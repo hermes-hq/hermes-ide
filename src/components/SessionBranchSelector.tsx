@@ -37,6 +37,19 @@ interface SessionBranchSelectorProps {
   defaultTaskSlug?: string;
   onBranchSelected: (branchName: string, createNew: boolean, fromRemote?: string) => void;
   onSkip: () => void;
+  /**
+   * What the open "New branch" form holds, so the step's own Continue can
+   * commit a name the user typed but did not confirm with "Create & use"
+   * (it used to go on with the proposed branch instead). `ok` is false while
+   * the name is one that cannot be created. null: nothing typed, the other
+   * tab, or the picker closed.
+   */
+  onDraftChange?: (draft: BranchDraft | null) => void;
+}
+
+export interface BranchDraft {
+  name: string;
+  ok: boolean;
 }
 
 type Tab = "existing" | "new";
@@ -112,7 +125,7 @@ export function sortBranchesMainFirst<T extends { name: string; is_remote: boole
   });
 }
 
-export function SessionBranchSelector({ projectId, existingBranchName, defaultTaskSlug, onBranchSelected, onSkip }: SessionBranchSelectorProps) {
+export function SessionBranchSelector({ projectId, existingBranchName, defaultTaskSlug, onBranchSelected, onSkip, onDraftChange }: SessionBranchSelectorProps) {
   const { t } = useI18n();
   // Keep the latest onBranchSelected behind a ref so loadData can read
   // it without including it in the useCallback dependency array.  The
@@ -410,6 +423,21 @@ export function SessionBranchSelector({ projectId, existingBranchName, defaultTa
     return () => clearTimeout(timer);
   }, [newBranchName, projectId, localBranchNames]);
 
+  // Tell the parent what the New branch form holds (see onDraftChange). While
+  // the availability check runs, the last answer belongs to the previous name.
+  const onDraftChangeRef = useRef(onDraftChange);
+  onDraftChangeRef.current = onDraftChange;
+  const draftName = tab === "new" ? newBranchName.trim() : "";
+  const draftOk =
+    !!draftName &&
+    !validateBranchName(draftName) &&
+    !localBranchNames.has(draftName) &&
+    (checkingAvailability || !validationError);
+  useEffect(() => {
+    onDraftChangeRef.current?.(draftName ? { name: draftName, ok: draftOk } : null);
+  }, [draftName, draftOk]);
+  useEffect(() => () => onDraftChangeRef.current?.(null), []);
+
   /**
    * Single-click commits.  Clicking a row on the Existing Branch tab fires
    * `onBranchSelected` immediately — there is no intermediate "highlighted
@@ -627,12 +655,20 @@ export function SessionBranchSelector({ projectId, existingBranchName, defaultTa
               placeholder="feature/my-branch"
               value={newBranchName}
               onChange={(e) => setNewBranchName(e.target.value)}
-              error={validationError ? <span className="branch-selector-validation-error">{validationError}</span> : undefined}
+              // Not the field's `error`: that draws the input anew when the
+              // message comes and goes, and the typing would lose the focus.
+              invalid={!!validationError}
+              aria-describedby={validationError ? `branch-selector-name-error-${projectId}` : undefined}
               autoComplete="off"
               autoCorrect="off"
               autoCapitalize="off"
               spellCheck={false}
             />
+            {validationError && (
+              <span id={`branch-selector-name-error-${projectId}`} className="h-field-error branch-selector-validation-error">
+                {validationError}
+              </span>
+            )}
           </div>
           <div className="branch-selector-field">
             <span className="branch-selector-field-label" id={`branch-selector-base-${projectId}`}>{t("branch.basedOn")}</span>

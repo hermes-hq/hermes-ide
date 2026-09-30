@@ -41,7 +41,7 @@ import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api
 import type { PermissionMode, SessionMode, TmuxSessionEntry } from "../types/session";
 import { isGitRepo as checkIsGitRepo } from "../api/git";
 import { LANG_COLORS } from "../utils/langColors";
-import { SessionBranchSelector } from "./SessionBranchSelector";
+import { SessionBranchSelector, type BranchDraft } from "./SessionBranchSelector";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { randomTaskSlug } from "../state/isolation";
 import { SESSION_COLORS } from "./SessionList";
@@ -229,6 +229,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // The selection the git check last answered for (see gitCheckPending).
   const [gitCheckedFor, setGitCheckedFor] = useState<readonly string[] | null>(null);
   const [branchSelections, setBranchSelections] = useState<Record<string, BranchSelection>>({});
+  // A name typed in the open "New branch" form; Continue commits it.
+  const [branchDraft, setBranchDraft] = useState<(BranchDraft & { projectId: string }) | null>(null);
   const [expandedProjectId, setExpandedProjectId] = useState<string | null>(null);
   // Honest isolation: one slug per task, so every project of this task
   // defaults to the same hermes/<slug> branch.
@@ -569,8 +571,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
 
   const toggleProject = (id: string) => {
     setSelectedProjectIds((prev) => {
+      // A shell's folder is a radio: picking it again (row, box or Space)
+      // keeps it; Skip is the way to have none.
+      if (isShellOnly) return prev.length === 1 && prev[0] === id ? prev : [id];
       if (prev.includes(id)) return prev.filter((r) => r !== id);
-      if (isShellOnly) return [id];
       return [...prev, id];
     });
   };
@@ -799,6 +803,14 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     if (id !== "claude") setSelectedChannels([]);
     // The Custom agent needs its command typed first.
     if (id === CUSTOM_AGENT_ID && !sanitizeCommandFragment(customAgentCommand)) return;
+    goNext();
+  };
+
+  const continueFromBranchStep = () => {
+    const draft = branchDraft;
+    if (draft?.ok) {
+      setBranchSelections((prev) => ({ ...prev, [draft.projectId]: { branch: draft.name, createNew: true } }));
+    }
     goNext();
   };
 
@@ -1103,7 +1115,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                     <IconButton
                       size="sm"
                       className="session-creator-remove-btn"
-                      label="Remove folder"
+                      label={t("session.removeFolder")}
                       icon={<CloseGlyph />}
                       onClick={(e) => { e.stopPropagation(); removeProject(project.id); }}
                     />
@@ -1213,7 +1225,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                               [projectId]: { branch: name, createNew: isNew, fromRemote },
                             }));
                           }}
+                          onDraftChange={(draft) => {
+                            setBranchDraft((prev) => (draft ? { ...draft, projectId } : prev?.projectId === projectId ? null : prev));
+                          }}
                           onSkip={() => {
+                            // "Use current branch" wins over a name left in the form.
+                            setBranchDraft(null);
                             setBranchSelections((prev) => {
                               const next = { ...prev };
                               delete next[projectId];
@@ -1234,7 +1251,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <Button className="session-creator-btn-secondary" onClick={handleBranchSkipped}>
                 {t("session.continueWithoutIsolation")}
               </Button>
-              <Button variant="primary" className="session-creator-btn-primary" onClick={goNext}>
+              <Button
+                variant="primary"
+                className="session-creator-btn-primary"
+                onClick={continueFromBranchStep}
+                disabled={!!branchDraft && !branchDraft.ok}
+              >
                 {t("common.continue")}
               </Button>
             </div>
@@ -1301,7 +1323,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                         className="session-creator-tmux-name"
                         aria-label={t("session.newTmuxSession")}
                         autoFocus
-                        placeholder="Session name..."
+                        placeholder={t("session.tmuxNamePlaceholder")}
                         value={newTmuxSessionName}
                         onChange={(e) => {
                           setNewTmuxSessionName(e.target.value);
@@ -1340,10 +1362,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             )}
             <div className="session-creator-actions">
               <Button className="session-creator-btn-secondary" onClick={goBack}>
-                Back
+                {t("common.back")}
               </Button>
               <Button variant="primary" className="session-creator-btn-primary" onClick={goNext} disabled={tmuxLoading || !selectedTmuxSession}>
-                {tmuxLoading ? "Discovering..." : "Next"}
+                {tmuxLoading ? t("common.checking") : t("common.next")}
               </Button>
             </div>
           </div>
@@ -1819,9 +1841,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                   type="button"
                   className={`session-creator-color-swatch session-creator-color-swatch-none ${selectedColor === "" ? "selected" : ""}`}
                   aria-pressed={selectedColor === ""}
-                  aria-label="No color"
+                  aria-label={t("session.noColor")}
                   onClick={() => setSelectedColor("")}
-                  title="No color"
+                  title={t("session.noColor")}
                 >
                   <svg viewBox="0 0 16 16" stroke="currentColor" strokeWidth="2" fill="none" aria-hidden="true">
                     <line x1="2" y1="2" x2="14" y2="14" />

@@ -28,6 +28,13 @@
 //     runners (HERMES_E2E_OS_KEYS=1) a real Tab is pressed from a field of
 //     the surface and the control it reaches must match :focus-visible and
 //     draw the ring.
+// And what those controls do on the creator:
+//   - a plain shell's folder is a radio: picking the chosen folder again
+//     (its row, its box's label) keeps it chosen;
+//   - on the branch step, a name typed in the New branch form is what the
+//     step's Continue uses (the confirm step shows it as a new branch), a
+//     name that cannot be created holds Continue back, and the field keeps
+//     its element (so the focus) while its error comes and goes.
 // The tmux step of the creator needs a reachable SSH server; it is not
 // driven here (its rows are the same Radio as the folder list).
 //
@@ -47,7 +54,7 @@ import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 import { osKeysAvailable, pressChords } from "../os-keys.mjs";
-import { dismissWhatsNew, expandOptions, invoke, launcherFixtures, openChip, openLauncher } from "../launcher-steps.mjs";
+import { dismissWhatsNew, expandOptions, invoke, launcherFixtures, openChip, openLauncher, typeInto } from "../launcher-steps.mjs";
 
 const SCENARIO = "UI-launch-surfaces";
 const startedAt = Date.now();
@@ -377,6 +384,25 @@ try {
   log("step 3: the New Session creator (Advanced…)");
   await bridge.click(".task-launcher-advanced");
   await bridge.waitFor("the creator's agent step", `return !e2e.first(".task-launcher-sheet") && e2e.all(".session-creator-provider-card").length > 0;`, { timeoutMs: 20_000 });
+  // A plain shell first: its folder list is a radio group.
+  await bridge.click(".session-creator-provider-card:not([data-agent-id])");
+  await bridge.click(".session-creator-actions .session-creator-btn-primary");
+  await bridge.waitFor("the shell's folder radios", `return e2e.all(".session-creator-list .project-picker-item input[type=radio]").length > 0;`, { timeoutMs: 20_000 });
+  const repoRow = `e2e.must(e2e.all(".session-creator-list .project-picker-item").find((r) => r.innerText.includes("launcher-repo")), "the fixture repository's row")`;
+  const radioState = `const row = ${repoRow}; return { row: row.classList.contains("project-picker-item-attached"), box: row.querySelector("input[type=radio]").checked, rows: e2e.all(".session-creator-list .project-picker-item-attached").length };`;
+  await bridge.clickWhenReady(`const row = ${repoRow}; return row.classList.contains("project-picker-item-attached") ? true : e2e.click(row);`);
+  await bridge.waitFor("the shell's folder chosen", `const row = ${repoRow}; return row.classList.contains("project-picker-item-attached");`);
+  await bridge.eval(`const row = ${repoRow}; return e2e.click(e2e.must(row.querySelector(".project-picker-name"), "its label"));`);
+  await sleep(200);
+  const afterLabel = await bridge.eval(radioState);
+  await bridge.eval(`const row = ${repoRow}; return e2e.click(row);`);
+  await sleep(200);
+  const afterRow = await bridge.eval(radioState);
+  log(`  shell folder picked again: by its label ${JSON.stringify(afterLabel)}, by its row ${JSON.stringify(afterRow)}`);
+  check(afterLabel.row && afterLabel.box && afterLabel.rows === 1, "a plain shell's folder stays chosen when its label is clicked again");
+  check(afterRow.row && afterRow.box && afterRow.rows === 1, "a plain shell's folder stays chosen when its row is clicked again");
+  await bridge.clickByName("Back", { within: ".session-creator-actions" });
+  await bridge.waitFor("the agent step again", `return e2e.all(".session-creator-provider-card").length > 0;`);
   await bridge.click('.session-creator-provider-card[data-agent-id="claude"]');
   await bridge.waitFor("Claude's options", `return !!e2e.first(".session-creator-permission-pill-active") && !!e2e.first(".session-creator-agent-view input[type=checkbox]");`);
   await surface(app, "creator-1-agent", ".session-creator", { startSel: ".session-creator-custom-suffix-input" });
@@ -407,13 +433,33 @@ try {
   await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.all(".branch-selector-tabs [role=radio]")[0], "Existing branch"));`);
   await bridge.waitFor("the branch list", `return e2e.all(".branch-selector-item").length > 0;`);
   await surface(app, "creator-3-branch-existing", ".session-creator", { startSel: ".branch-selector-filter" });
+  // A name typed in the New branch form, then the step's own Continue.
+  await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.all(".branch-selector-tabs [role=radio]")[1], "New branch"));`);
+  await bridge.waitFor("the new-branch form", `return !!e2e.first(".branch-selector-field-input");`);
+  await bridge.eval(`e2e.first(".branch-selector-field-input").dataset.uilaunchMark = "1"; return true;`);
+  const continueState = `const b = e2e.first(".session-creator-footer-actions .session-creator-btn-primary"); const f = e2e.first(".branch-selector-field-input"); return { disabled: !!b?.disabled, error: e2e.norm(e2e.first(".branch-selector-validation-error")?.innerText || ""), sameField: !!f && f.dataset.uilaunchMark === "1", describedBy: !!f && !!f.getAttribute("aria-describedby") };`;
+  await typeInto(bridge, ".branch-selector-field-input", "develop");
+  const taken = await bridge
+    .waitFor("the name's error", `const s = (() => { ${continueState} })(); return s.error ? s : false;`, { timeoutMs: 10_000 })
+    .catch(() => bridge.eval(continueState));
+  log(`  typed an existing branch's name: ${JSON.stringify(taken)}`);
+  check(/already exists/.test(taken.error) && taken.disabled, "a typed name that cannot be created holds the branch step's Continue back");
+  check(taken.sameField && taken.describedBy, "the name field keeps its element (and the focus) while its error shows, and names the error");
+  await typeInto(bridge, ".branch-selector-field-input", "ui/typed-by-hand");
+  const typed = await bridge
+    .waitFor("Continue to take the typed name", `const s = (() => { ${continueState} })(); return !s.disabled && !s.error ? s : false;`, { timeoutMs: 10_000 })
+    .catch(() => bridge.eval(continueState));
+  check(!typed.disabled && typed.sameField, "a valid typed name lets Continue go on, in the same field");
   await bridge.click(".session-creator-footer-actions .session-creator-btn-primary");
   await bridge.waitFor("the confirm step", `return !!e2e.first(".session-creator-name");`, { timeoutMs: 20_000 });
+  const summary = await bridge.eval(`return e2e.norm(e2e.first(".session-creator-summary")?.innerText || "");`);
+  log(`  confirm step: ${summary}`);
+  check(/Branch:\s*ui\/typed-by-hand \(new\)/.test(summary), "the confirm step shows the typed name as the new branch (Continue committed it without Create & use)");
   await surface(app, "creator-4-confirm", ".session-creator", { startSel: ".session-creator-name" });
   await bridge.click(".session-creator-close");
   await bridge.waitFor("the creator to close", `return !e2e.first(".session-creator");`);
 
-  assert(problems.length === 0, `every launch surface is built from the control set (${problems.length} check(s) failed)`);
+  assert(problems.length === 0, `every launch surface is built from the control set and behaves (${problems.length} check(s) failed)`);
 } catch (e) {
   failed = true;
   log(`ERROR: ${e.stack || e.message}`);

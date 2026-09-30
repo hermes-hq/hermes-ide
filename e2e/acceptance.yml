@@ -1223,6 +1223,11 @@ features:
         # the Linux and Windows runners.
         text: "Every control of those surfaces draws the focus ring, and a real Tab from a field of each surface lands on a control that matches :focus-visible and draws it"
         scenarios: [UI-launch-surfaces.mjs]
+      UI-13:
+        # Negative control: the same scenario on a build of the branch before
+        # this fix fails exactly these checks.
+        text: "On the creator's branch step, a name typed in the New branch form is what Continue uses (shown as the new branch on the confirm step), a name that cannot be created holds Continue back, and the field keeps the focus while its error shows; a plain shell's chosen folder stays chosen when picked again"
+        scenarios: [UI-launch-surfaces.mjs]
   CAP:
     name: "Models, effort and accounts for every agent (2.0 launch contract)"
     # The launcher's own chips (model, effort, account, presets row) are
