@@ -237,9 +237,9 @@ async function setFlagOverrides(bridge, values) {
     return e2e.click(e2e.must(tab, "Flags tab"));
   `);
   for (const [id, value] of Object.entries(values)) {
-    await bridge.waitFor(`the ${id} flag control`, `return !!e2e.first('select.settings-select[data-flag-id="${id}"]');`);
+    await bridge.waitFor(`the ${id} flag control`, `return !!e2e.first('select[data-flag-id="${id}"]');`);
     await bridge.eval(`
-      const sel = e2e.must(e2e.first('select.settings-select[data-flag-id="${id}"]'), "${id} select");
+      const sel = e2e.must(e2e.first('select[data-flag-id="${id}"]'), "${id} select");
       const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
       setter.call(sel, ${JSON.stringify(value)});
       sel.dispatchEvent(new Event("change", { bubbles: true }));
@@ -258,13 +258,20 @@ async function setFlagOverrides(bridge, values) {
 /** Settings > General: the status-strip checkbox. */
 async function setStatusStrip(bridge, on) {
   await openSettings(bridge);
-  await bridge.waitFor("the status strip checkbox", `return !!e2e.first('input[data-setting="status_strip"]');`);
-  const state = await bridge.eval(`
-    const box = e2e.must(e2e.first('input[data-setting="status_strip"]'), "status strip checkbox");
-    if (box.checked !== ${on ? "true" : "false"}) e2e.click(box);
-    return box.checked;
+  // A switch (role=switch, aria-checked), as every Settings on/off is.
+  const sw = `[data-setting="status_strip"] [role="switch"]`;
+  await bridge.waitFor("the status strip switch", `return !!e2e.first('${sw}');`);
+  await bridge.eval(`
+    const box = e2e.must(e2e.first('${sw}'), "status strip switch");
+    if ((box.getAttribute("aria-checked") === "true") !== ${on ? "true" : "false"}) e2e.click(box);
+    return true;
   `);
-  assert(state === on, `the status strip setting is ${on ? "on" : "off"}`);
+  const state = await bridge.waitFor("the switch to follow", `
+    const box = e2e.first('${sw}');
+    const checked = box?.getAttribute("aria-checked") === "true";
+    return checked === ${on ? "true" : "false"} ? { checked } : null;
+  `);
+  assert(state.checked === on, `the status strip setting is ${on ? "on" : "off"}`);
   await bridge.waitFor("the setting to be saved", `
     const raw = await window.__TAURI_INTERNALS__.invoke("get_settings");
     return (raw.status_strip || "on") === ${JSON.stringify(on ? "on" : "off")};

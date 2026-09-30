@@ -479,7 +479,7 @@ try {
   sheet = await readSheet(bridge);
   log(`  sheet: ${JSON.stringify({ doneWhen: sheet.doneWhen, land: sheet.land })}`);
   assert(sheet.doneWhen === "Done-When Failing: npm test exited 1" || sheet.doneWhen.includes("Failing: npm test exited 1"), "Done-When says it is failing");
-  assert(sheet.land.text === "Land anyway" && /land-sheet-btn-secondary/.test(sheet.land.className), "Land becomes a secondary 'Land anyway'");
+  assert(sheet.land.text === "Land anyway" && /h-btn--secondary/.test(sheet.land.className), "Land becomes a secondary 'Land anyway'");
   await bridge.screenshot(join(evidenceDir, "04-land-anyway.png"));
   await closeSheet(bridge);
   await bridge.eval(`

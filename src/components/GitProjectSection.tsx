@@ -14,6 +14,26 @@ import { GitLogView } from "./GitLogView";
 import { GitMergeBanner } from "./GitMergeBanner";
 import { GitConflictViewer } from "./GitConflictViewer";
 import type { GitToast } from "./GitPanel";
+import { Button, Textarea } from "./ui";
+
+/**
+ * A "+ all" / "− all" button of a file group: the control set's small quiet
+ * button in the Review Desk's Changes section, the panel's own elsewhere.
+ */
+function GroupButton({ kit, onClick, title, children }: { kit: boolean; onClick: () => void; title: string; children: string }) {
+  if (kit) {
+    return (
+      <Button size="sm" variant="quiet" className="git-group-action" onClick={onClick} title={title}>
+        {children}
+      </Button>
+    );
+  }
+  return (
+    <button className="git-group-btn" onClick={onClick} title={title}>
+      {children}
+    </button>
+  );
+}
 
 interface GitProjectSectionProps {
   sessionId: string;
@@ -406,7 +426,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                 <div className="git-file-group">
                   <div className="git-file-group-header">
                     <span className="git-file-group-label">STAGED ({staged.length})</span>
-                    <button className="git-group-btn" onClick={handleUnstageAll} title="Unstage all">&minus; all</button>
+                    <GroupButton kit={changesOnly} onClick={handleUnstageAll} title="Unstage all">{"\u2212 all"}</GroupButton>
                   </div>
                   {staged.map((f) => (
                     <GitFileRow
@@ -425,7 +445,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                 <div className="git-file-group">
                   <div className="git-file-group-header">
                     <span className="git-file-group-label">CHANGES ({unstaged.length})</span>
-                    <button className="git-group-btn" onClick={handleStageAll} title="Stage all">+ all</button>
+                    <GroupButton kit={changesOnly} onClick={handleStageAll} title="Stage all">+ all</GroupButton>
                   </div>
                   {unstaged.map((f) => (
                     <GitFileRow
@@ -445,7 +465,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                 <div className="git-file-group">
                   <div className="git-file-group-header">
                     <span className="git-file-group-label">UNTRACKED ({untracked.length})</span>
-                    <button className="git-group-btn" onClick={handleStageAll} title="Stage all">+ all</button>
+                    <GroupButton kit={changesOnly} onClick={handleStageAll} title="Stage all">+ all</GroupButton>
                   </div>
                   {untracked.map((f) => (
                     <GitFileRow
@@ -481,6 +501,16 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                   <div className="git-merge-message">
                     {mergeStatus?.merge_message || "Merge in progress"}
                   </div>
+                  {changesOnly ? (
+                    <div className="git-merge-actions">
+                      <Button size="sm" variant="primary" className="git-btn-merge-complete" disabled={!canCompleteMerge || completing} onClick={handleCompleteMerge}>
+                        {completing ? "..." : "Complete Merge"}
+                      </Button>
+                      <Button size="sm" variant="danger" className="git-btn-merge-abort" disabled={aborting} onClick={handleAbortMerge}>
+                        {aborting ? "..." : "Abort Merge"}
+                      </Button>
+                    </div>
+                  ) : (
                   <div className="git-merge-actions">
                     <button
                       className="git-btn git-btn-merge-complete"
@@ -497,6 +527,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                       {aborting ? "..." : "Abort Merge"}
                     </button>
                   </div>
+                  )}
                 </div>
               ) : (
                 <div className="git-commit-area">
@@ -508,9 +539,9 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                         </label>
                       )}
                       {/* Several lines: the drafted message lists the turns. */}
-                      <textarea
+                      <Textarea
                         id={`git-commit-${projectId}`}
-                        className="git-commit-input git-commit-textarea"
+                        className="git-commit-textarea"
                         placeholder="Commit message..."
                         rows={3}
                         value={commitMsg}
@@ -545,6 +576,19 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                     onContextMenu={textContextMenu}
                   />
                   )}
+                  {changesOnly ? (
+                    <div className="git-commit-actions">
+                      <Button size="sm" variant="primary" className="git-btn-commit" disabled={commitDisabled} onClick={handleCommit}>
+                        {autoStage ? "Stage & Commit" : "Commit"}
+                      </Button>
+                      <Button size="sm" className="git-btn-pull" disabled={pulling} onClick={handlePull}>
+                        {pulling ? "..." : "Pull \u2193"}
+                      </Button>
+                      <Button size="sm" className="git-btn-push" disabled={pushing} onClick={handlePush}>
+                        {pushing ? "..." : "Push \u2191"}
+                      </Button>
+                    </div>
+                  ) : (
                   <div className="git-commit-actions">
                     <button
                       className="git-btn git-btn-commit"
@@ -568,6 +612,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                       {pushing ? "..." : "Push \u2191"}
                     </button>
                   </div>
+                  )}
                 </div>
               )}
             </>

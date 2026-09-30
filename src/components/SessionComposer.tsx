@@ -97,21 +97,15 @@ export function SessionComposer() {
   const init = useAgentInit(composerSessionId);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const agentChipRef = useRef<HTMLButtonElement | null>(null);
   const inFlightRef = useRef(false);
   const [draggingHeight, setDraggingHeight] = useState<number | null>(null);
   const [isDragOver, setIsDragOver] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
-  const [modelPickerOpen, setModelPickerOpen] = useState(false);
   const [pendingModel, setPendingModel] = useState<string | null>(null);
   const [modelSwitchError, setModelSwitchError] = useState<string | null>(null);
-  const permChipRef = useRef<HTMLButtonElement | null>(null);
-  const [permPickerOpen, setPermPickerOpen] = useState(false);
   const [pendingPerm, setPendingPerm] = useState<string | null>(null);
   const [permSwitchError, setPermSwitchError] = useState<string | null>(null);
-  const effortChipRef = useRef<HTMLButtonElement | null>(null);
-  const [effortPickerOpen, setEffortPickerOpen] = useState(false);
   const [pendingEffort, setPendingEffort] = useState<string | null>(null);
   const [activeEffort, setActiveEffort] = useState<string | null>(null);
   const [effortSwitchError, setEffortSwitchError] = useState<string | null>(null);
@@ -521,7 +515,6 @@ export function SessionComposer() {
   // down + respawns with `--model <id>` and `--resume <prior-uuid>`, so
   // the user can swap models mid-conversation without losing context.
   const handleModelSelect = useCallback(async (modelId: string) => {
-    setModelPickerOpen(false);
     if (!composerSessionId) return;
     const target = modelId === "" || modelId.toLowerCase() === "default" ? null : modelId;
     setPendingModel(target);
@@ -566,7 +559,6 @@ export function SessionComposer() {
   // permissions auto-approved).  Same teardown+respawn-with-resume path
   // as the model picker keeps the conversation alive across the swap.
   const handlePermSelect = useCallback(async (mode: string) => {
-    setPermPickerOpen(false);
     if (!composerSessionId) return;
     setPendingPerm(mode);
     setPermSwitchError(null);
@@ -605,7 +597,6 @@ export function SessionComposer() {
   // permission-mode pickers — switchAgentEffort respawns Claude with
   // `--fork-session --resume <prior> --effort <level>`.
   const handleEffortSelect = useCallback(async (level: string) => {
-    setEffortPickerOpen(false);
     if (!composerSessionId) return;
     setPendingEffort(level);
     setEffortSwitchError(null);
@@ -1012,34 +1003,29 @@ export function SessionComposer() {
                 until the next init event confirms the new model. */}
             {(liveModel || pendingModel) && (
               <div className="session-composer-agent-wrap">
-                <button
-                  ref={agentChipRef}
-                  type="button"
-                  className={`session-composer-agent session-composer-agent-clickable composer-chip composer-chip-model${pendingModel ? " session-composer-agent-pending" : ""}`}
-                  onClick={() => setModelPickerOpen((o) => !o)}
-                  // Full id in the tooltip so the user can still see it without
-                  // the long string blowing out the row.
-                  title={t("composer.switchModel", { model: pendingModel ?? liveModel ?? "" })}
-                  aria-label={t("composer.switchModel", { model: pendingModel ?? liveModel ?? "" })}
-                  aria-expanded={modelPickerOpen}
-                  aria-haspopup="menu"
-                >
-                  <span className="composer-chip-dot" aria-hidden="true" />
-                  <span className="composer-chip-value">{compactModel(pendingModel ?? liveModel)}</span>
-                  {pendingModel && (
-                    <span className="session-composer-agent-pending-dot" aria-hidden="true">•</span>
+                <ModelPicker
+                  options={CLAUDE_MODEL_OPTIONS}
+                  currentModel={pendingModel ?? liveModel}
+                  onSelect={(m) => void handleModelSelect(m)}
+                  renderTrigger={(menu) => (
+                    <button
+                      {...menu}
+                      type="button"
+                      className={`session-composer-agent session-composer-agent-clickable composer-chip composer-chip-model${pendingModel ? " session-composer-agent-pending" : ""}`}
+                      // Full id in the tooltip so the user can still see it without
+                      // the long string blowing out the row.
+                      title={t("composer.switchModel", { model: pendingModel ?? liveModel ?? "" })}
+                      aria-label={t("composer.switchModel", { model: pendingModel ?? liveModel ?? "" })}
+                    >
+                      <span className="composer-chip-dot" aria-hidden="true" />
+                      <span className="composer-chip-value">{compactModel(pendingModel ?? liveModel)}</span>
+                      {pendingModel && (
+                        <span className="session-composer-agent-pending-dot" aria-hidden="true">•</span>
+                      )}
+                      <span className="composer-chip-caret" aria-hidden="true">▾</span>
+                    </button>
                   )}
-                  <span className="composer-chip-caret" aria-hidden="true">▾</span>
-                </button>
-                {modelPickerOpen && (
-                  <ModelPicker
-                    anchorEl={agentChipRef.current}
-                    options={CLAUDE_MODEL_OPTIONS}
-                    currentModel={pendingModel ?? liveModel}
-                    onSelect={(m) => void handleModelSelect(m)}
-                    onClose={() => setModelPickerOpen(false)}
-                  />
-                )}
+                />
               </div>
             )}
             {modelSwitchError && (
@@ -1063,31 +1049,26 @@ export function SessionComposer() {
               const isDanger = meta.tone === "danger";
               return (
                 <div className="session-composer-perm-wrap">
-                  <button
-                    ref={permChipRef}
-                    type="button"
-                    className={`session-composer-perm-chip-btn composer-chip composer-chip-perms${pendingPerm ? " session-composer-perm-chip-btn-pending" : ""}${isDanger ? " session-composer-perm-chip-btn-danger composer-chip-danger" : ""}`}
-                    onClick={() => setPermPickerOpen((o) => !o)}
-                    title={t("composer.permissionModeTitle", { mode: meta.label })}
-                    aria-label={t("composer.permissionMode", { mode: meta.label })}
-                    aria-haspopup="menu"
-                    aria-expanded={permPickerOpen}
-                  >
-                    <span className="composer-chip-dot" aria-hidden="true" />
-                    <span className="composer-chip-value">{meta.label}</span>
-                    {pendingPerm && (
-                      <span className="session-composer-agent-pending-dot" aria-hidden="true">•</span>
+                  <PermissionPicker
+                    current={activePerm}
+                    onSelect={(m) => void handlePermSelect(m)}
+                    renderTrigger={(menu) => (
+                      <button
+                        {...menu}
+                        type="button"
+                        className={`session-composer-perm-chip-btn composer-chip composer-chip-perms${pendingPerm ? " session-composer-perm-chip-btn-pending" : ""}${isDanger ? " session-composer-perm-chip-btn-danger composer-chip-danger" : ""}`}
+                        title={t("composer.permissionModeTitle", { mode: meta.label })}
+                        aria-label={t("composer.permissionMode", { mode: meta.label })}
+                      >
+                        <span className="composer-chip-dot" aria-hidden="true" />
+                        <span className="composer-chip-value">{meta.label}</span>
+                        {pendingPerm && (
+                          <span className="session-composer-agent-pending-dot" aria-hidden="true">•</span>
+                        )}
+                        <span className="composer-chip-caret" aria-hidden="true">▾</span>
+                      </button>
                     )}
-                    <span className="composer-chip-caret" aria-hidden="true">▾</span>
-                  </button>
-                  {permPickerOpen && (
-                    <PermissionPicker
-                      anchorEl={permChipRef.current}
-                      current={activePerm}
-                      onSelect={(m) => void handlePermSelect(m)}
-                      onClose={() => setPermPickerOpen(false)}
-                    />
-                  )}
+                  />
                 </div>
               );
             })()}
@@ -1108,33 +1089,28 @@ export function SessionComposer() {
               const effortLabel = pendingEffort ?? activeEffort ?? t("composer.effort");
               return (
                 <div className="session-composer-perm-wrap">
-                  <button
-                    ref={effortChipRef}
-                    type="button"
-                    className={`session-composer-perm-chip-btn composer-chip composer-chip-effort${pendingEffort ? " session-composer-perm-chip-btn-pending" : ""}`}
-                    onClick={() => setEffortPickerOpen((o) => !o)}
-                    title={t("composer.effortTitle")}
-                    aria-label={t("composer.effortLevel", { level: effortLabel })}
-                    aria-haspopup="menu"
-                    aria-expanded={effortPickerOpen}
-                  >
-                    <span className="composer-chip-dot" aria-hidden="true" />
-                    <span className="composer-chip-value">{effortLabel}</span>
-                    {pendingEffort && (
-                      <span className="session-composer-agent-pending-dot" aria-hidden="true">•</span>
+                  <EffortPicker
+                    levels={[...CLAUDE_EFFORT_LEVELS]}
+                    current={activeEffort}
+                    pending={pendingEffort}
+                    onSelect={(l) => void handleEffortSelect(l)}
+                    renderTrigger={(menu) => (
+                      <button
+                        {...menu}
+                        type="button"
+                        className={`session-composer-perm-chip-btn composer-chip composer-chip-effort${pendingEffort ? " session-composer-perm-chip-btn-pending" : ""}`}
+                        title={t("composer.effortTitle")}
+                        aria-label={t("composer.effortLevel", { level: effortLabel })}
+                      >
+                        <span className="composer-chip-dot" aria-hidden="true" />
+                        <span className="composer-chip-value">{effortLabel}</span>
+                        {pendingEffort && (
+                          <span className="session-composer-agent-pending-dot" aria-hidden="true">•</span>
+                        )}
+                        <span className="composer-chip-caret" aria-hidden="true">▾</span>
+                      </button>
                     )}
-                    <span className="composer-chip-caret" aria-hidden="true">▾</span>
-                  </button>
-                  {effortPickerOpen && (
-                    <EffortPicker
-                      anchorEl={effortChipRef.current}
-                      levels={[...CLAUDE_EFFORT_LEVELS]}
-                      current={activeEffort}
-                      pending={pendingEffort}
-                      onSelect={(l) => void handleEffortSelect(l)}
-                      onClose={() => setEffortPickerOpen(false)}
-                    />
-                  )}
+                  />
                 </div>
               );
             })()}

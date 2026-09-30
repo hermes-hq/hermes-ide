@@ -248,9 +248,9 @@ async function setLaunchHelperOverride(bridge, value) {
     const tab = e2e.all(".settings-tab").find((el) => e2e.norm(el.innerText) === "Flags");
     return e2e.click(e2e.must(tab, "Flags tab"));
   `);
-  await bridge.waitFor("the launchHelper flag control", `return !!e2e.first('select.settings-select[data-flag-id="launchHelper"]');`);
+  await bridge.waitFor("the launchHelper flag control", `return !!e2e.first('select[data-flag-id="launchHelper"]');`);
   const result = await bridge.eval(`
-    const sel = e2e.must(e2e.first('select.settings-select[data-flag-id="launchHelper"]'), "launchHelper select");
+    const sel = e2e.must(e2e.first('select[data-flag-id="launchHelper"]'), "launchHelper select");
     const label = e2e.norm(sel.closest(".settings-group")?.querySelector(".settings-label")?.innerText);
     const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
     setter.call(sel, ${JSON.stringify(value)});

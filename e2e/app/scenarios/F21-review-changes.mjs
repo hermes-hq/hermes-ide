@@ -195,7 +195,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   // ── 3. Commit with the drafted message ─────────────────────────────
   log("step 3: commit with the drafted message (no turns: the subject only)");
   const draft = await bridge.waitFor("the drafted commit message", `
-    const box = e2e.first(${JSON.stringify(SECTION)} + " textarea.git-commit-input");
+    const box = e2e.first(${JSON.stringify(SECTION)} + " textarea.git-commit-textarea");
     return box && box.value.trim() ? { value: box.value, label: e2e.norm(e2e.first(${JSON.stringify(SECTION)} + " .git-commit-label")?.innerText ?? "") } : null;
   `);
   log(`  drafted: ${JSON.stringify(draft.value)}`);

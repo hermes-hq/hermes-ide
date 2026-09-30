@@ -6,7 +6,7 @@
  * the turn, send-back with the delivery receipt, and the revert preview.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, cleanup, screen, waitFor, act } from "@testing-library/react";
+import { render, fireEvent, cleanup, screen, waitFor, act, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
 const h = vi.hoisted(() => ({
@@ -493,7 +493,7 @@ describe("ReviewDesk: Changes", () => {
   it("commits with the message drafted from the turns, then pushes and pulls", async () => {
     await open();
     const box = await waitFor(() => {
-      const el = section().querySelector<HTMLTextAreaElement>("textarea.git-commit-input")!;
+      const el = section().querySelector<HTMLTextAreaElement>("textarea.git-commit-textarea")!;
       expect(el.value).toContain("2 turns:");
       return el;
     });
@@ -517,7 +517,7 @@ describe("ReviewDesk: Changes", () => {
     clearFakeTurns();
     await open();
     const box = await waitFor(() => {
-      const el = section().querySelector<HTMLTextAreaElement>("textarea.git-commit-input")!;
+      const el = section().querySelector<HTMLTextAreaElement>("textarea.git-commit-textarea")!;
       expect(el.value).toBe("Task");
       return el;
     });
@@ -528,7 +528,7 @@ describe("ReviewDesk: Changes", () => {
 
   it("Escape in the commit message leaves the field and keeps the desk and the text; a second Escape closes", async () => {
     const onClose = await open();
-    const box = await waitFor(() => section().querySelector<HTMLTextAreaElement>("textarea.git-commit-input")!);
+    const box = await waitFor(() => section().querySelector<HTMLTextAreaElement>("textarea.git-commit-textarea")!);
     box.focus();
     fireEvent.change(box, { target: { value: "My own message" } });
     fireEvent.keyDown(box, { key: "Escape" });
@@ -550,5 +550,60 @@ describe("ReviewDesk: Changes", () => {
     });
     fireEvent.click(main);
     await waitFor(() => expect(calls("git_checkout_branch")).toEqual([{ sessionId: "sess-a", projectId: "p1", name: "main" }]));
+  });
+});
+
+describe("ReviewDesk: the control set", () => {
+  it("the views are tabs with one tab stop; the arrow keys switch them and the panel follows", async () => {
+    await open();
+    const list = screen.getByRole("tablist", { name: "Review Desk" });
+    const tabs = within(list).getAllByRole("tab");
+    expect(tabs.map((t) => t.textContent)).toEqual(["Review", "Repository", "Worktrees"]);
+    expect(tabs[0]).toHaveAttribute("aria-selected", "true");
+    expect(tabs.filter((t) => t.tabIndex === 0)).toEqual([tabs[0]]);
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Review");
+    fireEvent.keyDown(tabs[0], { key: "ArrowRight" });
+    expect(tabs[1]).toHaveAttribute("aria-selected", "true");
+    expect(document.querySelector(".review-desk")?.getAttribute("data-tab")).toBe("repository");
+    expect(screen.getByRole("tabpanel")).toHaveAccessibleName("Repository");
+    fireEvent.keyDown(tabs[1], { key: "Home" });
+    expect(document.querySelector(".review-desk")?.getAttribute("data-tab")).toBe("review");
+  });
+
+  it("By file / By turn is a segmented radio group: → picks By turn, ← goes back", async () => {
+    await open();
+    const group = screen.getByRole("radiogroup", { name: "Group by" });
+    const byFile = within(group).getByRole("radio", { name: "By file" });
+    expect(byFile).toHaveAttribute("aria-checked", "true");
+    fireEvent.keyDown(byFile, { key: "ArrowRight" });
+    expect(within(group).getByRole("radio", { name: "By turn" })).toHaveAttribute("aria-checked", "true");
+    expect(document.querySelectorAll(".review-turn-row")).toHaveLength(2);
+    fireEvent.keyDown(within(group).getByRole("radio", { name: "By turn" }), { key: "ArrowLeft" });
+    expect(document.querySelector(".review-desk")?.getAttribute("data-group")).toBe("file");
+  });
+
+  it("a file's viewed box is a named checkbox that does not move the selection", async () => {
+    await open();
+    // The first file is selected once the diff has loaded.
+    await waitFor(() => expect(document.querySelector(".review-row-selected")?.getAttribute("data-path")).toBe("src/app.js"));
+    const row = document.querySelector<HTMLElement>('.review-file-row[data-path="package-lock.json"]')!;
+    const box = within(row).getByRole("checkbox", { name: "Viewed" });
+    expect(box).toHaveClass("h-checkbox");
+    fireEvent.click(box);
+    await waitFor(() => expect(document.querySelector(".review-summary")?.getAttribute("data-viewed")).toBe("1"));
+    expect(document.querySelector(".review-row-selected")?.getAttribute("data-path")).toBe("src/app.js");
+  });
+
+  it("the revert sheet's confirm is the one solid danger button, Cancel a plain one", async () => {
+    await open();
+    fireEvent.click(screen.getByRole("radio", { name: "By turn" }));
+    fireEvent.click(document.querySelector('.review-turn-row[data-turn="1"]')!);
+    fireEvent.click(await screen.findByRole("button", { name: "Revert turn 1" }));
+    const sheet = await screen.findByRole("dialog", { name: "Revert turn 1" });
+    const confirm = sheet.querySelector<HTMLButtonElement>(".review-revert-confirm")!;
+    await waitFor(() => expect(confirm).not.toBeDisabled());
+    expect(confirm).toHaveClass("h-btn--danger-solid");
+    expect(within(sheet).getByRole("button", { name: "Cancel" })).toHaveClass("h-btn--secondary");
+    expect(screen.getByRole("button", { name: "Close" })).toHaveClass("h-close-btn");
   });
 });
