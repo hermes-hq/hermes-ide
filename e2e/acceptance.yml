@@ -1214,7 +1214,7 @@ features:
       UI-8:
         # Real cascade order: each stylesheet's own :focus rules are copied
         # in place, so a more specific or later `outline: none` still wins.
-        text: "Every control of the three-step welcome (task launcher included), of every Settings tab, and the model/effort picker rows, New Session prefix chips, notes sheet and composer, role, style, project and command-search fields draws the solid focus ring"
+        text: "Every control of the three-step welcome (task launcher included), of every Settings tab, and the model/effort/permission picker chips, New Session prefix chips, notes sheet and composer, role, style, project and command-search fields draws the solid focus ring"
         scenarios: [UI-focus-ring.mjs]
       UI-9:
         text: "With real key presses, Tab in Settings moves focus onto a control, :focus-visible matches and the control draws the solid ring"
@@ -1263,6 +1263,36 @@ features:
       UI-18:
         text: "A sidebar row's model and permission-mode tags are 18 px tags that share one line, and a guessed status is set in italics as well as the quietest ink, so it still reads as a guess on the current or hovered row"
         scenarios: [UI-chrome.mjs, F10-agent-status.mjs]
+  UI-C:
+    name: "Review Desk, Land and turn sheets, Settings and the composer pickers on the control set"
+    # Wave 2.0-UI1, track UI-C. Not behind a flag: the same controls and
+    # behaviour, drawn by src/components/ui. Every check runs in Frosted Dark
+    # and Frosted Light. Negative controls: HERMES_E2E_UIRS_NEGATIVE=keys (the
+    # pickers get only Esc, like the old ones), =ring (outline: none back in
+    # Settings) and =checkbox (a native checkbox back in Settings > General)
+    # each end in RESULT: FAIL. Keyboard and ARIA are also unit-tested
+    # (src/__tests__/composer-pickers, settings-controls, review-desk,
+    # git-file-row-kit).
+    status: partial
+    criteria:
+      UI-C-1:
+        text: "Settings' navigation is a vertical tab list of 32 px rows at 13 px with a rail on the current row, and the arrow keys move and select"
+        scenarios: [UI-review-settings.mjs]
+      UI-C-2:
+        text: "Every on/off in Settings is a switch that saves at once, every choice a styled select, and Export/Import are secondary buttons whose text meets 4.5:1"
+        scenarios: [UI-review-settings.mjs]
+      UI-C-3:
+        text: "The Review Desk's views are tabs with the brass rail, By file / By turn is a segmented control driven by the arrow keys, a file's viewed box is the control-set checkbox, and every button of the Changes section is the control set: each file's Open / Stage / Discard (Discard asks with a danger Confirm and a quiet Cancel), + all, Commit, Pull and Push"
+        scenarios: [UI-review-settings.mjs]
+      UI-C-4:
+        text: "The Land sheet's options, archive box, message and footer, and the turn sheet's buttons and restore confirm, are the control set with one primary each"
+        scenarios: [UI-review-settings.mjs]
+      UI-C-5:
+        text: "The composer's model, effort and permission chips open a menu with the arrow keys; Home/End and type-ahead move, Enter picks, Esc closes and gives focus back to the chip; each menu ends with a note that a change restarts Claude"
+        scenarios: [UI-review-settings.mjs]
+      UI-C-6:
+        text: "On these surfaces every control has its size's height, its text meets 4.5:1 and it draws the solid 2 px focus ring at >= 3:1, in Frosted Dark and Frosted Light"
+        scenarios: [UI-review-settings.mjs]
   CAP:
     name: "Models, effort and accounts for every agent (2.0 launch contract)"
     # The launcher's own chips (model, effort, account, presets row) are

@@ -420,15 +420,17 @@ async function setTurnLedgerInSettings(bridge, on, shot) {
   `);
   await bridge.waitFor("the Settings panel", `return !!e2e.first(".settings-panel");`);
   await bridge.clickByName("Git", { within: ".settings-tabs" });
-  const box = 'input[type=checkbox][data-setting="turn_ledger"]';
-  await bridge.waitFor("the turn history checkbox on the Git tab", `return !!e2e.first(${JSON.stringify(box)});`);
+  // A switch (role=switch, aria-checked), as every Settings on/off is.
+  const box = '[data-setting="turn_ledger"] [role="switch"]';
+  await bridge.waitFor("the turn history switch on the Git tab", `return !!e2e.first(${JSON.stringify(box)});`);
   const hint = await bridge.eval(`return e2e.norm(e2e.first('[data-setting-hint="turn_ledger"]')?.innerText ?? "");`);
   assert(/untracked files/.test(hint) && /mirror push/.test(hint), `the setting says snapshots include untracked files and are copied by a mirror push: "${hint}"`);
-  const before = await bridge.eval(`return e2e.first(${JSON.stringify(box)}).checked;`);
+  const before = await bridge.eval(`return e2e.first(${JSON.stringify(box)}).getAttribute("aria-checked") === "true";`);
   if (before !== on) await bridge.click(box);
-  const after = await bridge.waitFor(`the checkbox to be ${on ? "ticked" : "unticked"}`, `
+  const after = await bridge.waitFor(`the switch to be ${on ? "on" : "off"}`, `
     const b = e2e.first(${JSON.stringify(box)});
-    return b && b.checked === ${on} ? { checked: b.checked } : null;
+    const checked = b?.getAttribute("aria-checked") === "true";
+    return b && checked === ${on} ? { checked } : null;
   `);
   await bridge.screenshot(join(evidenceDir, shot));
   await bridge.click(".settings-close");

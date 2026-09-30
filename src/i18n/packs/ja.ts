@@ -686,6 +686,8 @@ export const jaPack: LanguagePack = {
     "settings.terminalFontSize": "ターミナルフォントサイズ",
     "settings.fontFamily": "フォントファミリ",
     "settings.windowSize": "ウィンドウサイズ",
+    "settings.windowWidth": "ウィンドウの幅",
+    "settings.windowHeight": "ウィンドウの高さ",
     "settings.decreaseWidth": "幅を減らす",
     "settings.increaseWidth": "幅を増やす",
     "settings.decreaseHeight": "高さを減らす",

@@ -4,6 +4,7 @@ import { Project } from "../hooks/useSessionProjects";
 import { getProjects, createProject, deleteProject as apiDeleteProject, scanProject, scanDirectory as apiScanDirectory } from "../api/projects";
 import { LANG_COLORS } from "../utils/langColors";
 import { useI18n } from "../i18n/I18nProvider";
+import { CloseButton } from "./ui/Button";
 
 interface WorkspacePanelProps {
   onClose: () => void;
@@ -84,7 +85,7 @@ export function WorkspacePanel({ onClose }: WorkspacePanelProps) {
         <div className="workspace-header">
           <span className="workspace-title">{t("workspace.projects")}</span>
           <span className="workspace-count">{t("workspace.projectCount", { count: projects.length })}</span>
-          <button className="settings-close" onClick={onClose} title={t("common.close")}>&times;</button>
+          <CloseButton className="workspace-close" onClick={onClose} label={t("common.close")} />
         </div>
 
         <div className="workspace-scan-row">

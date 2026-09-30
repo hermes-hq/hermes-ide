@@ -42,18 +42,6 @@
   font-family: var(--font-mono);
 }
 
-.land-sheet-x {
-  background: none;
-  border: none;
-  color: var(--text-2);
-  cursor: pointer;
-  font-size: var(--text-lg);
-  line-height: 1;
-}
-.land-sheet-x:hover {
-  color: var(--text-0);
-}
-
 .land-sheet-body {
   padding: var(--space-3);
   overflow-y: auto;
@@ -135,58 +123,28 @@
   padding: 0 4px;
 }
 
-.land-sheet-option label {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
-  cursor: pointer;
-  color: var(--text-0);
-}
-.land-sheet-option-disabled label {
-  cursor: not-allowed;
-  color: var(--text-2);
-}
-
+/* Under the option's title: past the radio and its gap. */
 .land-sheet-option-reason,
-.land-sheet-option-hint {
-  margin-left: 22px;
+.land-sheet-option-hint,
+.land-sheet-option .land-sheet-gh-link {
+  margin-left: calc(var(--choice-size) + var(--space-2));
   font-size: var(--text-xs);
+}
+.land-sheet-option-hint {
   color: var(--text-2);
+}
+/* A link inside hint text: its own colour, and underlined so colour is not the only cue. */
+.land-sheet-option .land-sheet-gh-link {
+  text-decoration: underline;
 }
 .land-sheet-option-reason {
   color: var(--yellow);
-}
-
-.land-sheet-link-btn {
-  background: none;
-  border: none;
-  padding: 0;
-  margin-left: 22px;
-  color: var(--accent);
-  cursor: pointer;
-  font-size: var(--text-xs);
-  text-decoration: underline;
-}
-.land-sheet-checks-head .land-sheet-link-btn,
-.land-sheet-previous .land-sheet-link-btn {
-  margin-left: var(--space-1);
 }
 
 .land-sheet-field {
   display: flex;
   flex-direction: column;
   gap: 4px;
-}
-
-.land-sheet-message {
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  background: var(--bg-0);
-  color: var(--text-0);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm, 4px);
-  padding: var(--space-2);
-  resize: vertical;
 }
 
 .land-sheet-prbody-text {
@@ -200,12 +158,6 @@
   max-height: 180px;
   overflow: auto;
   margin: 4px 0 0;
-}
-
-.land-sheet-check {
-  display: flex;
-  gap: var(--space-2);
-  align-items: center;
 }
 
 .land-sheet-conflict,
@@ -272,29 +224,6 @@
 
 .land-sheet-spacer {
   flex: 1;
-}
-
-.land-sheet-btn {
-  background: var(--bg-2);
-  color: var(--text-0);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm, 4px);
-  padding: 4px 12px;
-  cursor: pointer;
-  font-size: var(--text-sm);
-}
-.land-sheet-btn:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
-.land-sheet-btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--bg-0);
-}
-.land-sheet-btn-secondary {
-  background: transparent;
-  color: var(--text-1);
 }
 
 @media (max-width: 560px) {

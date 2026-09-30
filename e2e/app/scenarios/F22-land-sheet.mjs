@@ -309,6 +309,22 @@ function readSheet(bridge) {
       land: (() => { const b = e2e.first(".land-sheet-land"); return b ? { text: e2e.norm(b.innerText), className: b.className, disabled: b.disabled } : null; })(),
       conflict: e2e.norm(e2e.first(".land-sheet-conflict")?.innerText ?? ""),
       ghLink: e2e.norm(e2e.first(".land-sheet-gh-link")?.innerText ?? ""),
+      // The link must look like one: the theme's link colour (not the grey
+      // hint text around it) and an underline.
+      ghLinkStyle: (() => {
+        const a = e2e.first(".land-sheet-gh-link");
+        if (!a) return null;
+        const resolve = (v) => {
+          const probe = document.createElement("span");
+          probe.style.color = v;
+          a.parentElement.appendChild(probe);
+          const c = getComputedStyle(probe).color;
+          probe.remove();
+          return c;
+        };
+        const cs = getComputedStyle(a);
+        return { colour: cs.color, linkFg: resolve("var(--link-fg)"), hint: resolve("var(--text-2)"), underline: cs.textDecorationLine.includes("underline") };
+      })(),
       title: e2e.norm(e2e.first(".land-sheet-title")?.innerText ?? ""),
       baseNote: e2e.first(".land-sheet-base-note") ? e2e.norm(e2e.first(".land-sheet-base-note").innerText) : null,
     };
@@ -479,7 +495,7 @@ try {
   sheet = await readSheet(bridge);
   log(`  sheet: ${JSON.stringify({ doneWhen: sheet.doneWhen, land: sheet.land })}`);
   assert(sheet.doneWhen === "Done-When Failing: npm test exited 1" || sheet.doneWhen.includes("Failing: npm test exited 1"), "Done-When says it is failing");
-  assert(sheet.land.text === "Land anyway" && /land-sheet-btn-secondary/.test(sheet.land.className), "Land becomes a secondary 'Land anyway'");
+  assert(sheet.land.text === "Land anyway" && /h-btn--secondary/.test(sheet.land.className), "Land becomes a secondary 'Land anyway'");
   await bridge.screenshot(join(evidenceDir, "04-land-anyway.png"));
   await closeSheet(bridge);
   await bridge.eval(`
@@ -573,6 +589,8 @@ try {
   log(`  pr option: ${JSON.stringify(sheet.pr)}; link: "${sheet.ghLink}"`);
   assert(sheet.pr.disabled && sheet.pr.text.includes("GitHub CLI (gh) is not signed in."), "the PR option is disabled: gh is not signed in");
   assert(sheet.ghLink === "Sign in: run gh auth login", "a sign-in link is offered");
+  log(`  link style: ${JSON.stringify(sheet.ghLinkStyle)}`);
+  assert(sheet.ghLinkStyle.colour === sheet.ghLinkStyle.linkFg && sheet.ghLinkStyle.colour !== sheet.ghLinkStyle.hint && sheet.ghLinkStyle.underline, "the gh link is drawn as a link (link colour, underlined), not as hint text");
   await bridge.screenshot(join(evidenceDir, "08-gh-signed-out.png"));
   await closeSheet(bridge);
   setGh({ signedIn: true, checks: [] });
@@ -667,6 +685,8 @@ try {
   log(`  pr option: ${JSON.stringify(sheet.pr)}; link: "${sheet.ghLink}"`);
   assert(sheet.pr.disabled && sheet.pr.text.includes("GitHub CLI (gh) is not installed."), "the PR option is disabled: gh is not installed");
   assert(sheet.ghLink === "Install GitHub CLI", "an install link is offered");
+  log(`  link style: ${JSON.stringify(sheet.ghLinkStyle)}`);
+  assert(sheet.ghLinkStyle.colour === sheet.ghLinkStyle.linkFg && sheet.ghLinkStyle.colour !== sheet.ghLinkStyle.hint && sheet.ghLinkStyle.underline, "the gh link is drawn as a link (link colour, underlined), not as hint text");
   log(`  title: "${sheet.title}"; branch note: "${sheet.baseNote}"`);
   assert(sheet.title.endsWith("into release-1"), "the sheet lands into the branch the project folder has checked out");
   assert(

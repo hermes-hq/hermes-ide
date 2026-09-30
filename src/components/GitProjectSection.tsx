@@ -14,6 +14,8 @@ import { GitLogView } from "./GitLogView";
 import { GitMergeBanner } from "./GitMergeBanner";
 import { GitConflictViewer } from "./GitConflictViewer";
 import type { GitToast } from "./GitPanel";
+import { GitActionButton } from "./GitActionButton";
+import { Textarea } from "./ui/Input";
 
 interface GitProjectSectionProps {
   sessionId: string;
@@ -406,7 +408,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                 <div className="git-file-group">
                   <div className="git-file-group-header">
                     <span className="git-file-group-label">STAGED ({staged.length})</span>
-                    <button className="git-group-btn" onClick={handleUnstageAll} title="Unstage all">&minus; all</button>
+                    <GitActionButton kit={changesOnly} variant="quiet" kitClass="git-group-action" legacyClass="git-group-btn" onClick={handleUnstageAll} title="Unstage all">{"\u2212 all"}</GitActionButton>
                   </div>
                   {staged.map((f) => (
                     <GitFileRow
@@ -415,6 +417,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                       onUnstage={handleUnstage}
                       onOpen={handleOpen}
                       onClick={handleFileClick}
+                      kit={changesOnly}
                     />
                   ))}
                 </div>
@@ -425,7 +428,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                 <div className="git-file-group">
                   <div className="git-file-group-header">
                     <span className="git-file-group-label">CHANGES ({unstaged.length})</span>
-                    <button className="git-group-btn" onClick={handleStageAll} title="Stage all">+ all</button>
+                    <GitActionButton kit={changesOnly} variant="quiet" kitClass="git-group-action" legacyClass="git-group-btn" onClick={handleStageAll} title="Stage all">+ all</GitActionButton>
                   </div>
                   {unstaged.map((f) => (
                     <GitFileRow
@@ -435,6 +438,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                       onDiscard={handleDiscard}
                       onOpen={handleOpen}
                       onClick={handleFileClick}
+                      kit={changesOnly}
                     />
                   ))}
                 </div>
@@ -445,7 +449,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                 <div className="git-file-group">
                   <div className="git-file-group-header">
                     <span className="git-file-group-label">UNTRACKED ({untracked.length})</span>
-                    <button className="git-group-btn" onClick={handleStageAll} title="Stage all">+ all</button>
+                    <GitActionButton kit={changesOnly} variant="quiet" kitClass="git-group-action" legacyClass="git-group-btn" onClick={handleStageAll} title="Stage all">+ all</GitActionButton>
                   </div>
                   {untracked.map((f) => (
                     <GitFileRow
@@ -454,6 +458,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                       onStage={handleStage}
                       onOpen={handleOpen}
                       onClick={handleFileClick}
+                      kit={changesOnly}
                     />
                   ))}
                 </div>
@@ -482,20 +487,26 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                     {mergeStatus?.merge_message || "Merge in progress"}
                   </div>
                   <div className="git-merge-actions">
-                    <button
-                      className="git-btn git-btn-merge-complete"
+                    <GitActionButton
+                      kit={changesOnly}
+                      variant="primary"
+                      kitClass="git-merge-complete"
+                      legacyClass="git-btn git-btn-merge-complete"
                       disabled={!canCompleteMerge || completing}
                       onClick={handleCompleteMerge}
                     >
                       {completing ? "..." : "Complete Merge"}
-                    </button>
-                    <button
-                      className="git-btn git-btn-merge-abort"
+                    </GitActionButton>
+                    <GitActionButton
+                      kit={changesOnly}
+                      variant="danger"
+                      kitClass="git-merge-abort"
+                      legacyClass="git-btn git-btn-merge-abort"
                       disabled={aborting}
                       onClick={handleAbortMerge}
                     >
                       {aborting ? "..." : "Abort Merge"}
-                    </button>
+                    </GitActionButton>
                   </div>
                 </div>
               ) : (
@@ -508,9 +519,9 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                         </label>
                       )}
                       {/* Several lines: the drafted message lists the turns. */}
-                      <textarea
+                      <Textarea
                         id={`git-commit-${projectId}`}
-                        className="git-commit-input git-commit-textarea"
+                        className="git-commit-textarea"
                         placeholder="Commit message..."
                         rows={3}
                         value={commitMsg}
@@ -546,27 +557,22 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                   />
                   )}
                   <div className="git-commit-actions">
-                    <button
-                      className="git-btn git-btn-commit"
+                    <GitActionButton
+                      kit={changesOnly}
+                      variant="primary"
+                      kitClass="git-btn-commit"
+                      legacyClass="git-btn git-btn-commit"
                       disabled={commitDisabled}
                       onClick={handleCommit}
                     >
                       {autoStage ? "Stage & Commit" : "Commit"}
-                    </button>
-                    <button
-                      className="git-btn git-btn-pull"
-                      disabled={pulling}
-                      onClick={handlePull}
-                    >
+                    </GitActionButton>
+                    <GitActionButton kit={changesOnly} kitClass="git-btn-pull" legacyClass="git-btn git-btn-pull" disabled={pulling} onClick={handlePull}>
                       {pulling ? "..." : "Pull \u2193"}
-                    </button>
-                    <button
-                      className="git-btn git-btn-push"
-                      disabled={pushing}
-                      onClick={handlePush}
-                    >
+                    </GitActionButton>
+                    <GitActionButton kit={changesOnly} kitClass="git-btn-push" legacyClass="git-btn git-btn-push" disabled={pushing} onClick={handlePush}>
                       {pushing ? "..." : "Push \u2191"}
-                    </button>
+                    </GitActionButton>
                   </div>
                 </div>
               )}

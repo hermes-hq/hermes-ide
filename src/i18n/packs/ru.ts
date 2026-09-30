@@ -686,6 +686,8 @@ export const ruPack: LanguagePack = {
     "settings.terminalFontSize": "Размер шрифта терминала",
     "settings.fontFamily": "Семейство шрифта",
     "settings.windowSize": "Размер окна",
+    "settings.windowWidth": "Ширина окна",
+    "settings.windowHeight": "Высота окна",
     "settings.decreaseWidth": "Уменьшить ширину",
     "settings.increaseWidth": "Увеличить ширину",
     "settings.decreaseHeight": "Уменьшить высоту",

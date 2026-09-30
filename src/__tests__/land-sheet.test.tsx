@@ -286,8 +286,8 @@ describe("what the sheet shows", () => {
     await openSheet();
     const land = document.querySelector(".land-sheet-land") as HTMLButtonElement;
     expect(land.textContent).toBe("Land anyway");
-    expect(land.className).toContain("land-sheet-btn-secondary");
-    expect(document.querySelector(".land-sheet-cancel")?.className).toContain("land-sheet-btn-primary");
+    expect(land.className).toContain("h-btn--secondary");
+    expect(document.querySelector(".land-sheet-cancel")?.className).toContain("h-btn--primary");
     expect(document.querySelector(".land-sheet-donewhen")?.textContent).toContain("Failing: npm test exited 1");
   });
 });

@@ -238,7 +238,8 @@ async function pickTheme(bridge, theme) {
   `);
   await bridge.clickWhenReady(`
     const item = e2e.all(".settings-theme-item").find((el) => e2e.norm(el.innerText) === ${JSON.stringify(theme.label)});
-    return e2e.click(e2e.must(item, ${JSON.stringify(theme.label)}));
+    // Each theme is a control-set Chip inside its item: press the chip's button.
+    return e2e.click(e2e.must(item && (item.querySelector("button") ?? item), ${JSON.stringify(theme.label)}));
   `);
   await bridge.waitFor(`the ${theme.id} theme`, `return document.documentElement.dataset.theme === ${JSON.stringify(theme.id)};`);
   await bridge.click(".settings-close");

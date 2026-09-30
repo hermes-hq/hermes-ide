@@ -2,6 +2,7 @@ import "../styles/components/TurnBar.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { translate } from "../i18n/registry";
+import { Button, CloseButton } from "./ui/Button";
 import { getTurnDiff, listTurns, type Turn, type TurnChecks } from "../agent/contract/turns";
 import { getSessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import { withTurnChecks } from "../agent/turns/turnChecks";
@@ -248,9 +249,7 @@ export function TurnBar({ sessionId }: TurnBarProps) {
                 <span className="turn-bar-add">+{sheet.turn.diffstat.insertions}</span>
                 <span className="turn-bar-del">−{sheet.turn.diffstat.deletions}</span>
               </span>
-              <button type="button" className="turn-sheet-close" onClick={close} aria-label={translate("turnBar.close")}>
-                &times;
-              </button>
+              <CloseButton className="turn-sheet-close" onClick={close} label={translate("turnBar.close")} />
             </div>
 
             {sheet.kind === "diff" && (
@@ -261,12 +260,10 @@ export function TurnBar({ sessionId }: TurnBarProps) {
                   {sheet.patch !== null && <Patch patch={sheet.patch} />}
                 </div>
                 <div className="turn-sheet-actions">
-                  <button type="button" className="turn-sheet-btn" onClick={close}>
-                    {translate("turnBar.close")}
-                  </button>
-                  <button type="button" className="turn-sheet-btn turn-sheet-btn-primary" onClick={() => openRestore(sheet.turn)}>
+                  <Button onClick={close}>{translate("turnBar.close")}</Button>
+                  <Button variant="primary" className="turn-sheet-restore" onClick={() => openRestore(sheet.turn)}>
                     {translate("turnBar.restoreTo", { n: sheet.turn.n })}
-                  </button>
+                  </Button>
                 </div>
               </>
             )}
@@ -288,17 +285,17 @@ export function TurnBar({ sessionId }: TurnBarProps) {
                   )}
                 </div>
                 <div className="turn-sheet-actions">
-                  <button type="button" className="turn-sheet-btn" onClick={close} disabled={sheet.busy}>
+                  <Button onClick={close} disabled={sheet.busy}>
                     {translate("turnBar.cancel")}
-                  </button>
-                  <button
-                    type="button"
-                    className="turn-sheet-btn turn-sheet-btn-danger"
+                  </Button>
+                  <Button
+                    variant="danger-solid"
+                    className="turn-sheet-confirm"
                     disabled={sheet.busy || !sheet.preview || sheet.preview.diffstat.files === 0}
                     onClick={() => confirmRestore(sheet.turn)}
                   >
                     {translate("turnBar.confirmRestore")}
-                  </button>
+                  </Button>
                 </div>
               </>
             )}

@@ -1,7 +1,12 @@
 import "../styles/components/Settings.css";
 import { useState, useEffect, useCallback, useRef, Suspense } from "react";
 import { createPortal } from "react-dom";
-import { Button } from "./ui/Button";
+import { Button, CloseButton, IconButton } from "./ui/Button";
+import { Chip } from "./ui/Chip";
+import { Toggle } from "./ui/Choice";
+import { Input } from "./ui/Input";
+import { NativeSelect } from "./ui/Select";
+import { TabPanel, Tabs } from "./ui/Tabs";
 import { lazyView } from "../utils/lazyView";
 import { useResizablePanel } from "../hooks/useResizablePanel";
 import { useTextContextMenu } from "../hooks/useTextContextMenu";
@@ -45,6 +50,9 @@ import {
 import { AwayNotifySetting } from "./AwayNotifySetting";
 import { FleetSettingsTab } from "../fleet/FleetSettingsTab";
 import { AgentsSettings } from "./AgentsSettings";
+
+/** Id prefix of the Settings tabs and their panel. */
+const SETTINGS_TABS_ID = "settings";
 
 // The plugin manager loads when its tab is first opened.
 const PluginManager = lazyView("PluginManager", () => import("./PluginManager").then((m) => m.PluginManager));
@@ -283,29 +291,28 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
         <div className="settings-resize-handle-bottom" onMouseDown={onResizeHeightStart} />
         <div className="settings-header">
           <span className="settings-title" onClick={handleTitleClick}>{t("settings.title")}</span>
-          <button className="close-btn settings-close" onClick={onClose} aria-label={t("common.close")}>&times;</button>
+          <CloseButton className="settings-close" onClick={onClose} label={t("common.close")} />
         </div>
 
         <div className="settings-body">
-          <div className="settings-tabs">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                className={`settings-tab ${activeTab === tab.id ? "settings-tab-active" : ""}`}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            idPrefix={SETTINGS_TABS_ID}
+            orientation="vertical"
+            className="settings-tabs"
+            tabClassName="settings-tab"
+            label={t("settings.title")}
+            value={activeTab}
+            onChange={setActiveTab}
+            tabs={tabs.map((tab) => ({ value: tab.id, label: tab.label }))}
+          />
 
-          <div className="settings-content">
+          <TabPanel idPrefix={SETTINGS_TABS_ID} value={activeTab} className="settings-content">
             {activeTab === "general" && (
               <div className="settings-section">
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.defaultShell")}</label>
-                  <select
-                    className="settings-select"
+                  <label className="settings-label" htmlFor="settings-default-shell">{t("settings.defaultShell")}</label>
+                  <NativeSelect
+                    id="settings-default-shell"
                     value={settings.default_shell || ""}
                     onChange={(e) => updateSetting("default_shell", e.target.value)}
                   >
@@ -313,13 +320,13 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     {shells.map((s) => (
                       <option key={s.path} value={s.path}>{s.name}</option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.terminalScrollback")}</label>
-                  <select
-                    className="settings-select"
+                  <label className="settings-label" htmlFor="settings-scrollback">{t("settings.terminalScrollback")}</label>
+                  <NativeSelect
+                    id="settings-scrollback"
                     value={settings.scrollback || "10000"}
                     onChange={(e) => updateSetting("scrollback", e.target.value)}
                   >
@@ -327,56 +334,49 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     <option value="10000">{t("settings.lines", { count: "10,000" })}</option>
                     <option value="25000">{t("settings.lines", { count: "25,000" })}</option>
                     <option value="50000">{t("settings.lines", { count: "50,000" })}</option>
-                  </select>
+                  </NativeSelect>
                 </div>
 
-                <div className="settings-group">
-                  <label className="settings-label">
-                    <input
-                      type="checkbox"
-                      checked={settings.shell_suggestions !== "native"}
-                      onChange={(e) => updateSetting("shell_suggestions", e.target.checked ? "hermes" : "native")}
-                    />
-                    {" "}{t("settings.shellSuggestions")}
-                  </label>
-                  <span className="settings-hint-inline">{t("settings.shellSuggestionsHint")}</span>
+                <div className="settings-group" data-setting="shell_suggestions">
+                  <Toggle
+                    checked={settings.shell_suggestions !== "native"}
+                    onChange={(on) => updateSetting("shell_suggestions", on ? "hermes" : "native")}
+                    label={t("settings.shellSuggestions")}
+                    description={t("settings.shellSuggestionsHint")}
+                  />
                 </div>
 
-                <div className="settings-group">
-                  <label className="settings-label">
-                    <input
-                      type="checkbox"
-                      data-setting="status_strip"
-                      checked={settings.status_strip !== "off"}
-                      onChange={(e) => {
-                        updateSetting("status_strip", e.target.checked ? "on" : "off");
-                        void setStatusStripEnabled(e.target.checked);
-                      }}
-                    />
-                    {" "}{t("settings.statusStrip")}
-                  </label>
-                  <span className="settings-hint-inline">{t("settings.statusStripHint")}</span>
+                <div className="settings-group" data-setting="status_strip">
+                  <Toggle
+                    checked={settings.status_strip !== "off"}
+                    onChange={(on) => {
+                      updateSetting("status_strip", on ? "on" : "off");
+                      void setStatusStripEnabled(on);
+                    }}
+                    label={t("settings.statusStrip")}
+                    description={t("settings.statusStripHint")}
+                  />
                 </div>
 
                 <div className="settings-group">
                   <label className="settings-label" htmlFor="settings-update-channel">{t("settings.updateChannel")}</label>
-                  <select
+                  <NativeSelect
                     id="settings-update-channel"
-                    className="settings-select"
                     data-setting="update_channel"
                     value={normalizeUpdateChannel(settings.update_channel)}
                     onChange={(e) => updateSetting("update_channel", normalizeUpdateChannel(e.target.value))}
                   >
                     <option value="stable">{t("settings.updateChannelStable")}</option>
                     <option value="beta">{t("settings.updateChannelBeta")}</option>
-                  </select>
+                  </NativeSelect>
                   <span className="settings-hint-inline">{t("settings.updateChannelHint")}</span>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.defaultWorkingDirectory")}</label>
-                  <input
-                    className="settings-input"
+                  <label className="settings-label" htmlFor="settings-default-cwd">{t("settings.defaultWorkingDirectory")}</label>
+                  <Input
+                    id="settings-default-cwd"
+                    code
                     placeholder={t("settings.homeDirectoryPlaceholder")}
                     value={settings.default_cwd || ""}
                     onChange={(e) => updateSetting("default_cwd", e.target.value)}
@@ -385,22 +385,22 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.commandPaletteShortcut")}</label>
-                  <select
-                    className="settings-select"
+                  <label className="settings-label" htmlFor="settings-palette-shortcut">{t("settings.commandPaletteShortcut")}</label>
+                  <NativeSelect
+                    id="settings-palette-shortcut"
                     value={settings.command_palette_shortcut || "cmd_k"}
                     onChange={(e) => updateSetting("command_palette_shortcut", e.target.value)}
                   >
                     <option value="cmd_k">{shortcutLabel("view.command-palette")} ({t("settings.defaultOption")})</option>
                     <option value="cmd_shift_p">{fmt("{mod}{shift}P")} ({t("settings.freesShortcut", { shortcut: shortcutLabel("view.command-palette") })})</option>
-                  </select>
+                  </NativeSelect>
                   <span className="settings-hint-inline">{t("settings.requiresRestartMenu")}</span>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.preferredEditor")}</label>
-                  <select
-                    className="settings-select"
+                  <label className="settings-label" htmlFor="settings-preferred-editor">{t("settings.preferredEditor")}</label>
+                  <NativeSelect
+                    id="settings-preferred-editor"
                     value={settings.preferred_editor || ""}
                     onChange={(e) => updateSetting("preferred_editor", e.target.value)}
                   >
@@ -415,37 +415,34 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     <option value="vim">Vim</option>
                     <option value="nvim">Neovim</option>
                     <option value="emacs">Emacs</option>
-                  </select>
+                  </NativeSelect>
                   <span className="settings-hint-inline">{t("settings.editorHint")}</span>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.restoreSessions")}</label>
-                  <select
-                    className="settings-select"
+                  <label className="settings-label" htmlFor="settings-restore-sessions">{t("settings.restoreSessions")}</label>
+                  <NativeSelect
+                    id="settings-restore-sessions"
                     value={settings.restore_sessions || "always"}
                     onChange={(e) => updateSetting("restore_sessions", e.target.value)}
                   >
                     <option value="always">{t("settings.always")}</option>
                     <option value="never">{t("settings.never")}</option>
-                  </select>
+                  </NativeSelect>
                   <span className="settings-hint-inline">{t("settings.restoreHint")}</span>
                 </div>
 
-                <div className="settings-group">
-                  <label className="settings-label">
-                    <input
-                      type="checkbox"
-                      checked={settings.skip_close_confirm !== "true"}
-                      onChange={(e) => {
-                        const skip = !e.target.checked;
-                        updateSetting("skip_close_confirm", skip ? "true" : "false");
-                        dispatch({ type: "SET_SKIP_CLOSE_CONFIRM", skip });
-                      }}
-                    />
-                    {" "}{t("settings.confirmBeforeClosing")}
-                  </label>
-                  <span className="settings-hint-inline">{t("settings.confirmBeforeClosingHint")}</span>
+                <div className="settings-group" data-setting="skip_close_confirm">
+                  <Toggle
+                    checked={settings.skip_close_confirm !== "true"}
+                    onChange={(on) => {
+                      const skip = !on;
+                      updateSetting("skip_close_confirm", skip ? "true" : "false");
+                      dispatch({ type: "SET_SKIP_CLOSE_CONFIRM", skip });
+                    }}
+                    label={t("settings.confirmBeforeClosing")}
+                    description={t("settings.confirmBeforeClosingHint")}
+                  />
                 </div>
 
                 {isFeatureFlagEnabled("attentionInbox") && (
@@ -466,77 +463,71 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     }}
                   >
                     <span className="settings-theme-group-label">{t("settings.dark")}</span>
-                    {DARK_THEMES.map((t) => (
-                      <button
-                        key={t.id}
-                        className={`settings-theme-item${(settings.theme || "frosted-dark") === t.id ? " settings-theme-item-active" : ""}`}
-                        onClick={() => updateSetting("theme", t.id)}
-                        onMouseEnter={() => applyTheme(t.id, { ...settings, theme: t.id })}
-                      >
-                        {t.label}
-                      </button>
+                    {DARK_THEMES.map((theme) => (
+                      <span key={theme.id} className="settings-theme-item" data-theme-id={theme.id} onMouseEnter={() => applyTheme(theme.id, { ...settings, theme: theme.id })}>
+                        <Chip size="sm" selected={(settings.theme || "frosted-dark") === theme.id} onToggle={() => updateSetting("theme", theme.id)}>
+                          {theme.label}
+                        </Chip>
+                      </span>
                     ))}
                     <div className="settings-theme-separator" />
                     <span className="settings-theme-group-label">{t("settings.light")}</span>
-                    {LIGHT_THEMES.map((t) => (
-                      <button
-                        key={t.id}
-                        className={`settings-theme-item${(settings.theme || "frosted-dark") === t.id ? " settings-theme-item-active" : ""}`}
-                        onClick={() => updateSetting("theme", t.id)}
-                        onMouseEnter={() => applyTheme(t.id, { ...settings, theme: t.id })}
-                      >
-                        {t.label}
-                      </button>
+                    {LIGHT_THEMES.map((theme) => (
+                      <span key={theme.id} className="settings-theme-item" data-theme-id={theme.id} onMouseEnter={() => applyTheme(theme.id, { ...settings, theme: theme.id })}>
+                        <Chip size="sm" selected={(settings.theme || "frosted-dark") === theme.id} onToggle={() => updateSetting("theme", theme.id)}>
+                          {theme.label}
+                        </Chip>
+                      </span>
                     ))}
                   </div>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.agentTimelineStyle")}</label>
+                  <label className="settings-label" htmlFor="settings-timeline-style">{t("settings.agentTimelineStyle")}</label>
                   <span className="settings-hint-inline">
                     {t("settings.agentTimelineHint")}
                   </span>
-                  <select
-                    className="settings-select"
+                  <NativeSelect
+                    id="settings-timeline-style"
                     value={settings.agent_timeline_style || "modern"}
                     onChange={(e) => updateSetting("agent_timeline_style", e.target.value)}
                   >
                     <option value="modern">{t("settings.modernDefault")}</option>
                     <option value="classic">{t("settings.classicCompact")}</option>
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.uiScale")}</label>
+                  <label className="settings-label" htmlFor="settings-ui-scale">{t("settings.uiScale")}</label>
                   <span className="settings-hint-inline">{t("settings.uiScaleHint")}</span>
-                  <select
-                    className="settings-select"
+                  <NativeSelect
+                    id="settings-ui-scale"
                     value={settings.ui_scale || "default"}
                     onChange={(e) => updateSetting("ui_scale", e.target.value)}
                   >
                     {UI_SCALE_OPTIONS.map((o) => (
                       <option key={o.id} value={o.id}>{o.label}</option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.terminalFontSize")}</label>
-                  <select
-                    className="settings-select"
+                  <label className="settings-label" htmlFor="settings-font-size">{t("settings.terminalFontSize")}</label>
+                  <NativeSelect
+                    id="settings-font-size"
                     value={settings.font_size || "14"}
                     onChange={(e) => updateSetting("font_size", e.target.value)}
                   >
                     {[12, 13, 14, 15, 16, 18].map((s) => (
                       <option key={s} value={String(s)}>{s}px</option>
                     ))}
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.fontFamily")}</label>
-                  <select
-                    className="settings-select"
+                  <label className="settings-label" htmlFor="settings-font-family">{t("settings.fontFamily")}</label>
+                  <NativeSelect
+                    id="settings-font-family"
                     value={settings.font_family || "default"}
                     onChange={(e) => updateSetting("font_family", e.target.value)}
                   >
@@ -545,22 +536,27 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     <option value="jetbrains">JetBrains Mono</option>
                     <option value="cascadia">Cascadia Code</option>
                     <option value="menlo">Menlo</option>
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 <div className="settings-group">
                   <label className="settings-label">{t("settings.windowSize")}</label>
                   <div className="settings-size-row">
                     <div className="settings-stepper">
-                      <button
+                      <IconButton
+                        size="sm"
                         className="settings-stepper-btn"
+                        icon={"\u2212"}
+                        label={t("settings.decreaseWidth")}
                         onPointerDown={() => startRepeat("w", -10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
-                        title={t("settings.decreaseWidth")}
-                      >&#9666;</button>
-                      <input
+                      />
+                      <Input
+                        size="sm"
+                        code
                         className="settings-stepper-input"
+                        aria-label={t("settings.windowWidth")}
                         type="text"
                         inputMode="numeric"
                         placeholder="1200"
@@ -568,25 +564,32 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         onChange={(e) => { setWinWidth(e.target.value); applyWindowSize(e.target.value, latestH.current); }}
                         onContextMenu={textContextMenu}
                       />
-                      <button
+                      <IconButton
+                        size="sm"
                         className="settings-stepper-btn"
+                        icon="+"
+                        label={t("settings.increaseWidth")}
                         onPointerDown={() => startRepeat("w", 10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
-                        title={t("settings.increaseWidth")}
-                      >&#9656;</button>
+                      />
                     </div>
                     <span className="settings-size-separator">&times;</span>
                     <div className="settings-stepper">
-                      <button
+                      <IconButton
+                        size="sm"
                         className="settings-stepper-btn"
+                        icon={"\u2212"}
+                        label={t("settings.decreaseHeight")}
                         onPointerDown={() => startRepeat("h", -10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
-                        title={t("settings.decreaseHeight")}
-                      >&#9666;</button>
-                      <input
+                      />
+                      <Input
+                        size="sm"
+                        code
                         className="settings-stepper-input"
+                        aria-label={t("settings.windowHeight")}
                         type="text"
                         inputMode="numeric"
                         placeholder="800"
@@ -594,13 +597,15 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         onChange={(e) => { setWinHeight(e.target.value); applyWindowSize(latestW.current, e.target.value); }}
                         onContextMenu={textContextMenu}
                       />
-                      <button
+                      <IconButton
+                        size="sm"
                         className="settings-stepper-btn"
+                        icon="+"
+                        label={t("settings.increaseHeight")}
                         onPointerDown={() => startRepeat("h", 10)}
                         onPointerUp={stopRepeat}
                         onPointerLeave={stopRepeat}
-                        title={t("settings.increaseHeight")}
-                      >&#9656;</button>
+                      />
                     </div>
                     <span className="settings-size-unit">px</span>
                   </div>
@@ -630,9 +635,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             {activeTab === "ssh" && (
               <div className="settings-section">
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.sshFileEditor")}</label>
-                  <select
-                    className="settings-select"
+                  <label className="settings-label" htmlFor="settings-ssh-editor">{t("settings.sshFileEditor")}</label>
+                  <NativeSelect
+                    id="settings-ssh-editor"
                     value={settings.preferred_ssh_editor || "vim"}
                     onChange={(e) => updateSetting("preferred_ssh_editor", e.target.value)}
                   >
@@ -648,7 +653,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       <option value="cursor">Cursor (Remote SSH)</option>
                       <option value="zed">Zed (Remote SSH)</option>
                     </optgroup>
-                  </select>
+                  </NativeSelect>
                   <span className="settings-hint-inline">{t("settings.sshEditorHint")}</span>
                 </div>
 
@@ -663,17 +668,19 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                           <span className="settings-ssh-host-detail">{h.user ? `${h.user}@` : ""}{h.host}{h.port !== 22 ? `:${h.port}` : ""}</span>
                         </div>
                         <div className="settings-ssh-host-actions">
-                          <button
-                            className="settings-btn-sm"
-                            onClick={() => setEditingHost({ ...h })}
-                          >{t("settings.edit")}</button>
-                          <button
-                            className="settings-btn-sm settings-btn-danger"
+                          <Button size="sm" onClick={() => setEditingHost({ ...h })}>
+                            {t("settings.edit")}
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="danger"
                             onClick={async () => {
                               await deleteSshSavedHost(h.id);
                               setSshHosts((prev) => prev.filter((x) => x.id !== h.id));
                             }}
-                          >{t("common.delete")}</button>
+                          >
+                            {t("common.delete")}
+                          </Button>
                         </div>
                       </div>
                     ))}
@@ -687,9 +694,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 {editingHost ? (
                   <div className="settings-ssh-host-form">
                     <div className="settings-group">
-                      <label className="settings-label">{t("settings.label")}</label>
-                      <input
-                        className="settings-input"
+                      <label className="settings-label" htmlFor="settings-ssh-label">{t("settings.label")}</label>
+                      <Input
+                        id="settings-ssh-label"
                         placeholder={t("settings.serverLabelPlaceholder")}
                         value={editingHost.label}
                         onChange={(e) => setEditingHost({ ...editingHost, label: e.target.value })}
@@ -697,9 +704,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-group">
-                      <label className="settings-label">{t("settings.host")}</label>
-                      <input
-                        className="settings-input"
+                      <label className="settings-label" htmlFor="settings-ssh-host">{t("settings.host")}</label>
+                      <Input
+                        id="settings-ssh-host"
+                        code
                         placeholder={t("settings.hostPlaceholder")}
                         value={editingHost.host}
                         onChange={(e) => setEditingHost({ ...editingHost, host: e.target.value })}
@@ -707,9 +715,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-group">
-                      <label className="settings-label">{t("settings.user")}</label>
-                      <input
-                        className="settings-input"
+                      <label className="settings-label" htmlFor="settings-ssh-user">{t("settings.user")}</label>
+                      <Input
+                        id="settings-ssh-user"
+                        code
                         placeholder={t("settings.userPlaceholder")}
                         value={editingHost.user}
                         onChange={(e) => setEditingHost({ ...editingHost, user: e.target.value })}
@@ -717,9 +726,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-group">
-                      <label className="settings-label">{t("settings.port")}</label>
-                      <input
-                        className="settings-input"
+                      <label className="settings-label" htmlFor="settings-ssh-port">{t("settings.port")}</label>
+                      <Input
+                        id="settings-ssh-port"
+                        code
                         type="number"
                         placeholder="22"
                         value={editingHost.port}
@@ -727,9 +737,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-group">
-                      <label className="settings-label">{t("settings.identityFile")}</label>
-                      <input
-                        className="settings-input"
+                      <label className="settings-label" htmlFor="settings-ssh-identity">{t("settings.identityFile")}</label>
+                      <Input
+                        id="settings-ssh-identity"
+                        code
                         placeholder={t("settings.identityFilePlaceholder")}
                         value={editingHost.identity_file || ""}
                         onChange={(e) => setEditingHost({ ...editingHost, identity_file: e.target.value || null })}
@@ -737,9 +748,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-group">
-                      <label className="settings-label">{t("settings.jumpHost")}</label>
-                      <input
-                        className="settings-input"
+                      <label className="settings-label" htmlFor="settings-ssh-jump">{t("settings.jumpHost")}</label>
+                      <Input
+                        id="settings-ssh-jump"
+                        code
                         placeholder={t("settings.jumpHostPlaceholder")}
                         value={editingHost.jump_host || ""}
                         onChange={(e) => setEditingHost({ ...editingHost, jump_host: e.target.value || null })}
@@ -747,8 +759,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       />
                     </div>
                     <div className="settings-ssh-host-form-actions">
-                      <button
-                        className="settings-btn"
+                      <Button onClick={() => setEditingHost(null)}>{t("common.cancel")}</Button>
+                      <Button
+                        variant="primary"
                         onClick={async () => {
                           if (!editingHost.label.trim() || !editingHost.host.trim() || !editingHost.user.trim()) return;
                           await upsertSshSavedHost(editingHost);
@@ -756,14 +769,14 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                           setSshHosts(hosts);
                           setEditingHost(null);
                         }}
-                      >{t("settings.save")}</button>
-                      <button className="settings-btn" onClick={() => setEditingHost(null)}>{t("common.cancel")}</button>
+                      >
+                        {t("settings.save")}
+                      </Button>
                     </div>
                   </div>
                 ) : (
-                  <button
-                    className="settings-btn"
-                    style={{ marginTop: 8 }}
+                  <Button
+                    className="settings-add-host"
                     onClick={() => setEditingHost({
                       id: crypto.randomUUID(),
                       label: "",
@@ -776,7 +789,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       created_at: new Date().toISOString(),
                       updated_at: new Date().toISOString(),
                     })}
-                  >{t("settings.addHost")}</button>
+                  >
+                    {t("settings.addHost")}
+                  </Button>
                 )}
               </div>
             )}
@@ -784,9 +799,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             {activeTab === "git" && (
               <div className="settings-section">
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.autoRefreshInterval")}</label>
-                  <select
-                    className="settings-select"
+                  <label className="settings-label" htmlFor="settings-git-poll">{t("settings.autoRefreshInterval")}</label>
+                  <NativeSelect
+                    id="settings-git-poll"
                     value={settings.git_poll_interval || "3000"}
                     onChange={(e) => updateSetting("git_poll_interval", e.target.value)}
                   >
@@ -795,13 +810,13 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     <option value="5000">{t("settings.seconds", { count: "5" })}</option>
                     <option value="10000">{t("settings.seconds", { count: "10" })}</option>
                     <option value="0">{t("settings.off")}</option>
-                  </select>
+                  </NativeSelect>
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.authorNameOverride")}</label>
-                  <input
-                    className="settings-input"
+                  <label className="settings-label" htmlFor="settings-git-author-name">{t("settings.authorNameOverride")}</label>
+                  <Input
+                    id="settings-git-author-name"
                     placeholder={t("settings.useGitConfig")}
                     value={settings.git_author_name || ""}
                     onChange={(e) => updateSetting("git_author_name", e.target.value)}
@@ -810,9 +825,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
 
                 <div className="settings-group">
-                  <label className="settings-label">{t("settings.authorEmailOverride")}</label>
-                  <input
-                    className="settings-input"
+                  <label className="settings-label" htmlFor="settings-git-author-email">{t("settings.authorEmailOverride")}</label>
+                  <Input
+                    id="settings-git-author-email"
                     placeholder={t("settings.useGitConfig")}
                     value={settings.git_author_email || ""}
                     onChange={(e) => updateSetting("git_author_email", e.target.value)}
@@ -820,41 +835,31 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   />
                 </div>
 
-                <div className="settings-group">
-                  <label className="settings-label settings-label-row">
-                    <input
-                      type="checkbox"
-                      checked={settings.git_auto_stage === "true"}
-                      onChange={(e) => updateSetting("git_auto_stage", e.target.checked ? "true" : "false")}
-                    />
-                    {t("settings.autoStageCommit")}
-                  </label>
+                <div className="settings-group" data-setting="git_auto_stage">
+                  <Toggle
+                    checked={settings.git_auto_stage === "true"}
+                    onChange={(on) => updateSetting("git_auto_stage", on ? "true" : "false")}
+                    label={t("settings.autoStageCommit")}
+                  />
                 </div>
 
-                <div className="settings-group">
-                  <label className="settings-label settings-label-row">
-                    <input
-                      type="checkbox"
-                      checked={settings.git_show_untracked !== "false"}
-                      onChange={(e) => updateSetting("git_show_untracked", e.target.checked ? "true" : "false")}
-                    />
-                    {t("settings.showUntracked")}
-                  </label>
+                <div className="settings-group" data-setting="git_show_untracked">
+                  <Toggle
+                    checked={settings.git_show_untracked !== "false"}
+                    onChange={(on) => updateSetting("git_show_untracked", on ? "true" : "false")}
+                    label={t("settings.showUntracked")}
+                  />
                 </div>
 
                 {/* F20 turn ledger kill switch: only shown while the flag is on. */}
                 {isFeatureFlagEnabled("turnLedger") && (
-                  <div className="settings-group">
-                    <label className="settings-label settings-label-row">
-                      <input
-                        type="checkbox"
-                        data-setting="turn_ledger"
-                        checked={settings.turn_ledger !== "off"}
-                        onChange={(e) => updateSetting("turn_ledger", e.target.checked ? "on" : "off")}
-                      />
-                      {t("settings.turnLedger")}
-                    </label>
-                    <span className="settings-hint-inline" data-setting-hint="turn_ledger">{t("settings.turnLedgerHint")}</span>
+                  <div className="settings-group" data-setting="turn_ledger">
+                    <Toggle
+                      checked={settings.turn_ledger !== "off"}
+                      onChange={(on) => updateSetting("turn_ledger", on ? "on" : "off")}
+                      label={t("settings.turnLedger")}
+                      description={<span data-setting-hint="turn_ledger">{t("settings.turnLedgerHint")}</span>}
+                    />
                   </div>
                 )}
               </div>
@@ -875,9 +880,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 <div className="settings-section">
                   <h3 className="settings-section-title">{t("settings.pluginUpdates")}</h3>
                   <div className="settings-group">
-                    <label className="settings-label">{t("settings.checkPluginUpdates")}</label>
-                    <select
-                      className="settings-select"
+                    <label className="settings-label" htmlFor="settings-plugin-update-check">{t("settings.checkPluginUpdates")}</label>
+                    <NativeSelect
+                      id="settings-plugin-update-check"
                       value={settings.plugin_update_check || "startup"}
                       onChange={(e) => updateSetting("plugin_update_check", e.target.value)}
                     >
@@ -885,22 +890,15 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                       <option value="daily">{t("settings.daily")}</option>
                       <option value="weekly">{t("settings.weekly")}</option>
                       <option value="never">{t("settings.never")}</option>
-                    </select>
+                    </NativeSelect>
                   </div>
-                  <div className="settings-group">
-                    <label className="settings-label-row">
-                      <input
-                        type="checkbox"
-                        checked={settings.plugin_auto_update === "true"}
-                        onChange={(e) =>
-                          updateSetting("plugin_auto_update", e.target.checked ? "true" : "false")
-                        }
-                      />
-                      {t("settings.autoUpdatePlugins")}
-                    </label>
-                    <p className="settings-hint">
-                      {t("settings.autoUpdatePluginsHint")}
-                    </p>
+                  <div className="settings-group" data-setting="plugin_auto_update">
+                    <Toggle
+                      checked={settings.plugin_auto_update === "true"}
+                      onChange={(on) => updateSetting("plugin_auto_update", on ? "true" : "false")}
+                      label={t("settings.autoUpdatePlugins")}
+                      description={t("settings.autoUpdatePluginsHint")}
+                    />
                   </div>
                 </div>
                 <Suspense fallback={null}><PluginManager runtime={pluginRuntime} onConfirmUpdate={onConfirmPluginUpdate} onConfirmUpdateAll={onConfirmPluginUpdateAll} refreshTrigger={pluginRefreshTrigger} /></Suspense>
@@ -939,22 +937,16 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
 
             {activeTab === "privacy" && (
               <div className="settings-section">
-                <div className="settings-group">
-                  <label className="settings-label-row">
-                    <input
-                      type="checkbox"
-                      checked={settings.telemetry_enabled === "true"}
-                      onChange={(e) => {
-                        const val = e.target.checked;
-                        updateSetting("telemetry_enabled", val ? "true" : "false");
-                        void setAnalyticsEnabled(val);
-                      }}
-                    />
-                    {t("settings.analytics")}
-                  </label>
-                  <p className="settings-hint">
-                    {t("settings.analyticsHint")}
-                  </p>
+                <div className="settings-group" data-setting="telemetry_enabled">
+                  <Toggle
+                    checked={settings.telemetry_enabled === "true"}
+                    onChange={(on) => {
+                      updateSetting("telemetry_enabled", on ? "true" : "false");
+                      void setAnalyticsEnabled(on);
+                    }}
+                    label={t("settings.analytics")}
+                    description={t("settings.analyticsHint")}
+                  />
                 </div>
               </div>
             )}
@@ -974,10 +966,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   const selectValue = current === undefined ? "default" : current ? "on" : "off";
                   return (
                     <div className="settings-group" key={flag.id}>
-                      <label className="settings-label">{flag.label}</label>
+                      <label className="settings-label" htmlFor={`settings-flag-${flag.id}`}>{flag.label}</label>
                       <span className="settings-hint-inline">{flag.description}</span>
-                      <select
-                        className="settings-select"
+                      <NativeSelect
+                        id={`settings-flag-${flag.id}`}
                         data-flag-id={flag.id}
                         value={selectValue}
                         onChange={(e) => {
@@ -990,18 +982,18 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                         <option value="default">{t("settings.flags.default")}</option>
                         <option value="on">{t("settings.flags.forceOn")}</option>
                         <option value="off">{t("settings.flags.forceOff")}</option>
-                      </select>
+                      </NativeSelect>
                     </div>
                   );
                 })}
               </div>
             )}
-          </div>
+          </TabPanel>
         </div>
 
         <div className="settings-footer">
-          <button
-            className="settings-btn"
+          <Button
+            className="settings-export"
             onClick={async () => {
               const path = await save({
                 defaultPath: "settings.json",
@@ -1018,9 +1010,9 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             }}
           >
             {t("settings.export")}
-          </button>
-          <button
-            className="settings-btn"
+          </Button>
+          <Button
+            className="settings-import"
             onClick={async () => {
               const path = await open({
                 filters: [{ name: "JSON", extensions: ["json"] }],
@@ -1042,7 +1034,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
             }}
           >
             {t("settings.import")}
-          </button>
+          </Button>
           {footerStatus && <span className="settings-footer-status">{footerStatus}</span>}
         </div>
         {/* Inside the panel, whose click handler keeps clicks from closing Settings. */}
@@ -1091,9 +1083,9 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
       </p>
 
       <div className="settings-group">
-        <label className="settings-label">{t("settings.defaultPermissionMode")}</label>
-        <select
-          className="settings-select"
+        <label className="settings-label" htmlFor="settings-default-permission-mode">{t("settings.defaultPermissionMode")}</label>
+        <NativeSelect
+          id="settings-default-permission-mode"
           value={settings.default_permission_mode || "default"}
           onChange={(e) => updateSetting("default_permission_mode", e.target.value)}
         >
@@ -1102,14 +1094,14 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
           <option value="plan">{t("settings.planMode")}</option>
           <option value="auto">{t("settings.autoMode")}</option>
           <option value="bypassPermissions">{t("settings.bypassPermissions")}</option>
-        </select>
+        </NativeSelect>
       </div>
 
       <div className="settings-group">
-        <label className="settings-label">{t("settings.customCommandSuffix")}</label>
-        <input
-          type="text"
-          className="settings-input"
+        <label className="settings-label" htmlFor="settings-command-suffix">{t("settings.customCommandSuffix")}</label>
+        <Input
+          id="settings-command-suffix"
+          code
           value={settings.custom_command_suffix || ""}
           onChange={(e) => updateSetting("custom_command_suffix", e.target.value)}
           placeholder={t("settings.customCommandSuffixPlaceholder")}
@@ -1136,10 +1128,9 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
               <label htmlFor={inputId} className="settings-agent-prefix-label">
                 {p.name}
               </label>
-              <input
+              <Input
                 id={inputId}
-                type="text"
-                className="settings-input"
+                code
                 value={value}
                 onChange={(e) => setPrefix(p.id, e.target.value)}
                 placeholder={placeholder}
@@ -1151,15 +1142,15 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
               {examples.length > 0 && (
                 <div className="settings-agent-prefix-chips" role="group" aria-label={t("settings.prefixExamples", { agent: p.name })}>
                   {examples.map((ex) => (
-                    <button
+                    <Button
                       key={ex.value}
-                      type="button"
+                      size="sm"
                       className="settings-agent-prefix-chip"
                       title={ex.hint}
                       onClick={() => setPrefix(p.id, ex.value)}
                     >
                       {ex.label}
-                    </button>
+                    </Button>
                   ))}
                 </div>
               )}

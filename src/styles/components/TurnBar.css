@@ -124,17 +124,6 @@
   color: var(--text-0);
   font-size: var(--text-sm);
 }
-.turn-sheet-close {
-  background: none;
-  border: none;
-  color: var(--text-2);
-  cursor: pointer;
-  font-size: var(--text-lg);
-  line-height: 1;
-  padding: 0 4px;
-}
-.turn-sheet-close:hover { color: var(--text-0); }
-
 .turn-sheet-body {
   flex: 1;
   min-height: 0;
@@ -188,27 +177,4 @@
   gap: var(--space-2);
   padding: var(--space-2) var(--space-3);
   border-top: 1px solid var(--border);
-}
-
-.turn-sheet-btn {
-  padding: 4px 12px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-2);
-  color: var(--text-1);
-  font: inherit;
-  font-size: var(--text-sm);
-  cursor: pointer;
-}
-.turn-sheet-btn:hover:not(:disabled) { color: var(--text-0); border-color: var(--text-3); }
-.turn-sheet-btn:disabled { opacity: 0.5; cursor: default; }
-.turn-sheet-btn-primary {
-  background: var(--accent);
-  border-color: var(--accent);
-  color: var(--bg-0);
-}
-.turn-sheet-btn-danger {
-  background: var(--red);
-  border-color: var(--red);
-  color: var(--bg-0);
 }

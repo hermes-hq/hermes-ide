@@ -12,8 +12,10 @@
 //     check, the repository step (its path field) and the first-task step
 //     (the task launcher's fields, a late stylesheet);
 //   - every Settings tab, including the command-prefix chips of AI Agent;
-//   - controls that need an agent session or a panel to appear (model and
-//     effort picker rows, the New Session prefix chips, the notes sheet,
+//   - controls that need an agent session or a panel to appear (the model,
+//     effort and permission chips that open the composer's menus — the
+//     menus themselves are the kit Menu, checked by UI-kit and
+//     UI-review-settings — the New Session prefix chips, the notes sheet,
 //     the prompt composer, role/style creators, new-project and command
 //     search fields): built with the app's own class names inside the
 //     running app, so the app's stylesheets style them;
@@ -32,7 +34,7 @@
 // Negative controls (must end in RESULT: FAIL):
 //   HERMES_E2E_UIFOCUS_SUPPRESS=1   adds `outline: none` to the repository
 //                                   field, the prefix chips and the picker
-//                                   rows, the way the old rules did.
+//                                   chips, the way the old rules did.
 //   Running against a build from before the fix (HERMES_E2E_OUT pointing at
 //   it) fails on the same controls.
 //
@@ -149,8 +151,8 @@ async function probe(bridge, where, rootSelector, { min = 1 } = {}) {
 // the app's own classes inside the running app; each class must have a rule
 // in the loaded stylesheets, or the check would prove nothing.
 const BUILT = [
-  { cls: "model-picker-item", html: '<button type="button" class="model-picker-item">Sonnet</button>' },
-  { cls: "effort-picker-item", html: '<button type="button" class="effort-picker-item">high</button>' },
+  { cls: "composer-chip", html: '<button type="button" class="session-composer-agent session-composer-agent-clickable composer-chip composer-chip-model">sonnet</button>' },
+  { cls: "composer-chip-effort", html: '<button type="button" class="session-composer-perm-chip-btn composer-chip composer-chip-effort">high</button>' },
   // The New Session prefix chips are the control set's chips now.
   { cls: "h-chip-button", html: '<span class="h-chip h-chip--md h-chip--interactive"><button type="button" class="h-chip-button session-creator-prefix-chip">nice</button></span>' },
   { cls: "workbench-notes-textarea", html: '<textarea class="workbench-notes-textarea" aria-label="Notes"></textarea>' },
@@ -177,11 +179,11 @@ try {
   if (SUPPRESS) {
     await bridge.eval(`
       const st = document.createElement("style");
-      st.textContent = ".setup-repo-input:focus, .settings-agent-prefix-chip:focus-visible, .model-picker-item:focus-visible { outline: none; }";
+      st.textContent = ".setup-repo-input:focus, .settings-agent-prefix-chip:focus-visible, .composer-chip:focus-visible { outline: none; }";
       document.head.appendChild(st);
       return true;
     `);
-    log("  NEGATIVE CONTROL: outline: none added to the repository field, the prefix chips and the model picker rows");
+    log("  NEGATIVE CONTROL: outline: none added to the repository field, the prefix chips and the composer's picker chips");
   }
 
   const missing = [];

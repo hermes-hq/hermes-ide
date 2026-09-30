@@ -116,9 +116,9 @@ async function setFlagOverrides(bridge, values) {
   await bridge.waitFor("the hidden Flags tab", `return e2e.all(".settings-tab").some((el) => e2e.norm(el.innerText) === "Flags");`);
   await bridge.eval(`const tab = e2e.all(".settings-tab").find((el) => e2e.norm(el.innerText) === "Flags"); return e2e.click(e2e.must(tab, "Flags tab"));`);
   for (const [id, value] of Object.entries(values)) {
-    await bridge.waitFor(`the ${id} flag control`, `return !!e2e.first('select.settings-select[data-flag-id="${id}"]');`);
+    await bridge.waitFor(`the ${id} flag control`, `return !!e2e.first('select[data-flag-id="${id}"]');`);
     await bridge.eval(`
-      const sel = e2e.must(e2e.first('select.settings-select[data-flag-id="${id}"]'), "${id} select");
+      const sel = e2e.must(e2e.first('select[data-flag-id="${id}"]'), "${id} select");
       const setter = Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set;
       setter.call(sel, ${JSON.stringify(value)});
       sel.dispatchEvent(new Event("change", { bubbles: true }));

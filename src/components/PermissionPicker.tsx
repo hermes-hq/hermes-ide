@@ -1,6 +1,5 @@
-import "../styles/components/ModelPicker.css";
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
+import type { ReactNode } from "react";
+import { Menu, type MenuTriggerProps } from "./ui/Menu";
 
 export interface PermissionModeInfo {
   id: string;
@@ -36,95 +35,32 @@ export const CLAUDE_PERMISSION_MODES: PermissionModeInfo[] = [
 ];
 
 interface PermissionPickerProps {
-  anchorEl: HTMLElement | null;
   current: string | null;
   onSelect: (modeId: string) => void;
-  onClose: () => void;
+  /** The composer's permission chip; it opens the menu. */
+  renderTrigger: (props: MenuTriggerProps) => ReactNode;
 }
 
 /**
- * Permission-mode picker.  Mirrors `ModelPicker`'s anchored-portal pattern
- * (see `src/components/ModelPicker.tsx`) so both chips have the same
- * positioning + dismiss-on-outside-click behavior.  Reuses ModelPicker's CSS
- * file for the panel chrome — keeps the visual language consistent without
- * duplicating styles.
+ * Permission-mode menu behind the composer's permission chip: the kit Menu
+ * (↑ ↓ Home End, type-ahead, Enter, Esc). Bypass is drawn as a destructive
+ * item; the current mode carries the check.
  */
-export function PermissionPicker({ anchorEl, current, onSelect, onClose }: PermissionPickerProps) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [pos, setPos] = useState<{ top: number; left: number; width: number }>({
-    top: 0, left: 0, width: 260,
-  });
-
-  useLayoutEffect(() => {
-    if (!anchorEl) return;
-    const r = anchorEl.getBoundingClientRect();
-    setPos({
-      top: r.top - 8,
-      left: r.left,
-      width: Math.max(260, r.width),
-    });
-  }, [anchorEl]);
-
-  useEffect(() => {
-    const onDocClick = (e: MouseEvent) => {
-      if (!ref.current) return;
-      if (anchorEl && anchorEl.contains(e.target as Node)) return;
-      if (!ref.current.contains(e.target as Node)) onClose();
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { e.preventDefault(); onClose(); }
-    };
-    const timer = window.setTimeout(() => {
-      document.addEventListener("mousedown", onDocClick);
-    }, 0);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      window.clearTimeout(timer);
-      document.removeEventListener("mousedown", onDocClick);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [onClose, anchorEl]);
-
-  return createPortal(
-    <div
-      className="model-picker"
-      ref={ref}
-      role="menu"
-      aria-label="Select permission mode"
-      style={{
-        top: pos.top,
-        left: pos.left,
-        minWidth: pos.width,
-        transform: "translateY(-100%)",
-      }}
-    >
-      <div className="model-picker-header">Permission mode</div>
-      {CLAUDE_PERMISSION_MODES.map((opt) => {
-        const isCurrent = current === opt.id || (current == null && opt.id === "default");
-        return (
-          <button
-            key={opt.id}
-            type="button"
-            role="menuitem"
-            className={`model-picker-item ${isCurrent ? "model-picker-item-current" : ""} ${opt.tone === "danger" ? "model-picker-item-danger" : ""}`}
-            onClick={(e) => {
-              e.preventDefault();
-              e.stopPropagation();
-              onSelect(opt.id);
-            }}
-          >
-            <div className="model-picker-row">
-              <span className="model-picker-label">{opt.label}</span>
-              {isCurrent && <span className="model-picker-dot" aria-label="Current">●</span>}
-            </div>
-            <div className="model-picker-desc">{opt.description}</div>
-          </button>
-        );
-      })}
-      <div className="model-picker-footer">
-        Respawns Claude with the new <kbd>--permission-mode</kbd>
-      </div>
-    </div>,
-    document.body,
+export function PermissionPicker({ current, onSelect, renderTrigger }: PermissionPickerProps) {
+  return (
+    <Menu
+      label="Select permission mode"
+      className="permission-picker"
+      renderTrigger={renderTrigger}
+      footer={<>Applies now; on your next message Claude restarts with the new <kbd>--permission-mode</kbd></>}
+      entries={CLAUDE_PERMISSION_MODES.map((opt) => ({
+        id: `mode-${opt.id}`,
+        label: opt.label,
+        detail: opt.description,
+        danger: opt.tone === "danger",
+        checked: current === opt.id || (current == null && opt.id === "default"),
+        onSelect: () => onSelect(opt.id),
+      }))}
+    />
   );
 }

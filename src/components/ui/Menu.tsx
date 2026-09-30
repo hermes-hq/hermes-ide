@@ -2,6 +2,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type Keyboard
 import { createPortal } from "react-dom";
 import "../../styles/ui/popover.css";
 import { cx } from "./Button";
+import { CheckGlyph } from "./icons";
 import { PAGE_SIZE, createTypeahead, firstEnabled, isPrintableKey, lastEnabled, moveBy } from "./listNav";
 import { scrollIntoViewIfNeeded, usePopover } from "./usePopover";
 
@@ -11,6 +12,13 @@ export interface MenuAction {
   /** Shown on the right as a key hint, e.g. "⌘K". */
   shortcut?: string;
   icon?: ReactNode;
+  /** Quieter text on the right, e.g. what the item does. */
+  detail?: ReactNode;
+  /**
+   * For a menu that picks one value (a model, a mode): the item is a
+   * menuitemradio and the current one shows a check.
+   */
+  checked?: boolean;
   /** A destructive action: drawn in the danger colour. */
   danger?: boolean;
   disabled?: boolean;
@@ -46,6 +54,11 @@ export interface MenuProps {
   /** Renders the button that opens the menu, e.g. `(p) => <Button {...p}>More</Button>`. */
   renderTrigger: (props: MenuTriggerProps) => ReactNode;
   className?: string;
+  /**
+   * A quiet note under the items, e.g. what picking one does. Not an item:
+   * the keyboard skips it; the menu is described by it.
+   */
+  footer?: ReactNode;
 }
 
 /**
@@ -54,11 +67,12 @@ export interface MenuProps {
  * type-ahead move; Enter or Space runs the item; Esc or Tab close it and
  * focus returns to the trigger.
  */
-export function Menu({ label, entries, renderTrigger, className }: MenuProps) {
+export function Menu({ label, entries, renderTrigger, className, footer }: MenuProps) {
   const autoId = useId();
   const baseId = `h-menu-${autoId}`;
   const menuId = `${baseId}-menu`;
   const triggerId = `${baseId}-trigger`;
+  const footerId = `${baseId}-footer`;
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLUListElement>(null);
   const [open, setOpen] = useState(false);
@@ -191,6 +205,7 @@ export function Menu({ label, entries, renderTrigger, className }: MenuProps) {
           tabIndex={-1}
           hidden={!open}
           aria-label={label}
+          aria-describedby={footer ? footerId : undefined}
           aria-activedescendant={open && active >= 0 ? `${baseId}-item-${active}` : undefined}
           className={cx("h-popover", "h-menu", className)}
           style={style}
@@ -208,7 +223,8 @@ export function Menu({ label, entries, renderTrigger, className }: MenuProps) {
               <li
                 key={entry.id}
                 id={`${baseId}-item-${i}`}
-                role="menuitem"
+                role={entry.checked === undefined ? "menuitem" : "menuitemradio"}
+                aria-checked={entry.checked}
                 aria-disabled={entry.disabled || undefined}
                 data-highlighted={i === active || undefined}
                 className={cx("h-option", "h-menu-item", entry.danger && "h-menu-item--danger")}
@@ -216,11 +232,17 @@ export function Menu({ label, entries, renderTrigger, className }: MenuProps) {
                 onMouseMove={() => !entry.disabled && active !== i && setActive(i)}
                 onClick={() => run(i)}
               >
-                <span className="h-option-check">{entry.icon}</span>
+                <span className="h-option-check">{entry.icon ?? (entry.checked ? <CheckGlyph /> : null)}</span>
                 <span className="h-option-label">{entry.label}</span>
+                {entry.detail !== undefined && <span className="h-option-detail">{entry.detail}</span>}
                 {entry.shortcut && <kbd className="h-menu-shortcut">{entry.shortcut}</kbd>}
               </li>
             ),
+          )}
+          {footer && (
+            <li role="none" id={footerId} className="h-menu-footer" onMouseDown={(e) => e.preventDefault()}>
+              {footer}
+            </li>
           )}
         </ul>,
         document.body,

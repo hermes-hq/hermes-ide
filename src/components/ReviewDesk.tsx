@@ -26,7 +26,7 @@
  * c comment on the selected line · s send the selected turn's comments ·
  * x revert the selected turn · Esc close.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import { useSession } from "../state/SessionContext";
 import { useI18n } from "../i18n/I18nProvider";
 import { getSessionEventSnapshot, subscribeSessionEvents } from "../agent/contract/sessionEventStore";
@@ -64,6 +64,13 @@ import { GitProjectSection } from "./GitProjectSection";
 import type { GitToast } from "./GitPanel";
 import { useGitStatus } from "../hooks/useGitStatus";
 import { draftMessage, draftSubject, type DraftInput } from "../land/draft";
+import { Button, CloseButton, IconButton } from "./ui/Button";
+import { Checkbox } from "./ui/Choice";
+import { Textarea } from "./ui/Input";
+import { Segmented } from "./ui/Segmented";
+import { TabPanel, Tabs } from "./ui/Tabs";
+// The kit's visually hidden text (the viewed box's label).
+import "../styles/ui/badge.css";
 import "../styles/components/ReviewDesk.css";
 
 // A key name, shown as printed on the keyboard in every language.
@@ -139,9 +146,18 @@ const SEND_DEPS = {
 function SendNowButton({ sessionId, label, onClick }: { sessionId: string; label: string; onClick: () => void }) {
   const busy = isBusy(useSessionStatus(sessionId));
   return (
-    <button type="button" className="review-btn review-btn-small review-send-now-btn" disabled={busy} data-busy={busy ? "1" : "0"} onClick={onClick}>
+    <Button size="sm" className="review-send-now-btn" disabled={busy} data-busy={busy ? "1" : "0"} onClick={onClick}>
       {label}
-    </button>
+    </Button>
+  );
+}
+
+/** A file's "viewed" box. Its row selects the file on click; the box must not. */
+function ViewedBox({ checked, label, onChange }: { checked: boolean; label: string; onChange: (checked: boolean) => void }) {
+  return (
+    <span className="review-viewed-wrap" onClick={(e) => e.stopPropagation()} title={label}>
+      <Checkbox className="review-viewed" checked={checked} onChange={onChange} label={<span className="h-visually-hidden">{label}</span>} />
+    </span>
   );
 }
 
@@ -167,6 +183,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   const [notice, setNotice] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const draftRef = useRef<HTMLTextAreaElement | null>(null);
+  const tabPrefix = `review-desk-${useId().replace(/:/g, "")}`;
 
   // Sessions working in the same folder: their turns belong to this review.
   const sameFolder = sessions.filter((s) => s.working_directory && normalizePath(s.working_directory) === normalizePath(repoPath));
@@ -507,15 +524,13 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                       </span>
                       <span className="review-comment-text">{c.text}</span>
                       {sentOf(c.id) === null && (
-                        <button type="button" className="review-comment-remove" onClick={() => removeComment(repoPath, c.id)} aria-label={t("review.removeComment")}>
-                          ×
-                        </button>
+                        <CloseButton className="review-comment-remove" onClick={() => removeComment(repoPath, c.id)} label={t("review.removeComment")} />
                       )}
                     </div>
                   ))}
                   {isDraft && (
                     <div className="review-comment-editor">
-                      <textarea
+                      <Textarea
                         ref={draftRef}
                         value={draftText}
                         placeholder={t("review.commentPlaceholder", { agent: agentLabel(sessions.find((s) => s.id === draft.sessionId), draft.sessionId.slice(0, 8)) })}
@@ -526,12 +541,12 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                         rows={3}
                       />
                       <div className="review-comment-editor-actions">
-                        <button type="button" className="review-btn review-comment-save" onClick={saveComment} disabled={!draftText.trim()}>
-                          {t("review.addComment")}
-                        </button>
-                        <button type="button" className="review-btn review-btn-quiet" onClick={() => setDraft(null)}>
+                        <Button size="sm" variant="quiet" onClick={() => setDraft(null)}>
                           {t("common.cancel")}
-                        </button>
+                        </Button>
+                        <Button size="sm" variant="primary" className="review-comment-save" onClick={saveComment} disabled={!draftText.trim()}>
+                          {t("review.addComment")}
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -565,13 +580,14 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                     : "";
     const glyph = d.kind === "delivered" ? "✓" : d.kind === "pasted" ? "→" : d.kind === "not_delivered" || d.kind === "failed" ? "!" : "…";
     const copyLine = d.filePath && (
-      <button
-        type="button"
-        className="review-btn review-btn-small review-btn-quiet review-copy-line-btn"
+      <Button
+        size="sm"
+        variant="quiet"
+        className="review-copy-line-btn"
         onClick={() => navigator.clipboard.writeText(pasteLine(n, d.filePath ?? "")).catch(() => {})}
       >
         {t("review.copyLine")}
-      </button>
+      </Button>
     );
     return (
       <span className={`review-delivery review-delivery-${d.kind}`} data-state={d.kind} data-n={n}>
@@ -581,9 +597,9 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
         {t("review.reviewN", { n })} · {label}
         {d.kind === "waiting" && <SendNowButton sessionId={d.sessionId} label={t("review.sendNow")} onClick={() => void resend(n)} />}
         {(d.kind === "not_delivered" || d.kind === "failed") && (
-          <button type="button" className="review-btn review-btn-small review-retry-btn" onClick={() => void resend(n)}>
+          <Button size="sm" className="review-retry-btn" onClick={() => void resend(n)}>
             {t("review.retry")}
-          </button>
+          </Button>
         )}
         {(d.kind === "not_delivered" || d.kind === "failed" || d.kind === "pasted") && copyLine}
       </span>
@@ -613,15 +629,15 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
               <span className="review-send-label">
                 {t("review.commentsFor", { count: unsent.length, agent: label })}
               </span>
-              <button
-                type="button"
-                className="review-btn review-send-btn"
+              <Button
+                size="sm"
+                className="review-send-btn"
                 disabled={unsent.length === 0 || gone}
                 title={gone ? t("review.sessionGone") : t("review.sendHint")}
                 onClick={() => void send(sid)}
               >
                 {t("review.sendTo", { agent: label })}
-              </button>
+              </Button>
             </div>
           );
         })}
@@ -659,37 +675,38 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
               {diff ? ` → ${diff.baseRef}` : ""}
             </span>
           </div>
-          <div className="review-tabs" role="tablist">
-            <button type="button" role="tab" className="review-tab" aria-selected={tab === "review"} onClick={() => setTab("review")}>
-              {t("review.tabReview")}
-            </button>
-            <button type="button" role="tab" className="review-tab" aria-selected={tab === "repository"} onClick={() => setTab("repository")}>
-              {t("review.tabRepository")}
-            </button>
-            {/* Disk guard (diskGuard flag): the Worktrees view of the git panel this desk replaces. */}
-            {isFeatureFlagEnabled("diskGuard") && (
-              <button type="button" role="tab" className="review-tab" aria-selected={tab === "worktrees"} onClick={() => setTab("worktrees")}>
-                {t("review.tabWorktrees")}
-              </button>
-            )}
-          </div>
+          <Tabs<Tab>
+            idPrefix={tabPrefix}
+            className="review-tabs"
+            tabClassName="review-tab"
+            label={t("review.title")}
+            value={tab}
+            onChange={setTab}
+            tabs={[
+              { value: "review", label: t("review.tabReview") },
+              { value: "repository", label: t("review.tabRepository") },
+              // Disk guard (diskGuard flag): the Worktrees view of the git panel this desk replaces.
+              ...(isFeatureFlagEnabled("diskGuard") ? [{ value: "worktrees" as const, label: t("review.tabWorktrees") }] : []),
+            ]}
+          />
           <LandButtons sessionId={sessionId} onLand={onClose} />
-          <button type="button" className="review-close" onClick={onClose} aria-label={t("common.close")} title={ESC_KEY}>
-            ✕
-          </button>
+          <CloseButton className="review-close" onClick={onClose} label={t("common.close")} title={ESC_KEY} />
         </header>
 
         {tab === "review" && (
-          <>
+          <TabPanel idPrefix={tabPrefix} value="review" className="review-tabpanel">
             <div className="review-toolbar">
-              <div className="review-group" role="radiogroup" aria-label={t("review.groupBy")}>
-                <button type="button" role="radio" aria-checked={groupBy === "file"} className="review-group-btn" data-group="file" onClick={() => setGroupBy("file")}>
-                  {t("review.byFile")}
-                </button>
-                <button type="button" role="radio" aria-checked={groupBy === "turn"} className="review-group-btn" data-group="turn" onClick={() => setGroupBy("turn")}>
-                  {t("review.byTurn")}
-                </button>
-              </div>
+              <Segmented<GroupBy>
+                className="review-group"
+                size="sm"
+                label={t("review.groupBy")}
+                value={groupBy}
+                onChange={setGroupBy}
+                options={[
+                  { value: "file", label: t("review.byFile") },
+                  { value: "turn", label: t("review.byTurn") },
+                ]}
+              />
               <span className="review-summary" data-files={files.length} data-flags={flagCount} data-viewed={review.viewed.filter((p) => files.some((f) => f.file.path === p)).length}>
                 {t("review.summary", { files: files.length, add: totals.add, del: totals.del })}
                 {" · "}
@@ -701,9 +718,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                   </>
                 )}
               </span>
-              <button type="button" className="review-btn review-btn-quiet review-refresh" onClick={() => setReloadTick((x) => x + 1)} title={t("review.refresh")}>
-                ↻
-              </button>
+              <IconButton size="sm" className="review-refresh" onClick={() => setReloadTick((x) => x + 1)} label={t("review.refresh")} icon="↻" />
             </div>
 
             <div className="review-body">
@@ -727,9 +742,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                       data-flags={(flagsByPath.get(file.path) ?? []).map((f) => f.kind).join(" ")}
                       onClick={() => setSelection({ kind: "file", path: file.path })}
                     >
-                      <label className="review-viewed" onClick={(e) => e.stopPropagation()} title={t("review.viewed")}>
-                        <input type="checkbox" checked={viewedSet.has(file.path)} onChange={(e) => setViewed(repoPath, file.path, e.target.checked)} />
-                      </label>
+                      <ViewedBox checked={viewedSet.has(file.path)} label={t("review.viewed")} onChange={(v) => setViewed(repoPath, file.path, v)} />
                       <span className={`review-file-status review-file-status-${file.status}`}>{file.status[0].toUpperCase()}</span>
                       <span className="review-file-path">{file.path}</span>
                       <span className="review-file-stat">
@@ -779,17 +792,15 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                       <span className="review-main-path">
                         T{selectedTurn.turn.n} · {selectedTurn.agentLabel}
                       </span>
-                      <button type="button" className="review-btn review-btn-small review-revert-btn" onClick={() => void openRevert(selectedTurn)}>
+                      <Button size="sm" className="review-revert-btn" onClick={() => void openRevert(selectedTurn)}>
                         {t("review.revertTurn", { n: selectedTurn.turn.n })}
-                      </button>
+                      </Button>
                     </div>
                     {selectedTurn.files.length === 0 && <div className="review-empty">{t("review.noChangeTurn")}</div>}
                     {selectedTurn.files.map((pf) => (
                       <div className="review-turn-file" key={pf.path} data-path={pf.path}>
                         <div className="review-turn-file-head">
-                          <label className="review-viewed" title={t("review.viewed")}>
-                            <input type="checkbox" checked={viewedSet.has(pf.path)} onChange={(e) => setViewed(repoPath, pf.path, e.target.checked)} />
-                          </label>
+                          <ViewedBox checked={viewedSet.has(pf.path)} label={t("review.viewed")} onChange={(v) => setViewed(repoPath, pf.path, v)} />
                           <span className="review-file-path">{pf.path}</span>
                           <span className="review-file-stat">
                             <span className="review-add">+{pf.additions}</span> <span className="review-del">−{pf.deletions}</span>
@@ -813,14 +824,18 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
               <kbd>j</kbd>/<kbd>k</kbd> {t("review.keyMove")} · <kbd>[</kbd>/<kbd>]</kbd> {t("review.keyTurn")} · <kbd>c</kbd> {t("review.keyComment")} · <kbd>s</kbd>{" "}
               {t("review.keySend")} · <kbd>x</kbd> {t("review.keyRevert")} · <kbd>{ESC_KEY}</kbd> {t("common.close")}
             </footer>
-          </>
+          </TabPanel>
         )}
 
-        {tab === "repository" && <RepositoryTab sessionId={sessionId} />}
+        {tab === "repository" && (
+          <TabPanel idPrefix={tabPrefix} value="repository" className="review-tabpanel">
+            <RepositoryTab sessionId={sessionId} />
+          </TabPanel>
+        )}
         {tab === "worktrees" && (
-          <div className="review-worktrees">
+          <TabPanel idPrefix={tabPrefix} value="worktrees" className="review-tabpanel review-worktrees">
             <WorktreeOverviewPanel />
-          </div>
+          </TabPanel>
         )}
 
         {revert && (
@@ -848,12 +863,12 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
               )}
               {revert.error && <div className="review-error">{revert.error}</div>}
               <div className="review-revert-actions">
-                <button type="button" className="review-btn review-btn-danger review-revert-confirm" disabled={!revert.preview || revert.preview.files.length === 0 || revert.busy} onClick={() => void confirmRevert()}>
-                  {revert.busy ? t("review.reverting") : t("review.revertConfirm", { n: revert.entry.turn.n })}
-                </button>
-                <button type="button" className="review-btn review-btn-quiet" disabled={revert.busy} onClick={() => setRevert(null)}>
+                <Button disabled={revert.busy} onClick={() => setRevert(null)}>
                   {t("common.cancel")}
-                </button>
+                </Button>
+                <Button variant="danger-solid" className="review-revert-confirm" disabled={!revert.preview || revert.preview.files.length === 0 || revert.busy} onClick={() => void confirmRevert()}>
+                  {revert.busy ? t("review.reverting") : t("review.revertConfirm", { n: revert.entry.turn.n })}
+                </Button>
               </div>
             </div>
           </div>
@@ -886,9 +901,9 @@ function LandButtons({ sessionId, onLand }: { sessionId: string; onLand: () => v
   return (
     <>
       {landable.map((project) => (
-        <button
+        <Button
           key={project.project_id}
-          type="button"
+          variant="primary"
           className="review-land-btn"
           data-project-id={project.project_id}
           onClick={() => {
@@ -898,7 +913,7 @@ function LandButtons({ sessionId, onLand }: { sessionId: string; onLand: () => v
           title={t("review.landTitle")}
         >
           {landable.length === 1 ? t("review.land") : t("review.landProject", { project: project.project_name })}
-        </button>
+        </Button>
       ))}
     </>
   );

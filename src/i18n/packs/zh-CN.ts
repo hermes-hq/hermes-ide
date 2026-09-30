@@ -686,6 +686,8 @@ export const zhCNPack: LanguagePack = {
     "settings.terminalFontSize": "终端字体大小",
     "settings.fontFamily": "字体",
     "settings.windowSize": "窗口大小",
+    "settings.windowWidth": "窗口宽度",
+    "settings.windowHeight": "窗口高度",
     "settings.decreaseWidth": "减小宽度",
     "settings.increaseWidth": "增大宽度",
     "settings.decreaseHeight": "减小高度",

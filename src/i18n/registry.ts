@@ -716,6 +716,8 @@ const ENGLISH_PACK: LanguagePack = {
     "settings.terminalFontSize": "Terminal Font Size",
     "settings.fontFamily": "Font Family",
     "settings.windowSize": "Window Size",
+    "settings.windowWidth": "Window width",
+    "settings.windowHeight": "Window height",
     "settings.decreaseWidth": "Decrease width",
     "settings.increaseWidth": "Increase width",
     "settings.decreaseHeight": "Decrease height",

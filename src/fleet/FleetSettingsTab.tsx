@@ -5,6 +5,7 @@
 import "../styles/components/Fleet.css";
 import { useEffect, useState } from "react";
 import { useI18n } from "../i18n/I18nProvider";
+import { Input } from "../components/ui/Input";
 import { parseCapValue, setFleetCap, useFleetCaps, type FleetCapField } from "./fleetSettings";
 
 interface FieldSpec {
@@ -38,9 +39,10 @@ function CapField({ spec, value }: { spec: FieldSpec; value: number | null }) {
     <div className="settings-group">
       <label className="settings-label" htmlFor={id}>{spec.label}</label>
       <div className="fleet-cap-row">
-        <input
+        <Input
           id={id}
-          className="settings-input fleet-cap-input"
+          code
+          className="fleet-cap-input"
           data-fleet-cap={spec.field}
           inputMode="decimal"
           type="number"
@@ -48,7 +50,7 @@ function CapField({ spec, value }: { spec: FieldSpec; value: number | null }) {
           step={spec.step}
           placeholder={t("fleet.capOff")}
           value={text}
-          aria-invalid={invalid || undefined}
+          invalid={invalid}
           onChange={(e) => setText(e.target.value)}
           onBlur={save}
           onKeyDown={(e) => {

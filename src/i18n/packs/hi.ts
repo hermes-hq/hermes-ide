@@ -40,6 +40,8 @@ export const hiPack: LanguagePack = {
     "settings.terminalFontSize": "टर्मिनल फ़ॉन्ट आकार",
     "settings.fontFamily": "फ़ॉन्ट परिवार",
     "settings.windowSize": "विंडो आकार",
+    "settings.windowWidth": "विंडो की चौड़ाई",
+    "settings.windowHeight": "विंडो की ऊंचाई",
     "settings.decreaseWidth": "चौड़ाई घटाएं",
     "settings.increaseWidth": "चौड़ाई बढ़ाएं",
     "settings.decreaseHeight": "ऊंचाई घटाएं",

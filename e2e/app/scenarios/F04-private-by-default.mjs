@@ -135,19 +135,20 @@ async function setAnalyticsInSettings(bridge, on, shot) {
   await bridge.waitFor("the Privacy tab", `
     return e2e.all(".settings-content label").some((l) => /usage analytics/i.test(l.innerText));
   `);
+  // The analytics setting is a switch (role=switch, aria-checked) like every Settings on/off.
   const before = await bridge.eval(`
     const label = e2e.all(".settings-content label").find((l) => /usage analytics/i.test(l.innerText));
-    return label.querySelector("input[type=checkbox]").checked;
+    return label.querySelector('[role="switch"]').getAttribute("aria-checked") === "true";
   `);
   if (before !== on) {
     await bridge.clickWhenReady(`
       const label = e2e.all(".settings-content label").find((l) => /usage analytics/i.test(l.innerText));
-      return e2e.click(e2e.must(label.querySelector("input[type=checkbox]"), "the analytics checkbox"));
+      return e2e.click(e2e.must(label.querySelector('[role="switch"]'), "the analytics switch"));
     `);
   }
-  await bridge.waitFor(`the analytics checkbox to be ${on ? "checked" : "unchecked"}`, `
+  await bridge.waitFor(`the analytics switch to be ${on ? "on" : "off"}`, `
     const label = e2e.all(".settings-content label").find((l) => /usage analytics/i.test(l.innerText));
-    return label.querySelector("input[type=checkbox]").checked === ${on};
+    return (label.querySelector('[role="switch"]').getAttribute("aria-checked") === "true") === ${on};
   `);
   if (shot) await bridge.screenshot(shot);
   await bridge.click(".settings-close");

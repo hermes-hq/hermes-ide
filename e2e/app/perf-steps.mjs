@@ -25,7 +25,7 @@ export async function setFlagOverride(bridge, flagId, value, assert) {
     const tab = e2e.all(".settings-tab").find((el) => e2e.norm(el.innerText) === "Flags");
     return e2e.click(e2e.must(tab, "Flags tab"));
   `);
-  const select = `e2e.first('select.settings-select[data-flag-id="${flagId}"]')`;
+  const select = `e2e.first('select[data-flag-id="${flagId}"]')`;
   await bridge.waitFor(`the ${flagId} flag control`, `return !!${select};`);
   const result = await bridge.eval(`
     const sel = e2e.must(${select}, "${flagId} select");

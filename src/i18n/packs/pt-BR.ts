@@ -686,6 +686,8 @@ export const ptBRPack: LanguagePack = {
     "settings.terminalFontSize": "Tamanho da fonte do terminal",
     "settings.fontFamily": "Família da fonte",
     "settings.windowSize": "Tamanho da janela",
+    "settings.windowWidth": "Largura da janela",
+    "settings.windowHeight": "Altura da janela",
     "settings.decreaseWidth": "Diminuir largura",
     "settings.increaseWidth": "Aumentar largura",
     "settings.decreaseHeight": "Diminuir altura",

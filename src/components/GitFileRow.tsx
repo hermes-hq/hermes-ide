@@ -1,5 +1,6 @@
 import { memo, useState } from "react";
 import type { GitFile } from "../types/git";
+import { GitActionButton } from "./GitActionButton";
 
 interface GitFileRowProps {
   file: GitFile;
@@ -9,6 +10,8 @@ interface GitFileRowProps {
   onOpen?: (path: string) => void;
   onClick?: (file: GitFile) => void;
   onContextMenu?: (e: React.MouseEvent, file: GitFile) => void;
+  /** The Review Desk's Changes section: the row's actions are the control set's buttons. */
+  kit?: boolean;
 }
 
 const STATUS_LABELS: Record<string, { letter: string; className: string }> = {
@@ -29,6 +32,7 @@ export const GitFileRow = memo(function GitFileRow({
   onOpen,
   onClick,
   onContextMenu,
+  kit = false,
 }: GitFileRowProps) {
   const info = STATUS_LABELS[file.status] || { letter: "?", className: "git-status-untracked" };
   const [confirmDiscard, setConfirmDiscard] = useState(false);
@@ -41,59 +45,77 @@ export const GitFileRow = memo(function GitFileRow({
       </span>
       <div className="git-file-actions">
         {onOpen && (
-          <button
-            className="git-file-btn git-file-btn-open"
+          <GitActionButton
+            kit={kit}
+            variant="quiet"
+            kitClass="git-file-action git-file-action-open"
+            legacyClass="git-file-btn git-file-btn-open"
             title="Open file in default editor"
             onClick={(e) => { e.stopPropagation(); onOpen(file.path); }}
           >
             Open
-          </button>
+          </GitActionButton>
         )}
         {file.area === "staged" && onUnstage && (
-          <button
-            className="git-file-btn git-file-btn-unstage"
+          <GitActionButton
+            kit={kit}
+            variant="quiet"
+            kitClass="git-file-action git-file-action-unstage"
+            legacyClass="git-file-btn git-file-btn-unstage"
             title="Unstage this file"
             onClick={(e) => { e.stopPropagation(); onUnstage(file.path); }}
           >
             Unstage
-          </button>
+          </GitActionButton>
         )}
         {file.area === "unstaged" && file.status !== "untracked" && onDiscard && (
           confirmDiscard ? (
             <>
-              <button
-                className="git-file-btn git-file-btn-discard-confirm"
+              <GitActionButton
+                kit={kit}
+                variant="danger"
+                kitClass="git-file-action git-file-action-discard-confirm"
+                legacyClass="git-file-btn git-file-btn-discard-confirm"
                 title="Confirm discard"
                 onClick={(e) => { e.stopPropagation(); onDiscard(file.path); setConfirmDiscard(false); }}
               >
                 Confirm
-              </button>
-              <button
-                className="git-file-btn git-file-btn-open"
+              </GitActionButton>
+              <GitActionButton
+                kit={kit}
+                variant="quiet"
+                kitClass="git-file-action git-file-action-cancel"
+                legacyClass="git-file-btn git-file-btn-open"
                 title="Cancel"
                 onClick={(e) => { e.stopPropagation(); setConfirmDiscard(false); }}
               >
                 Cancel
-              </button>
+              </GitActionButton>
             </>
           ) : (
-            <button
-              className="git-file-btn git-file-btn-discard"
+            <GitActionButton
+              kit={kit}
+              variant="quiet"
+              kitClass="git-file-action git-file-action-discard"
+              legacyClass="git-file-btn git-file-btn-discard"
               title="Discard changes (restore to last commit)"
               onClick={(e) => { e.stopPropagation(); setConfirmDiscard(true); }}
             >
               Discard
-            </button>
+            </GitActionButton>
           )
         )}
         {(file.area === "unstaged" || file.area === "untracked") && onStage && (
-          <button
-            className="git-file-btn git-file-btn-stage"
+          <GitActionButton
+            kit={kit}
+            variant="quiet"
+            kitClass="git-file-action git-file-action-stage"
+            legacyClass="git-file-btn git-file-btn-stage"
             title="Stage this file"
             onClick={(e) => { e.stopPropagation(); onStage(file.path); }}
           >
             Stage
-          </button>
+          </GitActionButton>
         )}
       </div>
     </div>
@@ -101,5 +123,6 @@ export const GitFileRow = memo(function GitFileRow({
 }, (prev, next) =>
   prev.file.path === next.file.path &&
   prev.file.status === next.file.status &&
-  prev.file.area === next.file.area
+  prev.file.area === next.file.area &&
+  prev.kit === next.kit
 );

@@ -25,6 +25,9 @@ import {
   type UndoOutcome,
 } from "./api";
 import { loadLandTurns, type LandTurn } from "./turnSource";
+import { Button, CloseButton } from "../components/ui/Button";
+import { Checkbox, Radio } from "../components/ui/Choice";
+import { Textarea } from "../components/ui/Input";
 import {
   baseBranchNote,
   ciLogRequest,
@@ -329,9 +332,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                   base: preview.base && <code className="land-sheet-branch">{preview.base.name}</code>,
                 })}
           </span>
-          <button className="land-sheet-x" onClick={onClose} disabled={busy !== null} aria-label={t("common.close")}>
-            &times;
-          </button>
+          <CloseButton className="land-sheet-x" onClick={onClose} disabled={busy !== null} label={t("common.close")} />
         </div>
 
         <div className="land-sheet-body">
@@ -386,9 +387,9 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
           {preview && !showResult && lastOpenLanding && (
             <div className="land-sheet-previous">
               {t("land.landedBefore", { mode: lastOpenLanding.mode === "archive" ? t("land.modeArchived") : lastOpenLanding.mode })}
-              <button className="land-sheet-link-btn land-sheet-undo-previous" disabled={busy !== null} onClick={() => undo(lastOpenLanding)}>
+              <Button variant="link" size="sm" className="land-sheet-undo-previous" disabled={busy !== null} onClick={() => undo(lastOpenLanding)}>
                 {t("land.undoThat")}
-              </button>
+              </Button>
             </div>
           )}
 
@@ -427,14 +428,14 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                   reason={available?.pr ?? null}
                 >
                   {gh?.state === "missing" && (
-                    <button className="land-sheet-link-btn land-sheet-gh-link" onClick={() => void shellOpen(GH_INSTALL_URL)}>
+                    <Button variant="link" size="sm" className="land-sheet-gh-link" onClick={() => void shellOpen(GH_INSTALL_URL)}>
                       {t("land.installGh")}
-                    </button>
+                    </Button>
                   )}
                   {gh?.state === "signed_out" && (
-                    <button className="land-sheet-link-btn land-sheet-gh-link" onClick={() => void shellOpen(GH_SIGN_IN_URL)}>
+                    <Button variant="link" size="sm" className="land-sheet-gh-link" onClick={() => void shellOpen(GH_SIGN_IN_URL)}>
                       {t("land.signInGh", { command: GH_SIGN_IN_COMMAND })}
-                    </button>
+                    </Button>
                   )}
                 </LandOption>
                 <LandOption
@@ -453,23 +454,20 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                     {t("land.conflict", { files: conflictFiles.join(", ") })}
                   </div>
                   <div className="land-sheet-conflict-actions">
-                    <button className="land-sheet-btn land-sheet-route-pr" onClick={routeToPr} disabled={!!available?.pr}>
+                    <Button size="sm" className="land-sheet-route-pr" onClick={routeToPr} disabled={!!available?.pr}>
                       {t("land.routeToPr")}
-                    </button>
-                    <button
-                      className="land-sheet-btn land-sheet-ask-rebase"
-                      onClick={() => void askRebase(conflictFiles)}
-                      disabled={!sessionAlive}
-                    >
+                    </Button>
+                    <Button size="sm" className="land-sheet-ask-rebase" onClick={() => void askRebase(conflictFiles)} disabled={!sessionAlive}>
                       {t("land.askRebase")}
-                    </button>
+                    </Button>
                   </div>
                 </div>
               )}
 
               <label className="land-sheet-field">
                 <span>{t("land.commitMessage")}</span>
-                <textarea
+                <Textarea
+                  code
                   className="land-sheet-message"
                   value={message}
                   rows={6}
@@ -487,16 +485,14 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 </details>
               )}
 
-              <label className="land-sheet-check" title={available?.archive ?? undefined}>
-                <input
-                  type="checkbox"
-                  className="land-sheet-archive-after"
-                  checked={archiveAfter && !preview.shared}
-                  disabled={preview.shared}
-                  onChange={(e) => setArchiveAfter(e.target.checked)}
-                />
-                {t("land.archiveAfter")}
-              </label>
+              <Checkbox
+                className="land-sheet-check land-sheet-archive-after"
+                title={available?.archive ?? undefined}
+                checked={archiveAfter && !preview.shared}
+                disabled={preview.shared}
+                onChange={setArchiveAfter}
+                label={t("land.archiveAfter")}
+              />
               {failing && (
                 <div className="land-sheet-warning">
                   {t("land.failingWarning")}
@@ -532,15 +528,15 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 <span>
                   {withNodes(t("land.checksOn"), {
                     url: (
-                      <button className="land-sheet-link-btn land-sheet-pr-link" onClick={() => void shellOpen(prUrl)}>
+                      <Button variant="link" size="sm" className="land-sheet-pr-link" onClick={() => void shellOpen(prUrl)}>
                         {prUrl}
-                      </button>
+                      </Button>
                     ),
                   })}
                 </span>
-                <button className="land-sheet-link-btn land-sheet-refresh-checks" onClick={() => void refreshChecks()}>
+                <Button variant="link" size="sm" className="land-sheet-refresh-checks" onClick={() => void refreshChecks()}>
                   {t("land.refresh")}
-                </button>
+                </Button>
               </div>
               {checksError && <div className="land-sheet-error">{checksError}</div>}
               {checks === null && !checksError && <div className="land-sheet-loading">{t("land.readingChecks")}</div>}
@@ -551,14 +547,15 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                     <span className="land-sheet-ci-name">{c.name}</span>
                     <span className="land-sheet-ci-state">{c.bucket || c.state}</span>
                     {c.bucket === "fail" && (
-                      <button
-                        className="land-sheet-btn land-sheet-send-log"
+                      <Button
+                        size="sm"
+                        className="land-sheet-send-log"
                         disabled={busy !== null || !sessionAlive}
                         title={sessionAlive ? undefined : "The session was archived"}
                         onClick={() => void sendLog(c)}
                       >
                         {t("land.sendLog")}
-                      </button>
+                      </Button>
                     )}
                   </li>
                 ))}
@@ -585,43 +582,41 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
         <div className="land-sheet-footer">
           {!showResult && preview && (
             <>
-              <button
-                className="land-sheet-btn land-sheet-archive"
+              <Button
+                className="land-sheet-archive"
                 disabled={busy !== null || !!available?.archive}
                 title={available?.archive ?? undefined}
                 onClick={() => void archiveOnly()}
               >
                 {t("land.archiveOnly")}
-              </button>
+              </Button>
               <span className="land-sheet-spacer" />
-              <button
-                className={`land-sheet-btn land-sheet-cancel${failing ? " land-sheet-btn-primary" : ""}`}
-                onClick={onClose}
-                disabled={busy !== null}
-              >
+              {/* A failing Done-When check makes Cancel the primary and Land a secondary "Land anyway". */}
+              <Button variant={failing ? "primary" : "secondary"} className="land-sheet-cancel" onClick={onClose} disabled={busy !== null}>
                 {t("common.cancel")}
-              </button>
-              <button
-                className={`land-sheet-btn land-sheet-land ${failing ? "land-sheet-btn-secondary" : "land-sheet-btn-primary"}`}
+              </Button>
+              <Button
+                variant={failing ? "secondary" : "primary"}
+                className="land-sheet-land"
                 data-anyway={failing ? "true" : "false"}
                 disabled={busy !== null || !mode || !!(mode && available?.[mode]) || !message.trim()}
                 onClick={() => mode && void land(mode)}
               >
                 {busy === "land" ? "Landing…" : failing ? "Land anyway" : "Land"}
-              </button>
+              </Button>
             </>
           )}
           {showResult && (
             <>
               {landedRecord && !undone && (
-                <button className="land-sheet-btn land-sheet-undo" disabled={busy !== null} onClick={() => void undo(landedRecord)}>
+                <Button className="land-sheet-undo" disabled={busy !== null} onClick={() => void undo(landedRecord)}>
                   {busy === "undo" ? "Undoing…" : "Undo"}
-                </button>
+                </Button>
               )}
               <span className="land-sheet-spacer" />
-              <button className="land-sheet-btn land-sheet-btn-primary land-sheet-close" disabled={busy !== null} onClick={onClose}>
+              <Button variant="primary" className="land-sheet-close" disabled={busy !== null} onClick={onClose}>
                 {t("common.close")}
-              </button>
+              </Button>
             </>
           )}
         </div>
@@ -658,17 +653,14 @@ function LandOption({ mode, current, onPick, title, reason, hint, children }: La
   const disabled = reason !== null;
   return (
     <div className={`land-sheet-option${disabled ? " land-sheet-option-disabled" : ""}`} data-mode={mode} aria-disabled={disabled}>
-      <label>
-        <input
-          type="radio"
-          name="land-mode"
-          value={mode}
-          checked={current === mode}
-          disabled={disabled}
-          onChange={() => onPick(mode)}
-        />
-        <span className="land-sheet-option-title">{title}</span>
-      </label>
+      <Radio
+        name="land-mode"
+        value={mode}
+        checked={current === mode}
+        disabled={disabled}
+        onChange={() => onPick(mode)}
+        label={<span className="land-sheet-option-title">{title}</span>}
+      />
       {reason && <div className="land-sheet-option-reason">{reason}</div>}
       {!reason && hint && <div className="land-sheet-option-hint">{hint}</div>}
       {children}

@@ -8,6 +8,7 @@ import { useEffect, useRef, useState } from "react";
 import { AWAY_NOTIFY_URL_KEY } from "../api/attention";
 import { isAwayUrlAcceptable } from "../attention/awayUrl";
 import { useI18n } from "../i18n/I18nProvider";
+import { Input } from "./ui/Input";
 
 // An example address, not a sentence: the same in every language.
 const EXAMPLE_ADDRESS = "https://ntfy.sh/my-topic";
@@ -48,16 +49,16 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
       <label className="settings-label" htmlFor="away-notify-url">
         {t("settings.awayNotify")}
       </label>
-      <input
+      <Input
         id="away-notify-url"
-        className="settings-input"
+        code
         type={editing ? "url" : "password"}
         inputMode="url"
         spellCheck={false}
         autoComplete="off"
         placeholder={EXAMPLE_ADDRESS}
         aria-label={t("settings.awayNotifyUrl")}
-        aria-invalid={invalid}
+        invalid={invalid}
         aria-describedby="away-notify-hint"
         value={draft}
         onChange={(e) => {

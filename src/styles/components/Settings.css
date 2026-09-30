@@ -70,11 +70,6 @@
   color: var(--text-0);
 }
 
-.settings-close {
-  font-size: var(--text-2xl);
-}
-.settings-close:hover { color: var(--text-0); background: var(--bg-hover); }
-
 .settings-body {
   display: flex;
   flex: 1;
@@ -90,22 +85,10 @@
   flex-shrink: 0;
   border-right: 1px solid var(--border);
   background: var(--bg-0);
+  /* A short window scrolls the list; the rows keep their 32 px. */
+  overflow-y: auto;
 }
-
-.settings-tab {
-  background: none;
-  border: none;
-  color: var(--text-2);
-  cursor: pointer;
-  text-align: left;
-  padding: 8px 12px;
-  border-radius: var(--radius);
-  font-size: var(--text-lg);
-  font-family: var(--font-ui);
-  transition: background 0.1s, color 0.1s;
-}
-.settings-tab:hover { background: var(--bg-hover); color: var(--text-0); }
-.settings-tab-active { background: var(--accent-dim); color: var(--accent); font-weight: 500; }
+.settings-tabs .h-tab { flex-shrink: 0; }
 
 .settings-content {
   flex: 1;
@@ -119,39 +102,13 @@
 
 .settings-label {
   font-size: var(--text-base);
-  font-weight: 600;
-  color: var(--text-2);
-  text-transform: uppercase;
-  letter-spacing: 0.3px;
+  font-weight: var(--weight-medium);
+  color: var(--text-1);
 }
 
-.settings-label-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.settings-input, .settings-select {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: var(--text-lg);
-  padding: 8px 10px;
-  outline: none;
-}
-.settings-input:focus, .settings-select:focus { border-color: var(--accent); }
-.settings-input::placeholder { color: var(--text-3); }
-
-.settings-select {
-  cursor: pointer;
-  appearance: none;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23768390' d='M3 4.5L6 8l3-3.5H3z'/%3E%3C/svg%3E");
-  background-repeat: no-repeat;
-  background-position: right 8px center;
-  padding-right: 28px;
-}
+/* Buttons keep their own width in the column layout. */
+.settings-section > .h-btn,
+.settings-group > .h-btn { align-self: flex-start; }
 
 /* ─── Theme grid ─────────────────────────────────────────── */
 
@@ -163,29 +120,7 @@
   overflow-y: auto;
 }
 
-.settings-theme-item {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: var(--text-sm);
-  padding: 4px 10px;
-  cursor: pointer;
-  transition: background 0.1s, border-color 0.1s, color 0.1s;
-  white-space: nowrap;
-}
-
-.settings-theme-item:hover {
-  background: var(--bg-3);
-  color: var(--text-0);
-  border-color: var(--text-3);
-}
-
-.settings-theme-item-active {
-  border-color: var(--accent);
-  color: var(--accent);
-}
+.settings-theme-item { display: inline-flex; }
 
 .settings-theme-separator {
   width: 100%;
@@ -231,53 +166,18 @@
 .settings-stepper {
   display: flex;
   align-items: center;
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  overflow: hidden;
+  gap: var(--space-1);
 }
-.settings-stepper:focus-within {
-  border-color: var(--accent);
-}
-
-.settings-stepper-btn {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: 24px;
-  flex-shrink: 0;
-  font-size: var(--text-sm);
-  color: var(--text-2);
-  background: var(--bg-3);
-  border: none;
-  cursor: pointer;
-  user-select: none;
-  touch-action: none;
-  align-self: stretch;
-  padding: 0;
-  transition: color 0.1s, background 0.1s;
-}
-.settings-stepper-btn:hover {
-  color: var(--text-0);
-  background: var(--bg-active);
-}
-.settings-stepper-btn:active {
-  color: var(--accent);
-  background: var(--accent-dim);
-}
-
 .settings-stepper-input {
-  width: 56px;
+  width: calc(var(--control-h-sm) * 2);
   text-align: center;
-  border: none;
-  background: transparent;
-  color: var(--text-0);
-  font-family: var(--font-mono);
-  font-size: var(--text-lg);
-  padding: 6px 2px;
-  outline: none;
 }
-.settings-stepper-input::placeholder { color: var(--text-3); }
+/* Press and hold repeats: no text selection or touch panning on the way. */
+.settings-stepper-btn {
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
 
 .settings-size-separator {
   color: var(--text-3);
@@ -304,34 +204,6 @@
   color: var(--text-3);
   margin-right: auto;
 }
-
-.settings-btn {
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  color: var(--text-2);
-  padding: 6px 14px;
-  border-radius: var(--radius);
-  cursor: pointer;
-  font-size: var(--text-md);
-  font-family: var(--font-ui);
-  font-weight: 500;
-  transition: background 0.1s, color 0.1s, border-color 0.1s;
-}
-.settings-btn:hover { background: var(--accent-dim); color: var(--accent); border-color: var(--accent); }
-
-/* ─── Small Button ──────────────────────────── */
-
-.settings-btn-sm {
-  background: var(--bg-3);
-  border: 1px solid var(--border);
-  color: var(--text-1);
-  border-radius: 4px;
-  padding: 2px 8px;
-  font-size: 11px;
-  cursor: pointer;
-}
-.settings-btn-sm:hover { background: var(--accent-dim); color: var(--accent); }
-.settings-btn-danger:hover { background: var(--red-dim, rgba(244, 112, 103, 0.1)); color: var(--red, #f47067); border-color: var(--red, #f47067); }
 
 /* ─── SSH Saved Hosts ──────────────────────────── */
 
@@ -471,25 +343,6 @@
   flex-wrap: wrap;
   gap: 4px;
   margin-top: 2px;
-}
-
-.settings-agent-prefix-chip {
-  background: var(--bg-2);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  color: var(--text-2);
-  font-family: var(--font-mono);
-  font-size: var(--text-xs);
-  padding: 2px 8px;
-  cursor: pointer;
-  transition: border-color 0.12s, color 0.12s, background-color 0.12s;
-}
-
-.settings-agent-prefix-chip:hover,
-.settings-agent-prefix-chip:focus-visible {
-  border-color: var(--accent);
-  color: var(--text-0);
-  background: var(--bg-1);
 }
 
 .settings-agent-prefix-preview {

@@ -62,54 +62,15 @@
   text-overflow: ellipsis;
 }
 
-.review-tabs {
+/* The tabs sit in the header; the header's own rule is their baseline. */
+.review-tabs.h-tabs--horizontal { border-bottom: 0; }
+
+/* Each tab's panel fills the desk below the header. */
+.review-tabpanel {
   display: flex;
-  gap: 2px;
-}
-
-.review-tab,
-.review-group-btn {
-  background: none;
-  border: 1px solid transparent;
-  color: var(--text-2);
-  padding: 3px 10px;
-  border-radius: var(--radius-sm);
-  cursor: pointer;
-  font: inherit;
-}
-
-.review-tab[aria-selected="true"],
-.review-group-btn[aria-checked="true"] {
-  color: var(--text-0);
-  background: var(--bg-2);
-  border-color: var(--border-light);
-}
-
-.review-land-btn {
-  background: var(--accent);
-  color: var(--bg-0);
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 2px 10px;
-  font-size: var(--text-xs);
-  cursor: pointer;
-}
-.review-land-btn:hover {
-  opacity: 0.9;
-}
-
-.review-close {
-  background: none;
-  border: none;
-  color: var(--text-2);
-  font-size: var(--text-md);
-  cursor: pointer;
-  padding: 2px 6px;
-  border-radius: var(--radius-sm);
-}
-.review-close:hover {
-  color: var(--text-0);
-  background: var(--bg-hover);
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
 }
 
 .review-toolbar {
@@ -119,14 +80,6 @@
   padding: var(--space-2) var(--space-3);
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-}
-
-.review-group {
-  display: flex;
-  gap: 2px;
-  background: var(--bg-0);
-  padding: 2px;
-  border-radius: var(--radius);
 }
 
 .review-summary {
@@ -179,11 +132,13 @@
   color: var(--text-2);
   margin-bottom: var(--space-1);
 }
-.review-changes .git-commit-textarea {
-  resize: vertical;
-  min-height: 3.5em;
-  font-family: var(--font-ui, var(--font-mono));
-}
+.review-changes .git-commit-textarea { width: 100%; }
+.review-changes .git-commit-actions > .h-btn { flex: 1; }
+.review-changes .git-commit-actions > .git-btn-commit { flex: 2; }
+.review-changes .git-merge-actions > .h-btn { flex: 1; }
+.review-changes .git-merge-actions > .git-merge-complete { flex: 2; }
+/* A row's actions show on hover, and while one of them has keyboard focus. */
+.review-changes .git-file-row:focus-within .git-file-actions { opacity: 1; }
 .review-changes-toast {
   margin-top: var(--space-1);
   padding: var(--space-1) var(--space-2);
@@ -206,18 +161,15 @@
 .review-turn-row:hover {
   background: var(--bg-hover);
 }
+/* The current row: the row fill plus a brass rail (never colour alone). */
 .review-row-selected {
-  background: var(--accent-dim);
+  background: var(--row-active-bg);
+  border-left: var(--rail-width) solid var(--primary-bg);
+  padding-left: calc(var(--space-3) - var(--rail-width));
 }
 
-.review-viewed {
-  display: inline-flex;
-  align-items: center;
-}
-.review-viewed input {
-  accent-color: var(--accent);
-  margin: 0;
-}
+.review-viewed-wrap { display: inline-flex; }
+.review-viewed.h-choice { min-height: 0; padding: 0; }
 
 .review-file-status {
   width: 14px;
@@ -401,67 +353,16 @@
   flex: 1;
   color: var(--text-0);
 }
-.review-comment-remove {
-  background: none;
-  border: none;
-  color: var(--text-3);
-  cursor: pointer;
-}
-.review-comment-remove:hover {
-  color: var(--red);
-}
-
 .review-comment-editor {
   margin: 2px var(--space-3) 6px 102px;
   display: flex;
   flex-direction: column;
   gap: 4px;
 }
-.review-comment-editor textarea {
-  width: 100%;
-  box-sizing: border-box;
-  background: var(--bg-0);
-  color: var(--text-0);
-  border: 1px solid var(--border-light);
-  border-radius: var(--radius-sm);
-  padding: 6px 8px;
-  font: inherit;
-  font-family: var(--font-ui, var(--font-mono));
-  resize: vertical;
-}
 .review-comment-editor-actions {
   display: flex;
+  justify-content: flex-end;
   gap: var(--space-2);
-}
-
-.review-btn {
-  background: var(--accent);
-  color: var(--bg-0);
-  border: none;
-  border-radius: var(--radius-sm);
-  padding: 4px 10px;
-  cursor: pointer;
-  font: inherit;
-  font-family: var(--font-ui, var(--font-mono));
-}
-.review-btn:disabled {
-  opacity: 0.45;
-  cursor: default;
-}
-.review-btn-quiet {
-  background: transparent;
-  color: var(--text-2);
-  border: 1px solid var(--border-light);
-}
-.review-btn-quiet:hover:not(:disabled) {
-  color: var(--text-0);
-}
-.review-btn-small {
-  padding: 1px 8px;
-  font-size: var(--text-xs);
-}
-.review-btn-danger {
-  background: var(--red);
 }
 
 .review-send-panel {
@@ -597,6 +498,7 @@
 }
 .review-revert-actions {
   display: flex;
+  justify-content: flex-end;
   gap: var(--space-2);
 }
 

@@ -686,6 +686,8 @@ export const dePack: LanguagePack = {
     "settings.terminalFontSize": "Terminal-Schriftgröße",
     "settings.fontFamily": "Schriftfamilie",
     "settings.windowSize": "Fenstergröße",
+    "settings.windowWidth": "Fensterbreite",
+    "settings.windowHeight": "Fensterhöhe",
     "settings.decreaseWidth": "Breite verringern",
     "settings.increaseWidth": "Breite erhöhen",
     "settings.decreaseHeight": "Höhe verringern",

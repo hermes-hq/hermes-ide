@@ -686,6 +686,8 @@ export const frPack: LanguagePack = {
     "settings.terminalFontSize": "Taille de police du terminal",
     "settings.fontFamily": "Famille de police",
     "settings.windowSize": "Taille de la fenêtre",
+    "settings.windowWidth": "Largeur de la fenêtre",
+    "settings.windowHeight": "Hauteur de la fenêtre",
     "settings.decreaseWidth": "Réduire la largeur",
     "settings.increaseWidth": "Augmenter la largeur",
     "settings.decreaseHeight": "Réduire la hauteur",

@@ -266,7 +266,7 @@ async function setFlagOverride(bridge, flagId, value) {
     const tab = e2e.all(".settings-tab").find((el) => e2e.norm(el.innerText) === "Flags");
     return e2e.click(e2e.must(tab, "Flags tab"));
   `);
-  const selector = `select.settings-select[data-flag-id="${flagId}"]`;
+  const selector = `select[data-flag-id="${flagId}"]`;
   await bridge.waitFor(`the ${flagId} flag control`, `return !!e2e.first(${JSON.stringify(selector)});`);
   const result = await bridge.eval(`
     const sel = e2e.must(e2e.first(${JSON.stringify(selector)}), "flag select");
@@ -608,7 +608,7 @@ try {
   assert((await fileRows(bridge)).find((r) => r.path === "src/app.js")?.viewed === true, "src/app.js is still ticked after reopening from the sidebar button");
 
   log("step 4: by turn — T1 is Agent A's, T2 is Agent B's, T3 is Agent C's; comments are routed to the agent that made the turn");
-  await bridge.click('.review-group-btn[data-group="turn"]');
+  await bridge.clickByName("By turn", { within: ".review-group" });
   await bridge.waitFor("the turn list", `return e2e.all(".review-turn-row").length === 3;`);
   // The list can re-render as the turns load again; read it once it holds three.
   let turns = await turnRows(bridge);
@@ -792,7 +792,7 @@ try {
   assert(read("README.md").includes("Run `npm test`"), "turn 3's change to README.md is intact");
   const status = git("status", "--porcelain").trimEnd().split(/\r?\n/).sort();
   assert(JSON.stringify(status) === JSON.stringify([" M README.md", " M src/app.js"]), `git status shows only turns 1 and 3 (${JSON.stringify(status)})`);
-  await bridge.click('.review-group-btn[data-group="file"]');
+  await bridge.clickByName("By file", { within: ".review-group" });
   await bridge.waitFor("the by-file list to shrink to two files", `
     const p = e2e.all(".review-file-row").map((r) => r.getAttribute("data-path")).sort();
     return p.length === 2 && p[0] === "README.md" && p[1] === "src/app.js";

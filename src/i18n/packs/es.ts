@@ -686,6 +686,8 @@ export const esPack: LanguagePack = {
     "settings.terminalFontSize": "Tamaño de fuente del terminal",
     "settings.fontFamily": "Familia de fuente",
     "settings.windowSize": "Tamaño de ventana",
+    "settings.windowWidth": "Ancho de ventana",
+    "settings.windowHeight": "Alto de ventana",
     "settings.decreaseWidth": "Reducir ancho",
     "settings.increaseWidth": "Aumentar ancho",
     "settings.decreaseHeight": "Reducir alto",

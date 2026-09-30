@@ -25,6 +25,8 @@ export interface TabsProps<V extends string = string> {
   /** horizontal: a brass rail under the selected tab. vertical (Settings nav): a rail on the left. */
   orientation?: "horizontal" | "vertical";
   className?: string;
+  /** An extra class on every tab (a screen's hook for its tests). */
+  tabClassName?: string;
 }
 
 export const tabId = (prefix: string, value: string) => `${prefix}-tab-${value}`;
@@ -43,6 +45,7 @@ export function Tabs<V extends string = string>({
   label,
   orientation = "horizontal",
   className,
+  tabClassName,
 }: TabsProps<V>) {
   const refs = useRef<Array<HTMLButtonElement | null>>([]);
   const current = tabs.findIndex((t) => t.value === value);
@@ -88,7 +91,7 @@ export function Tabs<V extends string = string>({
           aria-controls={t.value === value ? tabPanelId(idPrefix, t.value) : undefined}
           tabIndex={i === current ? 0 : -1}
           disabled={t.disabled}
-          className="h-tab"
+          className={cx("h-tab", tabClassName)}
           onClick={() => t.value !== value && onChange(t.value)}
           onKeyDown={(e) => onKeyDown(e, i)}
         >
