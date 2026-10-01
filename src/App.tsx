@@ -1355,7 +1355,7 @@ function AppContent() {
         )}
         {ui.searchPanelOpen && !ui.flowMode && !activePluginPanel && (
           <Suspense fallback={null}>
-            <SearchPanel visible={ui.searchPanelOpen} />
+            <SearchPanel visible={ui.searchPanelOpen} onAddProject={() => setProjectPickerOpen(true)} />
           </Suspense>
         )}
         {activePluginPanel && !ui.flowMode && (() => {

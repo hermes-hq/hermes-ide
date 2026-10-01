@@ -6,6 +6,7 @@ import "../styles/components/MemorySection.css";
 import { useEffect, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { classifyMemoryPath } from "../utils/memoryPaths";
+import { basename } from "../utils/paths";
 
 interface Props {
   memoryPaths: string[];
@@ -39,7 +40,7 @@ export function MemorySection({ memoryPaths }: Props) {
 
 function MemoryRow({ path, expanded, onToggle }: { path: string; expanded: boolean; onToggle: () => void }) {
   const cls = classifyMemoryPath(path);
-  const filename = path.split("/").pop() ?? path;
+  const filename = basename(path);
   return (
     <li className="memory-row">
       <button type="button" className="memory-row-header" onClick={onToggle} aria-expanded={expanded}>

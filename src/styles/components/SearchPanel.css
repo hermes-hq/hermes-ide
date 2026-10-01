@@ -211,6 +211,14 @@
   text-align: center;
 }
 
+/* No project in the session: why, and the way to add one. */
+.search-no-project {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+}
+
 .search-error {
   color: var(--red);
   background: var(--red-dim);

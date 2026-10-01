@@ -4,6 +4,7 @@ import type { SessionData } from "../types/session";
 import { useAgentUsage } from "../agent/useAgentUsage";
 import type { RateLimitInfo } from "../agent/types";
 import { useI18n } from "../i18n/I18nProvider";
+import { getAgent } from "../catalog/agentCatalog";
 
 interface UsagePanelProps {
   session: SessionData;
@@ -188,6 +189,30 @@ function RateLimitRow({ kind, info, now }: { kind: string; info: RateLimitInfo; 
   );
 }
 
+/** The agent a session runs (chosen at launch, else detected in its terminal); null for a plain shell. */
+export function usageAgentId(session: Pick<SessionData, "ai_provider" | "detected_agent">): string | null {
+  return session.ai_provider || session.detected_agent?.provider || null;
+}
+
+/** The panel's subtitle: which agent, and how it runs ("Claude Code · terminal"); "Shell" without one. */
+export function usageSubtitle(session: Pick<SessionData, "ai_provider" | "detected_agent" | "mode">, t: Translate): string {
+  const id = usageAgentId(session);
+  if (!id) return t("usage.shell");
+  const name = getAgent(id)?.name ?? id;
+  return `${name} · ${session.mode === "agent" ? t("usage.live") : t("usage.terminal")}`;
+}
+
+/** Why there is nothing to show for a session that does not run in Agent view, and what to do. */
+export function usageEmptyText(session: Pick<SessionData, "ai_provider" | "detected_agent">, t: Translate): string {
+  const id = usageAgentId(session);
+  if (!id) return t("usage.noAgent");
+  // Agent view (where usage is reported) exists for agents Hermes runs through their SDK.
+  if (getAgent(id)?.structured?.protocol === "claude-agent-sdk") {
+    return t("usage.terminalTask", { options: t("usage.options"), runsIn: t("launcher.viewLabel"), agentView: t("launcher.viewAgent") });
+  }
+  return t("usage.claudeOnly", { agent: getAgent(id)?.name ?? id });
+}
+
 export function UsagePanel({ session }: UsagePanelProps) {
   const { t } = useI18n();
   const isAgent = session.mode === "agent";
@@ -225,7 +250,7 @@ export function UsagePanel({ session }: UsagePanelProps) {
     <div className="usage-panel">
       <div className="usage-panel-header">
         <span className="usage-panel-title">{t("usage.title")}</span>
-        <span className="usage-panel-subtitle">claude · {t("usage.live")}</span>
+        <span className="usage-panel-subtitle">{usageSubtitle(session, t)}</span>
       </div>
 
       <div className="usage-panel-body">
@@ -233,7 +258,7 @@ export function UsagePanel({ session }: UsagePanelProps) {
           <div className="usage-empty">
             <span className="usage-empty-glyph" aria-hidden="true">∅</span>
             <span className="usage-empty-text">
-              {t("usage.agentOnly")}
+              {usageEmptyText(session, t)}
             </span>
           </div>
         )}

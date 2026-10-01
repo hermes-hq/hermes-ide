@@ -23,7 +23,8 @@
   border-radius: var(--radius-pill);
   border: 1px solid var(--accent-dim);
   background: var(--accent-dim);
-  color: var(--accent);
+  /* The link ink, not --accent: 4.5:1 on the tint in the light themes too. */
+  color: var(--link-fg);
   cursor: pointer;
   white-space: nowrap;
   font-family: var(--font-ui);
@@ -115,11 +116,12 @@
   background: var(--bg-3);
   padding: 0 5px;
   border-radius: var(--radius-pill);
-  color: var(--text-3);
+  /* --text-3 is tuned for the surfaces, not for --bg-3 under it. */
+  color: var(--text-1);
   font-weight: 600;
 }
 
 .pab-commands-trigger-active .pab-commands-count {
   background: var(--accent-dim);
-  color: var(--accent);
+  color: var(--link-fg);
 }

@@ -1,5 +1,6 @@
 import "../styles/components/ContextStatusBar.css";
 import { type ContextManager } from "../hooks/useContextState";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface ContextStatusBarProps {
   manager: ContextManager;
@@ -9,6 +10,7 @@ interface ContextStatusBarProps {
 }
 
 export function ContextStatusBar({ manager, autoApplyEnabled, onToggleAutoApply, onApply }: ContextStatusBarProps) {
+  const { t } = useI18n();
   const { injectedVersion, lifecycle, lastError, applyContext,
           tokenBudget, estimatedTokens } = manager;
 
@@ -32,27 +34,27 @@ export function ContextStatusBar({ manager, autoApplyEnabled, onToggleAutoApply,
         <div className="ctx-status-left">
           {lifecycle === 'dirty' && (
             <span className="ctx-outofsync-indicator">
-              Out of sync
+              {t("ctxPanel.outOfSync")}
             </span>
           )}
           {lifecycle === 'applying' && (
             <span className="ctx-applying-indicator">
-              Applying...
+              {t("ctxPanel.applying")}
             </span>
           )}
           {lifecycle === 'apply_failed' && (
             <span className="ctx-failed-indicator">
-              Failed
+              {t("ctxPanel.failed")}
             </span>
           )}
           {lifecycle === 'clean' && injectedVersion > 0 && (
             <span className="ctx-insync-indicator">
-              In sync
+              {t("ctxPanel.inSync")}
             </span>
           )}
           {lifecycle === 'clean' && injectedVersion === 0 && (
             <span className="ctx-insync-indicator">
-              Ready
+              {t("ctxPanel.ready")}
             </span>
           )}
         </div>
@@ -62,7 +64,7 @@ export function ContextStatusBar({ manager, autoApplyEnabled, onToggleAutoApply,
             onClick={() => { (onApply || applyContext)().catch(console.error); }}
             disabled={lifecycle === 'clean' || lifecycle === 'applying'}
           >
-            {isApplying ? "Applying..." : "Apply Context"}
+            {isApplying ? t("ctxPanel.applying") : t("ctxPanel.apply")}
           </button>
         </div>
       </div>
@@ -79,7 +81,7 @@ export function ContextStatusBar({ manager, autoApplyEnabled, onToggleAutoApply,
           />
         </div>
         <span className={`ctx-budget-label ${budgetCritical ? "ctx-budget-critical" : budgetWarning ? "ctx-budget-warning" : ""}`}>
-          ~{estimatedTokens.toLocaleString()} / {tokenBudget.toLocaleString()} tokens ({budgetPercent}%)
+          {t("ctxPanel.budget", { used: estimatedTokens.toLocaleString(), budget: tokenBudget.toLocaleString(), percent: budgetPercent })}
         </span>
       </div>
 
@@ -99,7 +101,7 @@ export function ContextStatusBar({ manager, autoApplyEnabled, onToggleAutoApply,
             onChange={onToggleAutoApply}
             className="ctx-autoapply-checkbox"
           />
-          Auto-apply on execution
+          {t("ctxPanel.autoApply")}
         </label>
       </div>
     </div>

@@ -10,6 +10,7 @@ import { TabPanel, Tabs } from "./ui/Tabs";
 import { lazyView } from "../utils/lazyView";
 import { useResizablePanel } from "../hooks/useResizablePanel";
 import { useTextContextMenu } from "../hooks/useTextContextMenu";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { open, save } from "@tauri-apps/plugin-dialog";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { LogicalSize } from "@tauri-apps/api/dpi";
@@ -37,6 +38,7 @@ import { normalizeUpdateChannel } from "../api/updater";
 import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
 import { visibleShortcutGroups } from "../utils/shortcuts";
 import { AgentDoctor } from "./AgentDoctor";
+import { ensureDoctor, useAgentDoctor } from "../launcher/doctorStore";
 import { useI18n } from "../i18n/I18nProvider";
 import { setStatusStripEnabled } from "../statusStrip/preference";
 import {
@@ -150,16 +152,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
   const programmaticResize = useRef(false);
   const applyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopImmediatePropagation();
-        onClose();
-      }
-    };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [onClose]);
+  // The keyboard is Settings' while it is open (not the terminal behind
+  // it); Esc closes it unless a field inside handled that Esc first.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef, { onEscape: onClose, initialFocus: '.settings-tab[aria-selected="true"]' });
 
   useEffect(() => {
     getSettings()
@@ -286,7 +282,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
       aria-modal="true"
       aria-label={t("settings.title")}
     >
-      <div className="settings-panel" onClick={(e) => e.stopPropagation()} style={{ width: panelWidth, height: panelHeight }}>
+      <div ref={panelRef} className="settings-panel" onClick={(e) => e.stopPropagation()} style={{ width: panelWidth, height: panelHeight }}>
         <div className="settings-resize-handle" onMouseDown={onResizeWidthStart} />
         <div className="settings-resize-handle-bottom" onMouseDown={onResizeHeightStart} />
         <div className="settings-header">
@@ -919,6 +915,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
               <div className="settings-section settings-agents-doctor">
                 <p className="settings-hint">{t("settings.agentsDoctorHint")}</p>
                 <AgentDoctor
+                  // Settings > Agents has one "Check again" (above the cards), which checks this too.
+                  showRecheck={!isFeatureFlagEnabled("agentCatalog")}
                   onSignIn={(agentId) => {
                     onSignInAgent?.(agentId);
                     onClose();
@@ -1076,6 +1074,20 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
     updateSetting(AI_AGENT_PREFIXES_KEY, serializeAgentPrefixes(next));
   };
 
+  // A row per installed agent (and per agent that has a prefix already);
+  // the rest of the catalog behind "Show all agents". Until the doctor has
+  // answered, every agent is listed.
+  const { rows: doctorRows } = useAgentDoctor();
+  useEffect(() => {
+    ensureDoctor();
+  }, []);
+  const [showAll, setShowAll] = useState(false);
+  const allAgents = listAgents();
+  const installedIds = doctorRows ? new Set(doctorRows.filter((r) => r.installed).map((r) => r.id)) : null;
+  const shownAgents =
+    showAll || !installedIds ? allAgents : allAgents.filter((p) => installedIds.has(p.id) || (prefixes[p.id] ?? "").trim() !== "");
+  const hiddenCount = allAgents.length - shownAgents.length;
+
   return (
     <div className="settings-section">
       <p className="settings-hint">
@@ -1118,7 +1130,7 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
 
       <fieldset className="settings-agent-prefix-grid">
         <legend className="settings-agent-prefix-legend">{t("settings.agents")}</legend>
-        {listAgents().map((p) => {
+        {shownAgents.map((p) => {
           const value = prefixes[p.id] ?? "";
           const inputId = `agent-prefix-${p.id}`;
           const hintId = `agent-prefix-hint-${p.id}`;
@@ -1165,6 +1177,12 @@ function AiAgentSettingsTab({ settings, updateSetting }: AiAgentSettingsTabProps
             </div>
           );
         })}
+        {shownAgents.length === 0 && <p className="settings-hint">{t("settings.noAgentsInstalled")}</p>}
+        {hiddenCount > 0 && (
+          <Button size="sm" variant="link" className="settings-agent-prefix-show-all" onClick={() => setShowAll(true)}>
+            {t("settings.showAllAgents", { count: hiddenCount })}
+          </Button>
+        )}
       </fieldset>
     </div>
   );

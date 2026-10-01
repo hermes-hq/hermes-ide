@@ -120,9 +120,9 @@ describe("AgentDoctor", () => {
     // Installed agents first.
     expect([...document.querySelectorAll("tr[data-agent-id]")].map((r) => r.getAttribute("data-agent-id"))).toEqual(["claude", "codex", "aider", "gemini"]);
 
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude Code" }));
     expect(onSignIn).toHaveBeenCalledWith("claude");
-    fireEvent.click(screen.getByRole("button", { name: "Copy install command" }));
+    fireEvent.click(screen.getByRole("button", { name: "Copy install command for Gemini CLI" }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith("npm install -g @google/gemini-cli"));
   });
 
@@ -262,7 +262,7 @@ describe("SetupWizard", () => {
   it("Sign in steps aside until Back to setup, which checks again", async () => {
     h.doctor = [row("claude", "Claude Code", { signed_in: "no" })];
     const { onSignIn } = await openWizard();
-    fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
+    fireEvent.click(screen.getByRole("button", { name: "Sign in to Claude Code" }));
     expect(onSignIn).toHaveBeenCalledWith("claude");
     expect(document.querySelector(".setup-dialog")).toBeNull();
     expect(screen.getByText(/Sign in to Claude Code in the terminal/)).toBeInTheDocument();
