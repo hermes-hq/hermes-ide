@@ -2,6 +2,7 @@ import "../styles/components/EmptyState.css";
 import { SessionHistoryEntry } from "../state/SessionContext";
 import { shortcutLabel } from "../utils/keymap";
 import { useI18n } from "../i18n/I18nProvider";
+import { basename } from "../utils/paths";
 
 interface EmptyStateProps {
   recentSessions: SessionHistoryEntry[];
@@ -152,7 +153,7 @@ export function EmptyState({ recentSessions, onNew, onOpenPalette, onToggleConte
                             <span className="es-recent-chips">
                               {entry.shell && (
                                 <span className="es-recent-chip">
-                                  {entry.shell.split("/").pop() || entry.shell}
+                                  {basename(entry.shell)}
                                 </span>
                               )}
                             </span>

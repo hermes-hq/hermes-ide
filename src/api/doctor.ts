@@ -16,6 +16,8 @@ export interface DoctorRow {
   retired: boolean;
   retired_note: string | null;
   beta: boolean;
+  /** Installed but it cannot start: the first line it printed (its sign-in is then "unknown"). */
+  broken?: string | null;
 }
 
 /** Ask every catalog agent CLI this build shows for its version and sign-in state. */

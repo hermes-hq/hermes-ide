@@ -67,7 +67,7 @@ describe("summaries", () => {
 	it("words what can be chosen at launch", () => {
 		expect(modelsSummary(claude(), t)).toBe("Models: default, opus, sonnet, haiku, opusplan");
 		expect(modelsSummary(claude({ modelSource: "cli-list", agentName: "Codex", models: [{ id: "default", label: "D", efforts: [], available: true }, { id: "a", label: "A", efforts: [], available: false }, { id: "b", label: "B", efforts: [], available: true }] }), t)).toBe(
-			"Models: from Codex's own list (2) · 1 refused by this account",
+			"Models: from Codex's own list (2) · 1 refused by the default profile",
 		);
 		expect(modelsSummary(claude({ modelSource: "free-text", models: [claude().models[0]] }), t)).toBe("Models: default, or type a name");
 		expect(effortSummary(claude(), t)).toBe("Effort: low · medium · high · xhigh · max");
@@ -134,6 +134,105 @@ describe("AgentsSettings", () => {
 		await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("add_agent_account", { agentId: "claude", label: "Work" }));
 		await waitFor(() => expect(onSignInAccount).toHaveBeenCalledWith("claude", "work"));
 		await waitFor(() => expect(r.container.querySelector('[data-account-id="work"]')).toHaveTextContent("Work · not signed in · profile ~/.claude-work"));
+	});
+
+	it("a name that is taken is refused before anything is created", async () => {
+		accounts = [...accounts, { id: "work", label: "Work", detail: "Max plan", signedIn: true, signInState: "signed-in", profileEnv: { name: "CLAUDE_CONFIG_DIR", value: "/home-fixture/.claude-work" } }];
+		const r = render(
+			<I18nProvider>
+				<AgentsSettings />
+			</I18nProvider>,
+		);
+		fireEvent.click(await r.findByText("+ Add account (opens a terminal to sign in)"));
+		for (const [name, label] of [["work", "Work"], [" WORK ", "Work"], ["default", "Default profile"], ["Default Profile", "Default profile"]]) {
+			fireEvent.change(r.getByLabelText("Account name, e.g. Work"), { target: { value: name } });
+			expect(r.getByRole("alert")).toHaveTextContent(`You already have a Claude Code account named ${label}`);
+			expect(r.getByText("Add and sign in").closest("button")).toBeDisabled();
+		}
+		fireEvent.change(r.getByLabelText("Account name, e.g. Work"), { target: { value: "Personal" } });
+		expect(r.queryByRole("alert")).toBeNull();
+		// Esc closes the field only; it does not reach Settings.
+		const outside = vi.fn();
+		document.addEventListener("keydown", outside);
+		fireEvent.keyDown(r.getByLabelText("Account name, e.g. Work"), { key: "Escape" });
+		document.removeEventListener("keydown", outside);
+		expect(outside).not.toHaveBeenCalled();
+		expect(r.queryByLabelText("Account name, e.g. Work")).toBeNull();
+		expect(h.invoke).not.toHaveBeenCalledWith("add_agent_account", expect.anything());
+	});
+
+	it("Remove asks first, says what stays on disk, and can sign the profile out", async () => {
+		accounts = [...accounts, { id: "work", label: "Work", detail: "Max plan", signedIn: true, signInState: "signed-in", profileEnv: { name: "CLAUDE_CONFIG_DIR", value: "/home-fixture/.claude-work" } }];
+		const r = render(
+			<I18nProvider>
+				<AgentsSettings />
+			</I18nProvider>,
+		);
+		fireEvent.click(await r.findByRole("button", { name: "Remove Work (Claude Code)" }));
+		const confirm = r.getByRole("alertdialog");
+		expect(confirm).toHaveTextContent(/^Remove Work from Hermes\? Its profile folder ~\/\.claude-work stays on this (Mac|computer) and is still signed in\./);
+		expect(h.invoke).not.toHaveBeenCalledWith("remove_agent_account", expect.anything());
+		// Esc cancels the removal only.
+		fireEvent.keyDown(confirm, { key: "Escape" });
+		expect(r.queryByRole("alertdialog")).toBeNull();
+		fireEvent.click(r.getByRole("button", { name: "Remove Work (Claude Code)" }));
+		fireEvent.click(r.getByText("Remove and sign out"));
+		await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("remove_agent_account", { agentId: "claude", accountId: "work", signOut: true }));
+	});
+
+	it("re-adding a name whose folder is still there says it reuses it", async () => {
+		h.invoke.mockImplementation(async (cmd: string) => {
+			if (cmd === "list_agent_capabilities") return [claude({ accounts }), copilot];
+			if (cmd === "list_launch_presets") return [];
+			if (cmd === "add_agent_account") {
+				const a = { id: "work", label: "Work", detail: "Max plan", signedIn: true, signInState: "signed-in", profileEnv: { name: "CLAUDE_CONFIG_DIR", value: "/home-fixture/.claude-work" } };
+				return { account: a, reused: true, signedIn: true };
+			}
+			return undefined;
+		});
+		const onSignInAccount = vi.fn();
+		const r = render(
+			<I18nProvider>
+				<AgentsSettings onSignInAccount={onSignInAccount} />
+			</I18nProvider>,
+		);
+		fireEvent.click(await r.findByText("+ Add account (opens a terminal to sign in)"));
+		fireEvent.change(r.getByLabelText("Account name, e.g. Work"), { target: { value: "Work" } });
+		fireEvent.click(r.getByText("Add and sign in"));
+		expect(await r.findByRole("status")).toHaveTextContent("Using the existing profile ~/.claude-work (already signed in)");
+		expect(onSignInAccount).not.toHaveBeenCalled();
+	});
+
+	it("Esc while renaming a preset cancels the rename only; a later good rename clears an earlier error", async () => {
+		const r = render(
+			<I18nProvider>
+				<AgentsSettings />
+			</I18nProvider>,
+		);
+		fireEvent.click(await r.findByText("Rename"));
+		const field = r.getByLabelText("Preset name");
+		fireEvent.change(field, { target: { value: "Abandoned name" } });
+		const outside = vi.fn();
+		document.addEventListener("keydown", outside);
+		fireEvent.keyDown(field, { key: "Escape" });
+		document.removeEventListener("keydown", outside);
+		expect(outside).not.toHaveBeenCalled();
+		expect(r.queryByLabelText("Preset name")).toBeNull();
+		expect(r.getByText("Deep")).toBeInTheDocument();
+		await waitFor(() => expect(document.activeElement).toBe(r.getByText("Rename").closest("button")));
+		// Opened again, the field starts from the saved name.
+		fireEvent.click(r.getByText("Rename"));
+		expect(r.getByLabelText("Preset name")).toHaveValue("Deep");
+		h.invoke.mockImplementationOnce(async () => {
+			throw new Error("A preset needs a name");
+		});
+		fireEvent.change(r.getByLabelText("Preset name"), { target: { value: " " } });
+		fireEvent.keyDown(r.getByLabelText("Preset name"), { key: "Enter" });
+		expect(await r.findByRole("alert")).toHaveTextContent("A preset needs a name");
+		fireEvent.change(r.getByLabelText("Preset name"), { target: { value: "Deeper" } });
+		fireEvent.keyDown(r.getByLabelText("Preset name"), { key: "Enter" });
+		await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("rename_launch_preset", { id: "p1", name: "Deeper" }));
+		await waitFor(() => expect(r.queryByRole("alert")).toBeNull());
 	});
 
 	it("presets: rename and delete call the backend", async () => {

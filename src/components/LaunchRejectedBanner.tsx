@@ -58,9 +58,11 @@ export function LaunchRejectedBanner({ session, onSignIn }: LaunchRejectedBanner
 	}, [visible, agentId, session.agent_launch?.accountId]);
 
 	const agentName = getAgent(agentId)?.name ?? agentId;
+	// Where the CLI keeps its own default model (Codex: ~/.codex/config.toml).
+	const configPath = getAgent(agentId)?.setup?.settings.global[0] ?? null;
 	const view = useMemo(
-		() => (rejection ? rejectionView(rejection, agentName, session.agent_launch, caps, t("launchRejected.defaultAccount")) : null),
-		[rejection, agentName, session.agent_launch, caps, t],
+		() => (rejection ? rejectionView(rejection, agentName, session.agent_launch, caps, t("launchRejected.defaultAccount"), configPath) : null),
+		[rejection, agentName, session.agent_launch, caps, t, configPath],
 	);
 	if (!visible || !rejection || !view || !ready) return null;
 

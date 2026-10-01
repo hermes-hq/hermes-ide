@@ -2,8 +2,8 @@
 // Behavioural tests for the rig's accessibility audit: real DOM in, the
 // violations it reports out. Each rule has a passing and a failing case so
 // the audit is shown to be able to fail.
-import { afterEach, describe, expect, it } from "vitest";
-import { a11yAudit, auditA11y } from "./a11y.mjs";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { a11yAudit, auditA11y, auditContrast, contrastAudit } from "./a11y.mjs";
 
 function mount(html) {
   const root = document.createElement("div");
@@ -83,5 +83,53 @@ describe("auditA11y", () => {
     const found = await a11yAudit(bridge, "#surface");
     expect(found).toEqual([{ rule: "name", element: "button" }]);
     expect(sent).toContain('document.querySelector("#surface")');
+  });
+});
+
+describe("auditContrast", () => {
+  // jsdom lays nothing out: every element gets a box so it counts as shown.
+  const box = { width: 100, height: 20, top: 0, left: 0, right: 100, bottom: 20, x: 0, y: 0, toJSON() {} };
+  let restore;
+  beforeEach(() => {
+    const original = Element.prototype.getBoundingClientRect;
+    Element.prototype.getBoundingClientRect = () => box;
+    restore = () => (Element.prototype.getBoundingClientRect = original);
+  });
+  afterEach(() => restore());
+
+  it("passes dark text on white and reports light-blue text on white with its ratio", () => {
+    const root = mount(`
+      <div style="background-color: rgb(255, 255, 255)">
+        <span class="ok" style="color: rgb(58, 58, 60); font-size: 12px">Readable</span>
+        <span class="low" style="color: rgb(40, 167, 69); font-size: 11px">Exact status</span>
+      </div>`);
+    const found = auditContrast(root);
+    expect(found.map((f) => f.cls)).toEqual(["low"]);
+    expect(found[0].ratio).toBeCloseTo(3.13, 1);
+  });
+
+  it("blends a translucent background and the text's opacity", () => {
+    const root = mount(`
+      <div style="background-color: rgb(255, 255, 255)">
+        <span class="faded" style="color: rgb(0, 0, 0); opacity: 0.3; font-size: 12px">Faded</span>
+      </div>`);
+    expect(auditContrast(root).map((f) => f.cls)).toEqual(["faded"]);
+  });
+
+  it("holds large text to 3:1 and skips disabled controls and the terminal", () => {
+    const root = mount(`
+      <div style="background-color: rgb(255, 255, 255)">
+        <span class="big" style="color: rgb(40, 167, 69); font-size: 24px">Large</span>
+        <button disabled><span style="color: rgb(200, 200, 200)">Off</span></button>
+        <div class="xterm"><span style="color: rgb(250, 250, 250)">prompt</span></div>
+      </div>`);
+    expect(auditContrast(root)).toEqual([]);
+  });
+
+  it("contrastAudit runs the same audit in the page", async () => {
+    mount(`<div id="surface" style="background-color: rgb(255, 255, 255)"><span class="low" style="color: rgb(10, 132, 255)">Compose</span></div>`);
+    const bridge = { eval: async (script) => new Function(`return (async () => { ${script} })();`)() };
+    const found = await contrastAudit(bridge, "#surface");
+    expect(found.map((f) => f.cls)).toEqual(["low"]);
   });
 });

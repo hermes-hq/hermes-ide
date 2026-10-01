@@ -1,7 +1,9 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useSession } from "../state/SessionContext";
 import { searchProject } from "../api/git";
-import { getSessionProjects } from "../api/projects";
+import { useSessionProjects } from "../hooks/useSessionProjects";
+import { useI18n } from "../i18n/I18nProvider";
+import { Button } from "./ui";
 import type { SearchResponse, SearchFileResult } from "../types/git";
 import "../styles/components/SearchPanel.css";
 import { useContextMenu, buildSearchResultMenuItems } from "../hooks/useContextMenu";
@@ -21,10 +23,24 @@ export function highlightMatch(
   };
 }
 
-export function formatResultCount(total: number, fileCount: number): string {
+type Translate = (key: string, values?: Record<string, string | number>) => string;
+
+export function formatResultCount(total: number, fileCount: number, t?: Translate): string {
+  if (t) {
+    const results = t(total === 1 ? "search.result" : "search.results", { count: total });
+    const files = t(fileCount === 1 ? "search.file" : "search.files", { count: fileCount });
+    return t("search.resultCount", { results, files });
+  }
   const rWord = total === 1 ? "result" : "results";
   const fWord = fileCount === 1 ? "file" : "files";
   return `${total} ${rWord} in ${fileCount} ${fWord}`;
+}
+
+/** What the panel needs before it can search: a session, then a project in it. */
+export function searchBlocker(sessionId: string | null, projectId: string | null): "no-session" | "no-project" | null {
+  if (!sessionId) return "no-session";
+  if (!projectId) return "no-project";
+  return null;
 }
 
 export function debounce<T extends (...args: any[]) => void>(fn: T, ms: number): T {
@@ -40,9 +56,12 @@ export function debounce<T extends (...args: any[]) => void>(fn: T, ms: number):
 
 interface SearchPanelProps {
   visible: boolean;
+  /** Opens the picker that adds a project to the active session. */
+  onAddProject?: () => void;
 }
 
-export function SearchPanel({ visible }: SearchPanelProps) {
+export function SearchPanel({ visible, onAddProject }: SearchPanelProps) {
+  const { t } = useI18n();
   const { state } = useSession();
   const [query, setQuery] = useState("");
   const [isRegex, setIsRegex] = useState(false);
@@ -51,7 +70,6 @@ export function SearchPanel({ visible }: SearchPanelProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [collapsedFiles, setCollapsedFiles] = useState<Set<string>>(new Set());
-  const [projectId, setProjectId] = useState<string | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const [width, setWidth] = useState(320);
   const resizing = useRef(false);
@@ -70,23 +88,11 @@ export function SearchPanel({ visible }: SearchPanelProps) {
   const { onContextMenu: textContextMenu } = useTextContextMenu();
 
   const sessionId = state.activeSessionId;
-
-  // Load primary project for active session
-  useEffect(() => {
-    if (!sessionId) {
-      setProjectId(null);
-      return;
-    }
-    getSessionProjects(sessionId)
-      .then((projects) => {
-        if (projects.length > 0) {
-          setProjectId(projects[0].id);
-        } else {
-          setProjectId(null);
-        }
-      })
-      .catch(() => setProjectId(null));
-  }, [sessionId]);
+  // The session's primary project; follows a project added or removed
+  // while the panel is open.
+  const { projects } = useSessionProjects(sessionId);
+  const projectId = projects[0]?.id ?? null;
+  const blocker = searchBlocker(sessionId, projectId);
 
   // Auto-focus input on mount
   useEffect(() => {
@@ -174,12 +180,14 @@ export function SearchPanel({ visible }: SearchPanelProps) {
     <div className="search-panel" style={{ width }}>
       <div className="search-panel-resize-handle" onMouseDown={onResizeStart} />
       <div className="search-toolbar">
-        <div className="search-panel-title">Search</div>
+        <div className="search-panel-title">{t("search.title")}</div>
         <input
           ref={inputRef}
           className="search-input"
           type="text"
-          placeholder="Search files…"
+          placeholder={t("search.placeholder")}
+          aria-label={t("search.placeholder")}
+          disabled={blocker !== null}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           spellCheck={false}
@@ -189,17 +197,17 @@ export function SearchPanel({ visible }: SearchPanelProps) {
           <button
             className={`search-toggle${caseSensitive ? " search-toggle-active" : ""}`}
             onClick={() => setCaseSensitive((v) => !v)}
-            title="Match Case"
-            aria-label="Match case"
+            title={t("search.matchCase")}
+            aria-label={t("search.matchCase")}
             aria-pressed={caseSensitive}
           >
-            Aa
+            <span aria-hidden="true">{"Aa"}</span>
           </button>
           <button
             className={`search-toggle${isRegex ? " search-toggle-active" : ""}`}
             onClick={() => setIsRegex((v) => !v)}
-            title="Use Regular Expression"
-            aria-label="Use regular expression"
+            title={t("search.regex")}
+            aria-label={t("search.regex")}
             aria-pressed={isRegex}
           >
             .*
@@ -208,25 +216,33 @@ export function SearchPanel({ visible }: SearchPanelProps) {
       </div>
 
       {/* Summary */}
-      {(!sessionId || !projectId) && (
-        <div className="search-no-session">Open a session to search</div>
+      {blocker === "no-session" && <div className="search-no-session">{t("search.noSession")}</div>}
+      {blocker === "no-project" && (
+        <div className="search-no-session search-no-project">
+          <span>{t("search.noProject")}</span>
+          {onAddProject && (
+            <Button size="sm" className="search-add-project" onClick={onAddProject}>
+              {t("search.addProject")}
+            </Button>
+          )}
+        </div>
       )}
       {sessionId && projectId && loading && (
-        <div className="search-summary">Searching…</div>
+        <div className="search-summary">{t("search.searching")}</div>
       )}
       {sessionId && projectId && !loading && error && (
         <div className="search-error">{error}</div>
       )}
       {sessionId && projectId && !loading && !error && results && (
         <div className="search-summary">
-          {formatResultCount(results.total_matches, results.results.length)}
+          {formatResultCount(results.total_matches, results.results.length, t)}
         </div>
       )}
       {sessionId && projectId && !loading && !error && results && results.truncated && (
-        <div className="search-truncated">Results capped at 500. Narrow your search.</div>
+        <div className="search-truncated">{t("search.truncated", { count: 500 })}</div>
       )}
       {sessionId && projectId && !loading && !error && query.length >= 2 && results && results.total_matches === 0 && (
-        <div className="search-empty">No results found</div>
+        <div className="search-empty">{t("search.noResults")}</div>
       )}
 
       {/* Results */}

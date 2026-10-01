@@ -20,16 +20,8 @@
   margin: 0;
 }
 
-.agents-settings-refresh,
-.agents-settings-add-confirm {
-  padding: var(--space-0-5) var(--space-3);
-  border-radius: var(--radius-sm);
-  border: var(--control-border-width) solid var(--border);
-  background: var(--bg-2);
-  color: var(--text-1);
-  font-size: var(--text-xs);
-  cursor: pointer;
-  white-space: nowrap;
+.agents-settings-refresh {
+  flex-shrink: 0;
 }
 
 .agents-settings-card {
@@ -71,14 +63,15 @@
   font-size: var(--text-xs);
 }
 
+/* The ink variants: text colours that keep 4.5:1 on the light themes too. */
 .agents-settings-verified.ok,
 .agents-settings-status.ok {
-  color: var(--success);
+  color: var(--success-ink);
 }
 
 .agents-settings-verified.no,
 .agents-settings-status.no {
-  color: var(--warning);
+  color: var(--warning-ink);
 }
 
 .agents-settings-account {
@@ -92,14 +85,28 @@
   color: var(--text-2);
 }
 
-.agents-settings-link {
-  border: none;
-  background: transparent;
-  padding: 0;
-  color: var(--accent);
+/* Remove: what stays on disk is said before anything happens. */
+.agents-settings-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1-5);
+  flex: 1 1 100%;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  border: var(--control-border-width) solid var(--border);
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
+.agents-settings-confirm-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-1-5);
+}
+
+.agents-settings-notice {
+  color: var(--text-2);
   font-size: var(--text-xs);
-  cursor: pointer;
-  text-align: left;
 }
 
 .agents-settings-add-form {
@@ -132,7 +139,7 @@
 }
 
 .agents-settings-error {
-  color: var(--danger, var(--warning));
+  color: var(--danger-fg, var(--danger));
   font-size: var(--text-xs);
 }
 

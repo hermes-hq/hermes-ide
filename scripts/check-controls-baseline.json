@@ -23,7 +23,6 @@
     "src/agent/WorkingFootline.tsx": 1,
     "src/components/ActivityBar.tsx": 4,
     "src/components/AgentContextPanel.tsx": 2,
-    "src/components/AgentsSettings.tsx": 9,
     "src/components/AskUserQuestionCard.tsx": 2,
     "src/components/CliCommandBanner.tsx": 2,
     "src/components/CommandsPopover.tsx": 1,

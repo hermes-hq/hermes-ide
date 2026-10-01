@@ -10,7 +10,7 @@ const REPO_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const RULE = "hermes/no-untranslated-strings";
 
 // The allowlist may only shrink. Lower this when a file is fixed; never raise it.
-const ALLOWLIST_CEILING = 79;
+const ALLOWLIST_CEILING = 75;
 
 async function lint(code: string, filePath: string, eslint = new ESLint({ cwd: REPO_ROOT })) {
   const [result] = await eslint.lintText(code, { filePath });

@@ -13,10 +13,10 @@
 //   aria-hidden-focus nothing inside aria-hidden="true" can take focus;
 //   labelledby        every aria-labelledby id resolves to an element.
 //
-// Not covered here: colour contrast and reduced motion (neither can be
-// computed reliably from the DOM of a running webview without driving the
-// OS setting), and focus order/visibility, which scenarios prove by
-// pressing keys on the CI runners.
+// Text contrast as painted is `auditContrast` / `contrastAudit` below. Not
+// covered here: reduced motion (it cannot be driven without the OS
+// setting), and focus order/visibility, which scenarios prove by pressing
+// keys on the CI runners.
 //
 // `auditA11y` must stay self-contained — `a11yAudit` sends its source text
 // into the webview, so it cannot close over anything in this module.
@@ -136,4 +136,100 @@ export function auditA11y(root) {
  */
 export function a11yAudit(bridge, selector) {
   return bridge.eval(`return (${auditA11y.toString()})(document.querySelector(${JSON.stringify(selector)}));`);
+}
+
+// ─── Text contrast (WCAG AA) ────────────────────────────────────────────
+//
+// What a person sees on screen, not the tokens (scripts/contrast-audit.mjs
+// checks those): every visible text under `root`, its computed colour (with
+// the opacity of its ancestors) blended on the solid background it is drawn
+// on, against 4.5:1 (3:1 for large text: 24 px, or 18.66 px bold).
+// Skipped: the terminal (it paints its own colours), disabled controls
+// (exempt, as WCAG allows), text over an image (no single background).
+// Self-contained for the same reason as `auditA11y`.
+
+/**
+ * Texts under `root` below WCAG AA, lowest ratio first.
+ * @param {Element} root
+ * @param {number} [limit]
+ * @returns {{ text: string, ratio: number, size: number, cls: string }[]}
+ */
+export function auditContrast(root, limit = 30) {
+  if (!root) return [{ text: "(no element matched)", ratio: 0, size: 0, cls: "" }];
+  const view = root.ownerDocument.defaultView;
+  const parse = (c) => {
+    const m = /rgba?\(([^)]+)\)/.exec(c || "");
+    if (!m) return null;
+    const p = m[1].split(/[\s,/]+/).filter(Boolean).map(Number);
+    return { r: p[0], g: p[1], b: p[2], a: p.length > 3 ? p[3] : 1 };
+  };
+  const lum = ({ r, g, b }) => {
+    const f = (v) => {
+      v /= 255;
+      return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+    };
+    return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+  };
+  const blend = (fg, bg) => ({ r: fg.r * fg.a + bg.r * (1 - fg.a), g: fg.g * fg.a + bg.g * (1 - fg.a), b: fg.b * fg.a + bg.b * (1 - fg.a), a: 1 });
+  const backgroundOf = (el) => {
+    const layers = [];
+    for (let n = el; n; n = n.parentElement) {
+      const s = view.getComputedStyle(n);
+      if (s.backgroundImage && s.backgroundImage !== "none" && !/gradient/.test(s.backgroundImage)) return null;
+      const c = parse(s.backgroundColor);
+      if (c && c.a > 0) {
+        layers.push(c);
+        if (c.a >= 1) break;
+      }
+    }
+    let bg = { r: 255, g: 255, b: 255, a: 1 };
+    for (let i = layers.length - 1; i >= 0; i--) bg = blend(layers[i], bg);
+    return bg;
+  };
+  const opacityOf = (el) => {
+    let o = 1;
+    for (let n = el; n; n = n.parentElement) o *= Number(view.getComputedStyle(n).opacity);
+    return o;
+  };
+  const out = [];
+  const seen = new Set();
+  const walker = root.ownerDocument.createTreeWalker(root, 4 /* NodeFilter.SHOW_TEXT */);
+  while (walker.nextNode()) {
+    const node = walker.currentNode;
+    const text = node.textContent.trim();
+    if (!text) continue;
+    const el = node.parentElement;
+    if (!el || seen.has(el)) continue;
+    seen.add(el);
+    if (el.closest(".xterm") || el.closest("button:disabled, [aria-disabled=true]")) continue;
+    const rect = el.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) continue;
+    const s = view.getComputedStyle(el);
+    if (s.visibility === "hidden" || s.display === "none") continue;
+    const bg = backgroundOf(el);
+    let fg = parse(s.color);
+    if (!bg || !fg) continue;
+    const op = opacityOf(el);
+    if (op < 0.1) continue;
+    fg = blend({ ...fg, a: fg.a * op }, bg);
+    const a = lum(fg);
+    const b = lum(bg);
+    const ratio = (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05);
+    const size = parseFloat(s.fontSize);
+    const large = size >= 24 || (Number(s.fontWeight) >= 700 && size >= 18.66);
+    if (ratio < (large ? 3 : 4.5)) {
+      out.push({ text: text.slice(0, 40), ratio: Math.round(ratio * 100) / 100, size, cls: String(el.className || "").slice(0, 60) });
+    }
+  }
+  return out.sort((x, y) => x.ratio - y.ratio).slice(0, limit);
+}
+
+/**
+ * Run `auditContrast` inside the app on the element `selector` matches
+ * (the whole page when `selector` is null).
+ * @returns {Promise<{ text: string, ratio: number, size: number, cls: string }[]>}
+ */
+export function contrastAudit(bridge, selector = null, limit = 30) {
+  const root = selector ? `document.querySelector(${JSON.stringify(selector)})` : "document.body";
+  return bridge.eval(`return (${auditContrast.toString()})(${root}, ${Number(limit)});`);
 }

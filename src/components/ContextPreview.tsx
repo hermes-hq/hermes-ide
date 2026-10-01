@@ -1,12 +1,14 @@
 import "../styles/components/ContextPreview.css";
 import { useState, useCallback, useRef, useEffect } from "react";
 import { type ContextManager } from "../hooks/useContextState";
+import { useI18n } from "../i18n/I18nProvider";
 
 interface ContextPreviewProps {
   manager: ContextManager;
 }
 
 export function ContextPreview({ manager }: ContextPreviewProps) {
+  const { t } = useI18n();
   const [expanded, setExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const [showInjected, setShowInjected] = useState(false);
@@ -46,11 +48,12 @@ export function ContextPreview({ manager }: ContextPreviewProps) {
       <button
         className="ctx-preview-toggle"
         onClick={() => setExpanded(!expanded)}
-        title="Toggle context preview"
+        title={t("ctxPanel.togglePreview")}
+        aria-expanded={expanded}
       >
-        {expanded ? "\u25BE" : "\u25B8"} Context Preview
+        {expanded ? "\u25BE" : "\u25B8"} {t("ctxPanel.preview")}
         {isDirty && (
-          <span className="ctx-preview-outofsync-note">(not yet applied)</span>
+          <span className="ctx-preview-outofsync-note">{t("ctxPanel.notApplied")}</span>
         )}
       </button>
       {expanded && (
@@ -61,28 +64,28 @@ export function ContextPreview({ manager }: ContextPreviewProps) {
                 <button
                   className={`ctx-preview-tab ${!showInjected ? "ctx-preview-tab-active" : ""}`}
                   onClick={() => setShowInjected(false)}
-                  title="Show current context"
+                  title={t("ctxPanel.showCurrent")}
                 >
-                  Current
+                  {t("ctxPanel.current")}
                 </button>
                 <button
                   className={`ctx-preview-tab ${showInjected ? "ctx-preview-tab-active" : ""}`}
                   onClick={() => setShowInjected(true)}
-                  title="Show injected context"
+                  title={t("ctxPanel.showInjected")}
                 >
-                  Injected
+                  {t("ctxPanel.injected")}
                 </button>
               </div>
             )}
-            <button className="ctx-preview-copy" onClick={handleCopy} title="Copy context to clipboard">
-              {copied ? "Copied" : "Copy"}
+            <button className="ctx-preview-copy" onClick={handleCopy} title={t("ctxPanel.copyTitle")}>
+              {copied ? t("ctxPanel.copied") : t("ctxPanel.copy")}
             </button>
           </div>
           <pre className="ctx-preview-content">{displayContent}</pre>
           <div className="ctx-preview-charcount">
-            {charCount.toLocaleString()} chars (~{tokenEstimate.toLocaleString()} tokens)
-            {manager.tokenBudget > 0 && ` | ${budgetPercent}% of ${manager.tokenBudget.toLocaleString()} budget`}
-            {showInjected && " (injected)"}
+            {t("ctxPanel.chars", { chars: charCount.toLocaleString(), tokens: tokenEstimate.toLocaleString() })}
+            {manager.tokenBudget > 0 && ` | ${t("ctxPanel.ofBudget", { percent: budgetPercent, budget: manager.tokenBudget.toLocaleString() })}`}
+            {showInjected && ` ${t("ctxPanel.injectedNote")}`}
           </div>
         </div>
       )}

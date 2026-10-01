@@ -1,5 +1,6 @@
 import "../styles/components/ShortcutsPanel.css";
-import { useEffect } from "react";
+import { useRef } from "react";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import { fmt } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
 import { CloseButton } from "./ui";
@@ -21,20 +22,13 @@ interface ShortcutsPanelProps {
 
 export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
   const { t } = useI18n();
-  useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopImmediatePropagation();
-        onClose();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, [onClose]);
+  // The keyboard is the panel's while it is open; Esc closes it.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useFocusTrap(panelRef, { onEscape: onClose });
 
   return (
-    <div className="shortcuts-overlay" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="shortcuts-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="shortcuts-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label={t("shortcuts.title")}>
+      <div ref={panelRef} className="shortcuts-panel" onClick={(e) => e.stopPropagation()}>
         <div className="shortcuts-header">
           <span className="shortcuts-title">{t("shortcuts.title")}</span>
           <CloseButton className="shortcuts-close" onClick={onClose} label={t("common.close")} />

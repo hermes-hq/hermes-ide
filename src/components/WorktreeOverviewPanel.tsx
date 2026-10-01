@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
+import { basename } from "../utils/paths";
 import {
   listAllWorktrees,
   detectOrphanWorktrees,
@@ -123,7 +124,7 @@ export function friendlyWorktreeTooltip(
   if (sessionLabel) parts.push(sessionLabel);
   if (parts.length > 0) return parts.join(" — ");
   // Fallback: use last segment of path
-  return worktreePath.split("/").pop() || worktreePath;
+  return basename(worktreePath);
 }
 
 // ─── Types ────────────────────────────────────────────────────────────
@@ -270,7 +271,7 @@ export function WorktreeOverviewPanel() {
         if (!group) {
           group = {
             projectId: key,
-            projectName: orphan.root_path ? orphan.root_path.split("/").pop() || "Unknown" : "Orphaned",
+            projectName: orphan.root_path ? basename(orphan.root_path) || "Unknown" : "Orphaned",
             rootPath: orphan.root_path || "",
             worktrees: [],
             orphans: [],
@@ -513,7 +514,7 @@ export function WorktreeOverviewPanel() {
               key={r.path}
               className={r.success ? "worktree-overview-result-success" : "worktree-overview-result-failure"}
             >
-              {r.success ? "\u2713" : "\u2717"} {r.path.split("/").pop()}
+              {r.success ? "\u2713" : "\u2717"} {basename(r.path)}
               {r.error && ` - ${r.error}`}
             </div>
           ))}
