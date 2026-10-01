@@ -420,8 +420,12 @@
   gap: var(--space-2);
   align-items: center;
   margin-top: var(--space-1);
-  /* One line inside the row: the spend (last) gives way first, with an
-   * ellipsis; the line's tooltip has all of it (fillCutLineTitle). */
+  /* Inside the row, never past its edge: status, memory and age first; the
+   * spend (last) moves to a second line when the row is too narrow, and is
+   * cut with an ellipsis only when it alone is wider than the row (the
+   * line's tooltip then has all of it, fillCutLineTitle). */
+  flex-wrap: wrap;
+  row-gap: 0;
   min-width: 0;
   overflow: hidden;
   overflow: clip;

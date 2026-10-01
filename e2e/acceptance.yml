@@ -1143,7 +1143,7 @@ features:
         text: "Check for updates shows Checking…, then up to date or could not check (within 15 s)"
         scenarios: [QA-status-update-check.mjs]
       QA-STATUS-8:
-        text: "Eight agents at the default sidebar width: every row's meta line fits or cuts the spend with an ellipsis and a full tooltip, the selected row is not shifted, and each close button names its session"
+        text: "Eight agents at the default sidebar width: every row's meta line stays inside the row with the spend shown whole (it moves to a second line; an ellipsis and a full tooltip only past that), the selected row is not shifted, and each close button names its session"
         scenarios: [QA-status-session-rows.mjs]
       QA-STATUS-9:
         text: "At 600 × 400 (English and German) every status-bar control is inside the window; Check for updates, Report a Bug and Keyboard Shortcuts fold into a ⋯ menu"

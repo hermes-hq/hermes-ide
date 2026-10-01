@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // QA-status-session-rows — eight agents in the sidebar at its default width:
-// every row's meta line (status, memory, age, spend) fits or ends in an
-// ellipsis with the whole line in its tooltip, and the selected row is never
-// shifted left.
+// every row's meta line (status, memory, age, spend) stays inside the row
+// (the spend moves to a second line when it does not fit, and is cut with an
+// ellipsis and a full tooltip only when it alone is wider than the row), and
+// the selected row is never shifted left.
 //
 //   1. eight fake agents (Claude Code and Codex, two repositories); their
 //      spend arrives as usage events: exact, estimated and none (n/a)
@@ -13,8 +14,9 @@
 //     - the age (and the memory, when shown) come before the spend
 //     - an estimated spend reads "≈$x.xx", without "(estimated)" (the
 //       tooltip says it is an estimate)
-//     - every meta item is inside the line; one that does not fit is the
-//       spend, cut with an ellipsis, and the line's tooltip has it all
+//     - every meta item is inside the line, and the spend is shown whole at
+//       the default width (a cut one would end in an ellipsis, with the
+//       line's tooltip holding all of it)
 //     - the close button is named "Close session <name>"
 //   and the "+ Project" button shows when it has the keyboard focus.
 //
@@ -89,6 +91,7 @@ await runScenario("QA-status-session-rows", async ({ evidenceDir, log, assert, a
     assert(r.outside.length === 0, `${name}: every meta item but the spend is inside the line (${JSON.stringify(r.outside)})`);
     assert(r.order.age >= 0 && r.order.spend > r.order.age && (r.order.memory < 0 || r.order.memory < r.order.spend), `${name}: age and memory come before the spend (${JSON.stringify(r.order)})`);
     assert(r.spend && !/\(estimated\)/.test(r.spend.text), `${name}: the spend has no "(estimated)" in the row ("${r.spend?.text}")`);
+    assert(!r.spend.cut && r.spend.text.length > 0, `${name}: the spend is shown whole ("${r.spend.text}")`);
     if (r.spend.cut) assert(r.spend.ellipsis === "ellipsis" && r.spend.overflow === "hidden", `${name}: a cut spend ends in an ellipsis`);
     if (r.metaOverflows || r.spend.cut) assert(r.metaTitle.includes(r.spend.text.replace(/…$/, "")), `${name}: the line's tooltip has the whole line ("${r.metaTitle}")`);
     assert(r.closeLabel === `Close session ${name}`, `${name}: the close button is named "${r.closeLabel}"`);
