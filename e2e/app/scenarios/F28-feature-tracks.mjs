@@ -15,9 +15,10 @@
 //              appear within 2 s of the file write; the Track panel shows
 //              the waiting phase
 //          (3) answering the question in the file resolves its item; ⌘⏎
-//              sets gate: approved and advances the phase in the file, and
-//              the app's own approval is NOT reverted (negative control of
-//              the guard)
+//              sets gate: approved and advances the phase in the file, the
+//              writer agent (stopped at the gate) is told in one line to run
+//              `hi phase` for the next phase, and the app's own approval is
+//              NOT reverted (negative control of the guard)
 //          (4) the agent's plan over the line cap is refused; a plan within
 //              it is handed over; the person edits plan.md, presses r, and
 //              the writer agent receives one tagged line naming a review
@@ -400,6 +401,13 @@ try {
   assert(afterApprove.gate === "approved" && afterApprove.phase === "plan", `⌘⏎ set gate: approved and advanced the phase in the file (phase: ${afterApprove.phase})`);
   await waitForNoInbox(bridge, (i) => i.kind === "gate", "for the gate");
   await agentLine(bridge, writerId, "questions approved");
+  // The agent stopped at the gate; approving told it to go on, in one line.
+  await agentLine(bridge, writerId, "told to go on");
+  const told = readFileSync(agentLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.stdin?.startsWith("hermes track:"));
+  assert(
+    told.length === 1 && told[0].stdin === "hermes track: demo-search: questions approved by the person. Run `hi phase` now and do the plan phase the same way: write its file, run `hi phase done`, then stop and wait for the person's review.",
+    `approving told the writer agent, in one line on its input, to run \`hi phase\` for plan ("${told[0]?.stdin}")`,
+  );
   await sleep(1500);
   assert(!(await inboxItems(bridge)).some((i) => i.kind === "error"), "Hermes's own approval is never reverted (negative control of the guard)");
   assert(frontMatter(readFileSync(featureMdOf(wt), "utf8")).gate === "approved", "the file was not reverted");
@@ -429,8 +437,8 @@ try {
   assert(/got review \.hermes\/features\/demo-search\/review-1\.md \(diff\)/.test(got), `the writer agent received the review line and found a diff (${got.trim()})`);
   const reviewText = readFileSync(join(wt, ".hermes", "features", SLUG, "review-1.md"), "utf8");
   assert(reviewText.includes("+- [ ] add tests for empty queries"), "review-1.md holds the person's edit as a diff line");
-  const stdinRecord = readFileSync(agentLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((r) => r.stdin);
-  assert(stdinRecord?.stdin === `hermes review: read .hermes/features/${SLUG}/review-1.md and apply my edits to plan.md, then continue`, `the agent's stdin got exactly one tagged line: "${stdinRecord?.stdin}"`);
+  const stdinRecords = readFileSync(agentLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).filter((r) => r.stdin?.startsWith("hermes review:"));
+  assert(stdinRecords.length === 1 && stdinRecords[0].stdin === `hermes review: read .hermes/features/${SLUG}/review-1.md and apply my edits to plan.md, then continue`, `the agent's stdin got exactly one review line: "${stdinRecords[0]?.stdin}"`);
   await bridge.screenshot(join(evidenceDir, "04-review-sent.png"));
 
   log("step 5: ⇧O opens plan.md in $EDITOR in a split");

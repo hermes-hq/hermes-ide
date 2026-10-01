@@ -38,8 +38,9 @@ import {
   sameCombo,
   switchAgent,
   uniquePresetName,
+  withoutDanger,
 } from "../launcher/choice";
-import { clearLauncherDraft, saveLauncherDraft, setPendingSuggestion, takeLauncherDraft, takePendingSuggestion } from "../launcher/draft";
+import { clearLauncherDraft, isDraftWorthKeeping, saveLauncherDraft, setPendingSuggestion, takeLauncherDraft, takePendingSuggestion } from "../launcher/draft";
 import { overlayOpened } from "../state/overlays";
 import {
   TASK_LAUNCHES_KEY,
@@ -93,8 +94,13 @@ export type TaskLaunchResult = boolean | "queued";
 
 export interface TaskLauncherProps {
   onLaunch: (req: TaskLaunchRequest) => Promise<TaskLaunchResult>;
-  /** Closes the sheet. `keepDraft`: a click outside, the draft comes back on ⌘N. */
+  /**
+   * Closes the sheet. `keepDraft`: closed without launching (Esc, Cancel, a
+   * click outside); the draft comes back on ⌘N. False after a launch.
+   */
   onClose?: (opts?: { keepDraft: boolean }) => void;
+  /** "Start over": the restored draft is dropped and a fresh sheet opens. */
+  onStartOver?: () => void;
   /** Opens the full creator (SSH, tmux). */
   onOpenAdvanced?: () => void;
   /** Opens a terminal running the agent, where it signs in. */
@@ -152,7 +158,7 @@ function onMenuKeys(e: React.KeyboardEvent<HTMLElement>) {
   items[next]?.focus();
 }
 
-export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onManageAccounts, defaultRepo, inline = false, backend: backendProp }: TaskLauncherProps) {
+export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, onSignIn, onManageAccounts, defaultRepo, inline = false, backend: backendProp }: TaskLauncherProps) {
   const { t } = useI18n();
   const doctor = useAgentDoctor();
   const byId = useMemo(() => doctorById(doctor.rows), [doctor.rows]);
@@ -208,6 +214,10 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
   const [launched, setLaunched] = useState<{ label: string; queued: boolean }[]>([]);
   const [copied, setCopied] = useState<string | null>(null);
   const [ready, setReadyState] = useState(false);
+  // The sheet came back with the draft of an earlier one (it offers Start over).
+  const [restored, setRestored] = useState(false);
+  // The starting choice had Skip all (usual combination, last launch): replaced by the safety default.
+  const [dangerDropped, setDangerDropped] = useState(false);
   // Without an active session the most used project is the starting one; the choice waits for it.
   const [projectsLoaded, setProjectsLoaded] = useState(!!defaultRepo);
   const taskRef = useRef<HTMLTextAreaElement>(null);
@@ -215,6 +225,10 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
   const chipRefs = useRef<Partial<Record<Exclude<Menu, null>, HTMLButtonElement | null>>>({});
   const menuRef = useRef<HTMLDivElement>(null);
   const userTouched = useRef(false);
+  // A launch (or Start over) ends the draft: closing then keeps nothing.
+  const forgetDraft = useRef(false);
+  // The Terminal / Agent view the draft had, kept while its agent is the chosen one.
+  const viewFromDraft = useRef<{ agentId: string; mode: SessionMode } | null>(null);
   // Where the current choice came from ("usual" or a preset's name) until the person changes it.
   const choiceSource = useRef<string | null>(null);
 
@@ -326,12 +340,15 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
     if (draft) {
       setTask(draft.task);
       setChoice(draft.choice);
+      repoPathRef.current = draft.repoPath;
       setRepoPath(draft.repoPath);
       setBranch(draft.branch);
       setBranchEdited(draft.branchEdited);
       setChecks(draft.checks);
       setChecksEdited(draft.checksEdited);
       setExpanded(draft.expanded);
+      if (draft.viewMode) viewFromDraft.current = { agentId: draft.choice.agentId, mode: draft.viewMode };
+      setRestored(true);
       setReadyState(true);
       return;
     }
@@ -343,7 +360,10 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
         if (userTouched.current) return;
         if (usual && usual.source !== "catalog") {
           choiceSource.current = "usual";
-          setChoice(usual.choice);
+          // Skip all is never picked for the person, not even as their usual.
+          const safe = withoutDanger(usual.choice, caps, (id) => freshChoice(id).approvalModeId);
+          setChoice(safe.choice);
+          setDangerDropped(safe.dropped);
           setFallbacks(usual.issues.length || !usual.launchable ? { source: "usual", list: usual.issues, launchable: usual.launchable } : null);
         } else {
           const agentId = usual?.choice.agentId ?? defaultAgentRef.current();
@@ -359,7 +379,9 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
     (agentId: string): LaunchChoice => {
       const c = caps[agentId];
       let approval = safetyDefault(agentId);
-      if (defaultMode && c?.approvalModes.some((m) => m.id === defaultMode)) approval = defaultMode;
+      // The Settings default applies unless it is a dangerous mode (Skip all
+      // needs the person's own choice, every time).
+      if (defaultMode && c?.approvalModes.some((m) => m.id === defaultMode && !m.danger)) approval = defaultMode;
       const base = defaultChoice(agentId, c, approval);
       return { ...base, extraArgs: getAgent(agentId)?.custom ? "" : globalSuffix };
     },
@@ -383,6 +405,12 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
 
   // The remembered Terminal / Agent view choice for the chosen agent.
   useEffect(() => {
+    const fromDraft = viewFromDraft.current;
+    if (fromDraft && fromDraft.agentId === choice?.agentId) {
+      setViewMode(fromDraft.mode);
+      return;
+    }
+    viewFromDraft.current = null;
     setViewMode(preferredSessionMode(modePrefs, choice?.agentId ?? null));
   }, [choice?.agentId, modePrefs]);
 
@@ -448,6 +476,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
     userTouched.current = true;
     choiceSource.current = null;
     setFallbacks(null);
+    if (patch.approvalModeId !== undefined) setDangerDropped(false);
     setChoice((c) => (c ? { ...c, ...patch } : c));
   }, []);
   const updateAlso = useCallback((patch: Partial<LaunchChoice>) => {
@@ -480,7 +509,10 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
       .catch(() => null)
       .then((last) => {
         if (!last || seq !== pickSeq.current) return;
-        setChoice((cur) => (cur && cur.agentId === agentId ? switchAgent(cur, agentId, { ...last.choice, alsoOn: undefined }) : cur));
+        // What was last launched with it, but never Skip all by itself.
+        const safe = withoutDanger({ ...last.choice, alsoOn: undefined }, caps, (id) => freshChoice(id).approvalModeId);
+        if (safe.dropped) setDangerDropped(true);
+        setChoice((cur) => (cur && cur.agentId === agentId ? switchAgent(cur, agentId, safe.choice) : cur));
       });
   };
   const pickModel = (modelId: string) => {
@@ -606,17 +638,24 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
   const previewLine = previewLineState;
 
   // ── actions ─────────────────────────────────────────────────────
-  const close = useCallback(
-    (keepDraft: boolean) => {
-      if (keepDraft && choice) {
-        saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded });
-      } else {
-        clearLauncherDraft();
-      }
-      onClose?.({ keepDraft });
-    },
-    [choice, task, repoPath, branch, branchEdited, checks, checksEdited, expanded, onClose],
-  );
+  // The draft is kept whenever the sheet goes away without a launch: Esc,
+  // Cancel, a click outside, another overlay, or the app closing it because
+  // Settings or a sign-in opened from here. Read when the sheet unmounts.
+  const draftNow = useRef<() => void>(() => {});
+  draftNow.current = () => {
+    if (inline || forgetDraft.current || !choice) return;
+    if (!isDraftWorthKeeping({ task, touched: userTouched.current, expanded, branchEdited, checksEdited, restored })) return;
+    saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode });
+  };
+  useEffect(() => () => draftNow.current(), []);
+
+  const close = useCallback(() => onClose?.({ keepDraft: true }), [onClose]);
+
+  const startOver = useCallback(() => {
+    forgetDraft.current = true;
+    clearLauncherDraft();
+    onStartOver?.();
+  }, [onStartOver]);
 
   // One overlay at a time: the sheet closes (keeping what was typed) when the
   // inbox or the palette opens, and opening it closes them (state/overlays.ts).
@@ -624,7 +663,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
   closeRef.current = close;
   useEffect(() => {
     if (inline) return;
-    return overlayOpened("launcher", () => closeRef.current(true));
+    return overlayOpened("launcher", () => closeRef.current());
   }, [inline]);
 
   const launch = useCallback(
@@ -670,6 +709,10 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
         console.warn("[TaskLauncher] could not record the launch:", err);
       }
       clearLauncherDraft();
+      // Launched: closing the sheet now keeps no draft (Launch & next starts
+      // a new one with the next task).
+      forgetDraft.current = !next;
+      setRestored(false);
       if (offer) {
         // Offered once: recorded now, so the question never comes back for
         // this combination, whether it is answered, dismissed or ignored.
@@ -740,7 +783,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
       e.preventDefault();
       if (saving !== null) setSaving(null);
       else if (menu) closeMenu();
-      else if (!inline) close(false);
+      else if (!inline) close();
       return;
     }
     if (mod && !e.shiftKey && !e.altKey && /^[1-9]$/.test(e.key)) {
@@ -927,7 +970,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
   };
 
   /** A chip of the row under the task: it opens its menu below the row. */
-  const menuChip = (m: Exclude<Menu, null>, label: ReactNode, opts: { danger?: boolean; off?: boolean } = {}) => (
+  const menuChip = (m: Exclude<Menu, null>, label: ReactNode, opts: { danger?: boolean; off?: boolean; title?: string } = {}) => (
     <Chip
       expands
       selected={menu === m}
@@ -937,7 +980,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
       buttonRef={(el) => {
         chipRefs.current[m] = el;
       }}
-      buttonAttrs={{ className: cx("task-launcher-chip", menu === m && "open", opts.danger && "danger", opts.off && "off"), "data-chip": m }}
+      buttonAttrs={{ className: cx("task-launcher-chip", menu === m && "open", opts.danger && "danger", opts.off && "off"), "data-chip": m, title: opts.title }}
     >
       {label}
     </Chip>
@@ -1038,6 +1081,9 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
         )}
       </div>
       <div className={`task-launcher-approval-note${danger ? " danger" : ""}`}>{approvalNote(choice.agentId, choice.approvalModeId)}</div>
+      {agentCaps.approvalModes.some((m) => m.id === "plan") && (
+        <div className="task-launcher-muted task-launcher-plan-hint">{t("launcher.planModeHint", { agent: agentName(choice.agentId), plan: approvalLabel(choice.agentId, "plan") })}</div>
+      )}
       <div className="task-launcher-muted">
         {t("launcher.approvalRemembered", { agent: agentName(choice.agentId), account: accountLabel(agentCaps, choice.accountId) })}
         {" · "}
@@ -1103,7 +1149,16 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           <span className="task-launcher-subtitle">{t("launcher.subtitle")}</span>
           <span className="task-launcher-spacer" />
           <span className="task-launcher-keyhint">{shortcutLabel("file.new-session")}</span>
-          {onClose && <CloseButton className="task-launcher-close" label={t("launcher.close")} onClick={() => close(false)} />}
+          {onClose && <CloseButton className="task-launcher-close" label={t("launcher.close")} onClick={close} />}
+        </div>
+      )}
+
+      {restored && !inline && (
+        <div className="task-launcher-restored" role="status">
+          <span>{t("launcher.draftRestored")}</span>
+          <Button variant="link" className="task-launcher-link task-launcher-start-over" onClick={startOver}>
+            {t("launcher.startOver")}
+          </Button>
         </div>
       )}
 
@@ -1255,7 +1310,11 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           )}
           {menuChip("project", repoPath.trim() ? baseName(repoPath) : t("launcher.projectNone"))}
           {menuChip("where", whereChipText)}
-          {!isCustom && menuChip("approval", approvalLabel(choice.agentId, choice.approvalModeId), { danger })}
+          {!isCustom &&
+            menuChip("approval", approvalLabel(choice.agentId, choice.approvalModeId), {
+              danger,
+              title: t("launcher.approvalChipTitle", { mode: approvalLabel(choice.agentId, choice.approvalModeId), note: approvalNote(choice.agentId, choice.approvalModeId) }),
+            })}
           {!isCustom && menuChip("model", t("launcher.modelChip", { model: choice.modelId === "default" ? t("launcher.modelDefault") : choice.modelId }))}
           {!isCustom &&
             menuChip(
@@ -1277,6 +1336,18 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
           >
             {expanded ? t("launcher.fewerOptions") : t("launcher.moreOptions", { shortcut: fmt("{mod}.") })}
           </Button>
+        </div>
+      )}
+
+      {choice && danger && (
+        <div className="task-launcher-danger-warning" role="note" data-mode={choice.approvalModeId}>
+          {t("launcher.dangerWarning", { mode: approvalLabel(choice.agentId, choice.approvalModeId), agent: agentName(choice.agentId) })}
+          {choice.trackAsFeature && ` ${t("launcher.dangerWarningTrack")}`}
+        </div>
+      )}
+      {choice && !danger && dangerDropped && (
+        <div className="task-launcher-muted task-launcher-danger-dropped" role="note">
+          {t("launcher.dangerNotCarried", { mode: approvalLabel(choice.agentId, "bypassPermissions") })}
         </div>
       )}
 
@@ -1519,14 +1590,14 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
             </div>
           </div>
           <div className="task-launcher-opt-row">
-            <span className="task-launcher-opt-label">{t("launcher.planningLabel")}</span>
+            <span className="task-launcher-opt-label">{t("launcher.featureTrackLabel")}</span>
             <Checkbox
               className="task-launcher-feature"
               inputClassName="task-launcher-feature-box"
               checked={choice.trackAsFeature}
               onChange={(on) => update({ trackAsFeature: on })}
               label={t("launcher.trackAsFeature")}
-              description={t("launcher.trackAsFeatureNote", { slug: taskBranch(task).replace(/^hermes\//, "") })}
+              description={`${t("launcher.trackAsFeatureNote", { slug: taskBranch(task).replace(/^hermes\//, "") })} ${t("launcher.trackNotPlanMode", { agent: agentName(choice.agentId), plan: approvalLabel(choice.agentId, "plan") })}`}
             />
           </div>
           {!isCustom && (
@@ -1634,7 +1705,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
         )}
         <div className="task-launcher-actions">
           {!inline && onClose && (
-            <Button variant="quiet" className="task-launcher-cancel" onClick={() => close(false)}>
+            <Button variant="quiet" className="task-launcher-cancel" onClick={close}>
               {t("launcher.cancelEsc")}
             </Button>
           )}
@@ -1660,7 +1731,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
       aria-modal="true"
       aria-label={t("launcher.title")}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) close(true);
+        if (e.target === e.currentTarget) close();
       }}
     >
       <div className="task-launcher-sheet">{body}</div>

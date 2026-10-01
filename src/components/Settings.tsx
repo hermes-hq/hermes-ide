@@ -926,8 +926,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   onOpenAdvanced={
                     onOpenAdvancedCreator
                       ? () => {
-                          onClose();
+                          // The creator first: Settings closing must not bring
+                          // back a launcher it was opened from.
                           onOpenAdvancedCreator();
+                          onClose();
                         }
                       : undefined
                   }

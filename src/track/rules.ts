@@ -42,6 +42,37 @@ export function previousPhase(track: FeatureTrack, phase: FeaturePhase): Feature
   return null;
 }
 
+// ─── Telling the agent a gate moved ───────────────────────────────────
+
+/**
+ * The one line Hermes types to the writer agent after the person approved
+ * (or skipped) a phase: the agent stopped at the gate and waits to be told,
+ * and `hi phase` gives it the next phase's instructions. Agent-facing, so
+ * not translated (like the `hi` output it points to).
+ */
+export function gateMovedLine(slug: string, move: { from: string; to: string }, how: "approved" | "skipped"): string {
+  if (move.to === "done") return `hermes track: ${slug}: ${move.from} ${how} by the person; the feature is done. Stop here.`;
+  return `hermes track: ${slug}: ${move.from} ${how} by the person. Run \`hi phase\` now and do the ${move.to} phase the same way: write its file, run \`hi phase done\`, then stop and wait for the person's review.`;
+}
+
+/**
+ * The bytes that submit one line to the program in a terminal, the way the
+ * prompt composer and the Review Desk send theirs. A program that turned on
+ * bracketed paste (Claude Code, Codex) reads a fast burst of text as a paste,
+ * in which a trailing Enter is only a new line: the text sat in its prompt,
+ * never sent. So for such a program the line goes as a bracketed paste and
+ * Enter follows it; any other program gets the plain line and Enter.
+ */
+export function submitLineBytes(line: string, bracketedPaste: boolean): string {
+  const clean = line.replace(/[\u0000-\u001f\u007f]/g, " ");
+  return bracketedPaste ? `\x1b[200~${clean}\x1b[201~\r` : `${clean}\r`;
+}
+
+/** A permission mode in which nothing stops the agent at a gate but the agent itself. */
+export function skipsAllApprovals(permissionMode: string | null | undefined): boolean {
+  return permissionMode === "bypassPermissions";
+}
+
 // ─── questions.md ─────────────────────────────────────────────────────
 
 export interface Question {

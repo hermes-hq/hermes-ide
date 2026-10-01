@@ -41,11 +41,38 @@ const TRANSCRIPT_BACKLOG_BYTES: u64 = 4 * 1024 * 1024;
 /// A line longer than this is dropped unread (a huge tool result).
 const MAX_LINE_BYTES: usize = 8 * 1024 * 1024;
 
-/// Every Claude model's window, and the long-context one (the model name in
-/// the transcript does not say which of the two a session uses; a session
-/// that reports more than the standard window is on the long one).
+/// Claude's two window sizes.
 const CLAUDE_WINDOW: u32 = 200_000;
 const CLAUDE_LONG_WINDOW: u32 = 1_000_000;
+
+/// Claude models and their window, exactly as Claude Code itself states it
+/// (`context_window.context_window_size` in its status line input, Claude
+/// Code 2.1.286, read for each id below on 2026-10-01). Ids are without the
+/// `claude-` prefix, a date suffix and `[1m]`. A model not listed has no
+/// gauge: Claude Code answers 200k for any id it does not know, which is a
+/// guess, and Hermes does not show guesses. The Claude 5 models run on the
+/// long window by default, so a 200k assumption showed them five times too
+/// full.
+const CLAUDE_WINDOWS: &[(&str, u32)] = &[
+    ("opus-5-5", CLAUDE_LONG_WINDOW),
+    ("opus-5", CLAUDE_LONG_WINDOW),
+    ("opus-4-8", CLAUDE_LONG_WINDOW),
+    ("opus-4-7", CLAUDE_LONG_WINDOW),
+    ("sonnet-5-5", CLAUDE_LONG_WINDOW),
+    ("sonnet-5", CLAUDE_LONG_WINDOW),
+    ("fable-5-1", CLAUDE_LONG_WINDOW),
+    ("fable-5", CLAUDE_LONG_WINDOW),
+    ("mythos-5-1", CLAUDE_LONG_WINDOW),
+    ("mythos-5", CLAUDE_LONG_WINDOW),
+    ("opus-4-6", CLAUDE_WINDOW),
+    ("opus-4-5", CLAUDE_WINDOW),
+    ("opus-4", CLAUDE_WINDOW),
+    ("sonnet-4-6", CLAUDE_WINDOW),
+    ("sonnet-4-5", CLAUDE_WINDOW),
+    ("sonnet-4", CLAUDE_WINDOW),
+    ("haiku-4-5", CLAUDE_WINDOW),
+    ("3-5-haiku", CLAUDE_WINDOW),
+];
 
 // ─── Reading appended lines ──────────────────────────────────────────
 
@@ -216,8 +243,14 @@ fn transcript_record(v: &Value) -> Option<TranscriptRecord> {
             }
             let info = payload.get("info")?;
             let last = info.get("last_token_usage")?;
+            // What Codex itself counts as in the window (`/status`: "16.2K
+            // used / 258K"): the last call's total, its output included.
+            let input = as_u32(last.get("input_tokens"))?;
+            let used = as_u32(last.get("total_tokens")).unwrap_or_else(|| {
+                input.saturating_add(as_u32(last.get("output_tokens")).unwrap_or(0))
+            });
             Some(TranscriptRecord::Usage {
-                used: as_u32(last.get("input_tokens"))?,
+                used,
                 model: None,
                 window: as_u32(info.get("model_context_window")).filter(|w| *w > 0),
             })
@@ -233,22 +266,43 @@ fn transcript_record(v: &Value) -> Option<TranscriptRecord> {
     }
 }
 
+/// A Claude model id as the window table names it: lower case, without
+/// `claude-`, a `-YYYYMMDD` date or `[1m]`; and whether it asked for the
+/// long window (`[1m]`). None for an id that is not Claude's.
+fn claude_family(model: &str) -> Option<(String, bool)> {
+    let m = model.trim().to_ascii_lowercase();
+    let long = m.contains("[1m]");
+    let m = m.replace("[1m]", "");
+    let rest = m.strip_prefix("claude-")?;
+    let rest = match rest.rsplit_once('-') {
+        Some((head, date)) if date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()) => head,
+        _ => rest,
+    };
+    Some((rest.to_string(), long))
+}
+
 /// The context window for a model call: the agent's own figure when it
-/// gives one, else Hermes's table (Claude only), else unknown.
+/// gives one, else the window Claude Code states for that Claude model,
+/// else unknown (no gauge).
 pub fn context_limit(model: Option<&str>, used: u32, reported: Option<u32>) -> Option<NonZeroU32> {
     if let Some(w) = reported {
         return NonZeroU32::new(w);
     }
-    let model = model?.to_ascii_lowercase();
-    if model.contains("claude") {
-        let long = model.contains("[1m]") || used > CLAUDE_WINDOW;
-        return NonZeroU32::new(if long {
-            CLAUDE_LONG_WINDOW
-        } else {
-            CLAUDE_WINDOW
-        });
+    let (family, long) = claude_family(model?)?;
+    if long {
+        return NonZeroU32::new(CLAUDE_LONG_WINDOW);
     }
-    None
+    let window = CLAUDE_WINDOWS
+        .iter()
+        .find(|(name, _)| *name == family)
+        .map(|(_, w)| *w)?;
+    // More than the standard window can only be the long one (a 200k model
+    // started with `[1m]`, whose transcript does not say so).
+    NonZeroU32::new(if used > window {
+        CLAUDE_LONG_WINDOW
+    } else {
+        window
+    })
 }
 
 // ─── Session totals and their estimated cost (F31) ───────────────────
@@ -502,9 +556,31 @@ impl SpendTracker {
 pub struct UsageTracker {
     model: Option<String>,
     last: Option<(u32, Option<NonZeroU32>, Option<String>)>,
+    /// The window the agent's status line stated, and for which model (its
+    /// Claude family when it names one).
+    stated: Option<(Option<String>, u32)>,
 }
 
 impl UsageTracker {
+    /// The agent's status line stated its window (Claude Code's
+    /// `context_window.context_window_size`): it wins over the table for
+    /// that model.
+    pub fn state_window(&mut self, model: Option<&str>, size: u32) {
+        if size > 0 {
+            self.stated = Some((model.and_then(claude_family).map(|(f, _)| f), size));
+        }
+    }
+
+    fn stated_for(&self, model: Option<&str>) -> Option<u32> {
+        let (family, size) = self.stated.as_ref()?;
+        match family {
+            None => Some(*size),
+            Some(f) => (model.and_then(claude_family).map(|(g, _)| g).as_deref()
+                == Some(f.as_str()))
+            .then_some(*size),
+        }
+    }
+
     pub fn feed(
         &mut self,
         record: TranscriptRecord,
@@ -524,6 +600,7 @@ impl UsageTracker {
                 if model.is_some() {
                     self.model = model;
                 }
+                let window = window.or_else(|| self.stated_for(self.model.as_deref()));
                 let limit = context_limit(self.model.as_deref(), used, window);
                 let now = (used, limit, self.model.clone());
                 if self.last.as_ref() == Some(&now) {
@@ -629,6 +706,18 @@ pub fn parse_spool_note(line: &str, nonce: &str) -> Option<SpoolNote> {
     Some(SpoolNote::Transcript { path, agent })
 }
 
+/// The window a status line line states (`context_window_size`, kept by
+/// `hi signal`), with the model it names: only on lines with the nonce.
+pub fn parse_spool_window(line: &str, nonce: &str) -> Option<(Option<String>, u32)> {
+    let v: Value = serde_json::from_str(line.trim()).ok()?;
+    if v.get("nonce").and_then(Value::as_str) != Some(nonce) {
+        return None;
+    }
+    let payload = v.get("payload")?;
+    let size = as_u32(payload.get("context_window_size")).filter(|n| *n > 0)?;
+    Some((non_empty_str(payload.get("model")), size))
+}
+
 fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -666,6 +755,9 @@ pub(crate) fn watch(
             };
             let mut exited = false;
             for line in spool.poll() {
+                if let Some((model, size)) = parse_spool_window(&line, &nonce) {
+                    tracker.state_window(model.as_deref(), size);
+                }
                 match parse_spool_note(&line, &nonce) {
                     Some(SpoolNote::Transcript { path, agent }) => {
                         let same = transcript
@@ -680,7 +772,11 @@ pub(crate) fn watch(
                                 format!("transcript:{agent}"),
                                 true,
                             ));
+                            // A new conversation; the window its status
+                            // line stated still holds.
+                            let stated = tracker.stated.take();
                             tracker = UsageTracker::default();
+                            tracker.stated = stated;
                         }
                     }
                     Some(SpoolNote::Exited) => exited = true,
@@ -791,11 +887,12 @@ mod tests {
             parse_transcript_line(tc),
             Some(TranscriptRecord::Model("fake-codex-model".into()))
         );
+        // Without total_tokens: input plus output.
         let tokens = r#"{"type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":90000},"last_token_usage":{"input_tokens":54400,"cached_input_tokens":50000,"output_tokens":300},"model_context_window":272000}}}"#;
         assert_eq!(
             parse_transcript_line(tokens),
             Some(TranscriptRecord::Usage {
-                used: 54_400,
+                used: 54_700,
                 model: None,
                 window: Some(272_000)
             })
@@ -822,7 +919,7 @@ mod tests {
                 model,
                 ..
             }) => {
-                assert_eq!(used_tokens, 54_400);
+                assert_eq!(used_tokens, 54_700);
                 assert_eq!(context_limit.map(|l| l.get()), Some(272_000));
                 assert_eq!(model.as_deref(), Some("fake-codex-model"));
             }
@@ -836,22 +933,179 @@ mod tests {
             context_limit(Some("anything"), 5, Some(128_000)).map(|l| l.get()),
             Some(128_000)
         );
-        assert_eq!(
-            context_limit(Some("claude-fake-1"), 5, None).map(|l| l.get()),
-            Some(200_000)
-        );
-        assert_eq!(
-            context_limit(Some("claude-fake-1[1m]"), 5, None).map(|l| l.get()),
-            Some(1_000_000)
-        );
+        let w = |model: &str, used: u32| context_limit(Some(model), used, None).map(|l| l.get());
+        // As Claude Code 2.1.286 states them in its status line input.
+        assert_eq!(w("claude-haiku-4-5-20251001", 5), Some(200_000));
+        assert_eq!(w("claude-sonnet-4-5-20250929", 5), Some(200_000));
+        assert_eq!(w("claude-opus-5-5", 5), Some(1_000_000));
+        assert_eq!(w("claude-sonnet-5-5", 5), Some(1_000_000));
+        assert_eq!(w("claude-fable-5-1", 5), Some(1_000_000));
+        assert_eq!(w("claude-opus-4-7", 5), Some(1_000_000));
+        assert_eq!(w("claude-opus-5-5-20260801", 5), Some(1_000_000));
+        assert_eq!(w("claude-sonnet-4-5[1m]", 5), Some(1_000_000));
+        assert_eq!(w("claude-haiku-4-5-20251001[1M]", 5), Some(1_000_000));
         // More than the standard window can only be the long one.
-        assert_eq!(
-            context_limit(Some("claude-fake-1"), 250_000, None).map(|l| l.get()),
-            Some(1_000_000)
-        );
-        assert_eq!(context_limit(Some("gpt-fake"), 5, None), None);
+        assert_eq!(w("claude-sonnet-4-5-20250929", 250_000), Some(1_000_000));
+        // A model Claude Code does not know (it answers 200k for any id) and
+        // anything not Claude: no window, so no gauge, never a guess.
+        assert_eq!(w("claude-fake-1", 5), None);
+        assert_eq!(w("claude-opus-6", 5), None);
+        assert_eq!(w("claude-opus-5-1", 5), None);
+        assert_eq!(w("gpt-fake", 5), None);
+        assert_eq!(w("not-claude-opus-5-5", 5), None);
         assert_eq!(context_limit(None, 5, None), None);
         assert_eq!(context_limit(Some("x"), 5, Some(0)), None);
+    }
+
+    /// A real Claude Code 2.1.286 transcript line (claude-sonnet-5-5), with
+    /// its ids, paths and content replaced.
+    const REAL_CLAUDE_LINE: &str = r#"{"parentUuid":"00000000-0000-4000-8000-000000000002","isSidechain":false,"userType":"external","entrypoint":"cli","version":"2.1.286","effort":"max","perTurnEffort":"max","sessionId":"00000000-0000-4000-8000-000000000001","type":"assistant","uuid":"00000000-0000-4000-8000-000000000003","timestamp":"2026-09-30T12:00:00.000Z","requestId":"req_redacted","apiBlockIndex":0,"message":{"id":"msg_redacted","type":"message","role":"assistant","model":"claude-sonnet-5-5","content":[{"type":"text","text":"(redacted)"}],"stop_reason":"end_turn","stop_sequence":null,"usage":{"input_tokens":2,"cache_creation_input_tokens":4476,"cache_read_input_tokens":134668,"output_tokens":4802,"output_tokens_details":{"thinking_tokens":4070},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":4476,"ephemeral_5m_input_tokens":0},"iterations":[{"input_tokens":2,"output_tokens":4802,"cache_read_input_tokens":134668,"cache_creation_input_tokens":4476,"type":"message"}]}}}"#;
+
+    #[test]
+    fn a_real_claude_5_session_is_measured_against_its_1m_window() {
+        // The reported case: 139,146 tokens in context. Hermes showed 70 %
+        // (against 200k); Claude Code's own window for this model is 1M:
+        // 14 %, as its /context says.
+        let mut t = UsageTracker::default();
+        let rec = parse_transcript_line(REAL_CLAUDE_LINE).unwrap();
+        match t.feed(rec, 1, "transcript:claude") {
+            Some(SessionEvent::Context {
+                used_tokens,
+                context_limit,
+                model,
+                ..
+            }) => {
+                assert_eq!(used_tokens, 2 + 4_476 + 134_668);
+                assert_eq!(context_limit.map(|l| l.get()), Some(1_000_000));
+                assert_eq!(model.as_deref(), Some("claude-sonnet-5-5"));
+                assert_eq!(
+                    (used_tokens as f64 / 1_000_000.0 * 100.0).round() as u32,
+                    14
+                );
+            }
+            other => panic!("expected context, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_real_claude_haiku_call_matches_its_status_line() {
+        // Claude Code 2.1.286, claude-haiku-4-5, its status line input after
+        // the call: current_usage 8 + 229 + 40,913 = 41,150 of 200,000,
+        // used_percentage 21 (/context: "41.2k/200k tokens (21%)").
+        let line = REAL_CLAUDE_LINE
+            .replace("claude-sonnet-5-5", "claude-haiku-4-5-20251001")
+            .replace(r#""input_tokens":2,"cache_creation_input_tokens":4476,"cache_read_input_tokens":134668"#, r#""input_tokens":8,"cache_creation_input_tokens":229,"cache_read_input_tokens":40913"#);
+        let mut t = UsageTracker::default();
+        match t.feed(
+            parse_transcript_line(&line).unwrap(),
+            1,
+            "transcript:claude",
+        ) {
+            Some(SessionEvent::Context {
+                used_tokens,
+                context_limit,
+                ..
+            }) => {
+                assert_eq!(used_tokens, 41_150);
+                let limit = context_limit.unwrap().get();
+                assert_eq!(limit, 200_000);
+                assert_eq!(
+                    (used_tokens as f64 / limit as f64 * 100.0).round() as u32,
+                    21
+                );
+            }
+            other => panic!("expected context, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_real_codex_rollout_counts_what_codex_status_counts() {
+        // codex-cli 0.145.0, gpt-5.6-luna: `/status` said "98% left (16.2K
+        // used / 258K)" and the footer "94% left" after this token_count.
+        let line = r#"{"timestamp":"2026-10-01T11:52:40.000Z","type":"event_msg","payload":{"type":"token_count","info":{"total_token_usage":{"input_tokens":48338,"cached_input_tokens":40192,"cache_write_input_tokens":0,"output_tokens":164,"reasoning_output_tokens":0,"total_tokens":48502},"last_token_usage":{"input_tokens":16239,"cached_input_tokens":15104,"cache_write_input_tokens":0,"output_tokens":6,"reasoning_output_tokens":0,"total_tokens":16245},"model_context_window":258400},"rate_limits":null}}"#;
+        let tc = r#"{"timestamp":"2026-10-01T11:52:38.000Z","type":"turn_context","payload":{"turn_id":"t","cwd":"/fixture","model":"gpt-5.6-luna","effort":"low"}}"#;
+        let mut t = UsageTracker::default();
+        assert!(t
+            .feed(parse_transcript_line(tc).unwrap(), 1, "transcript:codex")
+            .is_none());
+        match t.feed(parse_transcript_line(line).unwrap(), 2, "transcript:codex") {
+            Some(SessionEvent::Context {
+                used_tokens,
+                context_limit,
+                model,
+                ..
+            }) => {
+                assert_eq!(used_tokens, 16_245, "Codex's own \"16.2K used\"");
+                assert_eq!(
+                    context_limit.map(|l| l.get()),
+                    Some(258_400),
+                    "Codex's own \"258K\""
+                );
+                assert_eq!(model.as_deref(), Some("gpt-5.6-luna"));
+                // 6 % used, the footer's "94% left".
+                assert_eq!((used_tokens as f64 / 258_400.0 * 100.0).round() as u32, 6);
+            }
+            other => panic!("expected context, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn a_status_line_window_wins_for_its_model_only() {
+        let abs = if cfg!(windows) {
+            "C:/fixture/t.jsonl"
+        } else {
+            "/fixture/t.jsonl"
+        };
+        let status = json!({"v":1,"ts":1,"session":"s","agent":"claude","nonce":"n1","event":"StatusLine","payload":{"model":"claude-sonnet-4-5[1m]","context_window_size":1000000,"transcript_path":abs}}).to_string();
+        assert_eq!(
+            parse_spool_window(&status, "n1"),
+            Some((Some("claude-sonnet-4-5[1m]".into()), 1_000_000))
+        );
+        assert_eq!(parse_spool_window(&status, "other"), None);
+        let hook = json!({"v":1,"ts":1,"session":"s","agent":"claude","nonce":"n1","event":"SessionStart","payload":{"transcript_path":abs}}).to_string();
+        assert_eq!(parse_spool_window(&hook, "n1"), None);
+        let mut t = UsageTracker::default();
+        t.state_window(Some("claude-sonnet-4-5[1m]"), 1_000_000);
+        let call = |model: &str, used| TranscriptRecord::Usage {
+            used,
+            model: Some(model.into()),
+            window: None,
+        };
+        // The transcript names the model without [1m]: the stated window holds.
+        match t.feed(
+            call("claude-sonnet-4-5-20250929", 150_000),
+            1,
+            "transcript:claude",
+        ) {
+            Some(SessionEvent::Context { context_limit, .. }) => {
+                assert_eq!(context_limit.map(|l| l.get()), Some(1_000_000))
+            }
+            other => panic!("{other:?}"),
+        }
+        // Another model (a /model switch): its own window from the table.
+        match t.feed(
+            call("claude-haiku-4-5-20251001", 150_000),
+            2,
+            "transcript:claude",
+        ) {
+            Some(SessionEvent::Context { context_limit, .. }) => {
+                assert_eq!(context_limit.map(|l| l.get()), Some(200_000))
+            }
+            other => panic!("{other:?}"),
+        }
+        // An unknown model gets a gauge only from a stated window.
+        let mut u = UsageTracker::default();
+        assert!(matches!(
+            u.feed(call("claude-next-9", 10), 1, "t"),
+            Some(SessionEvent::Context {
+                context_limit: None,
+                ..
+            })
+        ));
+        u.state_window(Some("claude-next-9"), 400_000);
+        assert!(
+            matches!(u.feed(call("claude-next-9", 11), 2, "t"), Some(SessionEvent::Context { context_limit: Some(l), .. }) if l.get() == 400_000)
+        );
     }
 
     #[test]
@@ -859,13 +1113,13 @@ mod tests {
         let mut t = UsageTracker::default();
         let call = |used| TranscriptRecord::Usage {
             used,
-            model: Some("claude-fake-1".into()),
+            model: Some("claude-haiku-4-5-20251001".into()),
             window: None,
         };
         let first = t.feed(call(83_003), 10, "transcript:claude").unwrap();
         assert_eq!(
             serde_json::to_value(&first).unwrap(),
-            json!({"type":"context","at":10,"source":"transcript:claude","usedTokens":83003,"contextLimit":200000,"model":"claude-fake-1"})
+            json!({"type":"context","at":10,"source":"transcript:claude","usedTokens":83003,"contextLimit":200000,"model":"claude-haiku-4-5-20251001"})
         );
         assert!(
             t.feed(call(83_003), 11, "transcript:claude").is_none(),

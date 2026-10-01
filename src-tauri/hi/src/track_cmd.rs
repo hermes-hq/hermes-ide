@@ -212,7 +212,7 @@ pub fn cmd_phase(cwd: &Path, args: &[String]) -> i32 {
         Some("done") => match feature::finish_phase(&root, &slug) {
             Ok(phase) => {
                 println!(
-                    "{}: {} is ready for review. Hermes shows it to the person; wait for `gate: approved` in feature.md, then run `hi phase`.",
+                    "{}: {} is ready for review. Stop here and end your turn: Hermes shows it to the person, and tells you when it is approved; then run `hi phase`.",
                     slug,
                     phase.as_str()
                 );

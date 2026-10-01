@@ -14,7 +14,9 @@
 //      in its tooltip; a sub-agent's call (a sidechain record) moves nothing;
 //      182,000 tokens shows 91 % and the warning colour;
 //   4. a compaction in the transcript reaches the session (counted), and the
-//      next, smaller call brings the gauge down to 10 %;
+//      next, smaller call brings the gauge down to 10 %; on claude-opus-5-5
+//      (a 1M window, as Claude Code states it) 182,000 tokens is 18 %; a
+//      model Hermes has no window for shows no gauge;
 //   5. the optional Agent view draws a "Context compacted" divider where a
 //      compact_boundary event arrived (none before it).
 //
@@ -102,8 +104,10 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   const shellRow = await sessionRow(bridge, shell);
   assert(shellRow && shellRow.gauge === null, "the plain shell row has no gauge");
 
+  // A model whose window Claude Code states as 200k (its status line input).
+  const MODEL_200K = "claude-haiku-4-5-20251001";
   const call = async (usage, what) => {
-    writeFileSync(join(recordDir, "usage-next.json"), JSON.stringify({ model: "claude-fake-1", output_tokens: 700, ...usage }));
+    writeFileSync(join(recordDir, "usage-next.json"), JSON.stringify({ model: MODEL_200K, output_tokens: 700, ...usage }));
     await bridge.typeInTerminal(claude, "c");
     await bridge.waitForTerminal(claude, new RegExp(`model call \\(${usage.input_tokens + usage.cache_creation_input_tokens + usage.cache_read_input_tokens} input tokens\\)`), { timeoutMs: 10_000 });
     log(`  the agent made a model call: ${what}`);
@@ -126,7 +130,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   assert(g1.text === `${Math.round(exact)}% context`, `the row reads "${g1.text}"`);
   assert(g1.title.includes((83003).toLocaleString("en-US")) || g1.title.includes("83003") || /83.003/.test(g1.title), `the tooltip has the exact numbers: "${g1.title}"`);
   const snap1 = await bridge.eval(`return window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(claude)});`);
-  assert(snap1.context.usedTokens === used && snap1.context.contextLimit === CONTEXT_WINDOW && snap1.context.model === "claude-fake-1", "the session's store holds the reported usage");
+  assert(snap1.context.usedTokens === used && snap1.context.contextLimit === CONTEXT_WINDOW && snap1.context.model === MODEL_200K, "the session's store holds the reported usage");
   const usageEvent = snap1.events.find((e) => e.type === "context");
   assert(usageEvent?.source === "transcript:claude", `it came from the agent's transcript (source "${usageEvent?.source}")`);
   await bridge.screenshot(join(evidenceDir, "01-gauge-42.png"));
@@ -154,6 +158,17 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   await call({ input_tokens: 20_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, "20,000 tokens after the compaction");
   const g3 = await waitForGauge(10);
   assert(g3.level === "ok", "the gauge is back to normal at 10%");
+
+  log("step 4b: a Claude 5 model runs on a 1M window (as Claude Code states it); a model Hermes does not know shows no gauge");
+  await call({ model: "claude-opus-5-5", input_tokens: 2_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 180_000 }, "182,000 tokens on claude-opus-5-5");
+  const g4 = await waitForGauge(18);
+  const snap4 = await bridge.eval(`return window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(claude)});`);
+  assert(snap4.context.contextLimit === 1_000_000 && g4.level === "ok", `182,000 of 1,000,000: 18%, not 91% of a 200k guess (limit ${snap4.context.contextLimit})`);
+  await bridge.screenshot(join(evidenceDir, "02b-gauge-1m.png"));
+  await call({ model: "claude-next-unknown", input_tokens: 5_000, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }, "5,000 tokens on a model Hermes has no window for");
+  await bridge.waitFor("the gauge to go away", `return !document.querySelector('[data-session-item-id="${claude}"] .session-context-gauge');`, { timeoutMs: 10_000 });
+  const snap5 = await bridge.eval(`return window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(claude)});`);
+  assert(snap5.context.usedTokens === 5_000 && snap5.context.contextLimit === null, "no window known: no gauge (never a guess)");
 
   const shellAfter = await sessionRow(bridge, shell);
   assert(shellAfter.gauge === null, "the plain shell row still has no gauge");

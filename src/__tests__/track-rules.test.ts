@@ -10,6 +10,9 @@ import {
   previousPhase,
   TRACK_PHASES,
   TURN_SLACK_MS,
+  gateMovedLine,
+  skipsAllApprovals,
+  submitLineBytes,
   writerSessionId,
 } from "../track/rules";
 
@@ -127,5 +130,30 @@ describe("editorCommandFor", () => {
     // A path with a dollar sign survives PowerShell's expansion of the re-parsed line.
     expect(editorCommandFor("pwsh", "C:\\r$x\\plan.md")).toContain("Invoke-Expression \"& $e 'C:\\r`$x\\plan.md'\"");
     expect(editorCommandFor("cmd.exe", "C:\\r\\plan.md")).toBe('if defined EDITOR (%EDITOR% "C:\\r\\plan.md") else (notepad "C:\\r\\plan.md")');
+  });
+});
+
+describe("telling the writer a gate moved", () => {
+  it("after an approval: run `hi phase`, do the next phase the same way, stop again", () => {
+    const line = gateMovedLine("fail-notice", { from: "questions", to: "research" }, "approved");
+    expect(line).toBe("hermes track: fail-notice: questions approved by the person. Run `hi phase` now and do the research phase the same way: write its file, run `hi phase done`, then stop and wait for the person's review.");
+    expect(line).not.toMatch(/[\r\n]/);
+    expect(gateMovedLine("x", { from: "plan", to: "implement" }, "skipped")).toContain("plan skipped by the person");
+    expect(gateMovedLine("x", { from: "implement", to: "done" }, "approved")).toBe("hermes track: x: implement approved by the person; the feature is done. Stop here.");
+  });
+
+  it("only Skip all lets the agent past a gate on its own", () => {
+    expect(skipsAllApprovals("bypassPermissions")).toBe(true);
+    for (const mode of ["acceptEdits", "plan", "default", "auto", null, undefined]) expect(skipsAllApprovals(mode)).toBe(false);
+  });
+});
+
+describe("submitting a line to the program in a terminal", () => {
+  it("a program with bracketed paste on gets the line as a paste, then Enter (else Enter was only a new line in its prompt)", () => {
+    expect(submitLineBytes("hermes track: x", true)).toBe("\x1b[200~hermes track: x\x1b[201~\r");
+    expect(submitLineBytes("hermes track: x", false)).toBe("hermes track: x\r");
+  });
+  it("control characters cannot end the paste early or drive the terminal", () => {
+    expect(submitLineBytes("a\x1b[201~b\rc\n", true)).toBe("\x1b[200~a [201~b c \x1b[201~\r");
   });
 });

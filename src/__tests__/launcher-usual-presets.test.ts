@@ -14,7 +14,8 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn(async (cmd: string) => Pr
 
 import type { LaunchChoice } from "../agent/capabilities/types";
 import { reconcileChoice } from "../agent/capabilities/choice";
-import { effortsFor, rememberedForm, sameCombo, switchAgent, uniquePresetName } from "../launcher/choice";
+import { effortsFor, rememberedForm, sameCombo, switchAgent, uniquePresetName, withoutDanger } from "../launcher/choice";
+import { isDraftWorthKeeping } from "../launcher/draft";
 import { capabilityBackend, sessionLaunchFor, validateChoice } from "../launcher/backend";
 import type { DoctorRow } from "../api/doctor";
 import { fakeCapabilities } from "./fakes/capabilityCommands";
@@ -105,5 +106,39 @@ describe("checks", () => {
     expect(r.issues.map((i) => i.field).sort()).toEqual(["approval", "effort", "model"]);
     expect(r.launchable).toBe(true);
     expect(reconcileChoice(c({}), fakeCapabilities("claude", row("claude", { installed: false }))).launchable).toBe(false);
+  });
+});
+
+describe("Skip all is never a starting choice", () => {
+  const modes = (ids: string[], danger: string[]) => ({ approvalModes: ids.map((id) => ({ id, label: id, flag: [], note: "", danger: danger.includes(id) })) }) as unknown as import("../agent/capabilities/types").AgentCapabilities;
+  const caps = { claude: modes(["default", "acceptEdits", "plan", "bypassPermissions"], ["bypassPermissions"]), codex: modes(["auto", "bypassPermissions"], ["bypassPermissions"]) };
+  const safe = (id: string) => (id === "codex" ? "auto" : "acceptEdits");
+
+  it("replaces a dangerous mode by the agent's safety default, for the second agent too, and says so", () => {
+    const usual = c({ approvalModeId: "bypassPermissions", modelId: "opus", alsoOn: c({ agentId: "codex", approvalModeId: "bypassPermissions" }) });
+    const out = withoutDanger(usual, caps, safe);
+    expect(out.dropped).toBe(true);
+    expect(out.choice.approvalModeId).toBe("acceptEdits");
+    expect(out.choice.modelId).toBe("opus");
+    expect(out.choice.alsoOn?.approvalModeId).toBe("auto");
+    expect(usual.approvalModeId).toBe("bypassPermissions");
+  });
+
+  it("leaves every other mode, and an agent it knows nothing about, as they are", () => {
+    const plan = c({ approvalModeId: "plan" });
+    expect(withoutDanger(plan, caps, safe)).toEqual({ choice: plan, dropped: false });
+    const unknown = c({ agentId: "gemini", approvalModeId: "bypassPermissions" });
+    expect(withoutDanger(unknown, caps, safe).dropped).toBe(false);
+  });
+});
+
+describe("what counts as a draft", () => {
+  const none = { task: "", touched: false, expanded: false, branchEdited: false, checksEdited: false, restored: false };
+  it("an untouched sheet is not one; any typing, choice, option or a restored draft is", () => {
+    expect(isDraftWorthKeeping(none)).toBe(false);
+    expect(isDraftWorthKeeping({ ...none, task: "  " })).toBe(false);
+    for (const over of [{ task: "x" }, { touched: true }, { expanded: true }, { branchEdited: true }, { checksEdited: true }, { restored: true }]) {
+      expect(isDraftWorthKeeping({ ...none, ...over })).toBe(true);
+    }
   });
 });

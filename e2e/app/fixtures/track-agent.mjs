@@ -110,6 +110,9 @@ try {
   say("questions handed over");
   await waitGate("approved", "plan");
   say("questions approved");
+  // Stopped at the gate, the agent is told by Hermes that it may go on.
+  const told = await waitFor("Hermes telling the agent to go on", () => stdinLines.find((l) => l.startsWith("hermes track:")) ?? null);
+  say(`told to go on: ${told.value}`);
   await waitGo("plan");
 
   // 3. Plan: first over the cap (refused), then within it; hand over.

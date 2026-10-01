@@ -221,7 +221,7 @@ try {
     check(o.palette && !o.launcher, "⌘⇧P over the launcher: the palette opens and the launcher closes");
     await press(bridge, ESC);
     await waitOverlays(bridge, { palette: false }, "the palette to close");
-    await openLauncher(bridge);
+    await openLauncher(bridge, { draft: "keep" });
     const task = await bridge.eval(`return e2e.first(".task-launcher-task")?.value ?? null;`);
     check(task === "A task typed before the palette", `the launcher comes back with what was typed (${JSON.stringify(task)})`);
     await press(bridge, ESC);

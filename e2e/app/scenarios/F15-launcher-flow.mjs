@@ -7,8 +7,8 @@
 //   run 2  - Launch & next (⌘⏎): two tasks one after the other; the sheet
 //            stays open with the same choice and an empty task; both agents
 //            start with the chosen model.
-//          - the draft survives a click outside the sheet (⌘N brings it
-//            back); Esc cancels it.
+//          - the draft survives a click outside the sheet and Esc (⌘N brings it
+//            back); Start over forgets it.
 //          - Recent: the last tasks, one click puts one back.
 //          - the project list: the one used most comes first.
 //          - the running-agents cap (Settings > Limits = 2): a third task
@@ -104,7 +104,7 @@ try {
   assert(recs.some((r) => r.argv.some((a) => String(a).startsWith("Task one"))) && recs.some((r) => r.argv.some((a) => String(a).startsWith("Task two"))), "each with its own task");
   await bridge.screenshot(join(evidenceDir, "01-launch-and-next.png"));
 
-  log("step 2: a click outside keeps the draft; Esc cancels it");
+  log("step 2: a click outside keeps the draft, Esc keeps it too; Start over forgets it");
   await typeInto(bridge, ".task-launcher-task", "Half-written task");
   await bridge.eval(`
     const overlay = e2e.must(e2e.first(".task-launcher-overlay"), "overlay");
@@ -112,14 +112,18 @@ try {
     return true;
   `);
   await bridge.waitFor("the sheet to close", `return !e2e.first(".task-launcher-sheet");`);
-  await openLauncher(bridge);
+  await openLauncher(bridge, { draft: "keep" });
   let st = await launcherState(bridge);
   assert(st.task === "Half-written task" && /model: sonnet/.test(st.model), "⌘N brings the draft back");
   await pressKey(bridge, ".task-launcher-task", "Escape");
   await bridge.waitFor("the sheet to close", `return !e2e.first(".task-launcher-sheet");`);
-  await openLauncher(bridge);
+  await openLauncher(bridge, { draft: "keep" });
   st = await launcherState(bridge);
-  assert(st.task === "", "after Esc the draft is gone");
+  assert(st.task === "Half-written task", "after Esc ⌘N brings it back too");
+  await bridge.click(".task-launcher-start-over");
+  await bridge.waitFor("a fresh launcher", `return !e2e.first(".task-launcher-restored") && e2e.first(".task-launcher")?.getAttribute("data-ready") === "true";`, { timeoutMs: 30_000 });
+  st = await launcherState(bridge);
+  assert(st.task === "", "Start over forgets it");
 
   log("step 3: Recent");
   const recents = await bridge.eval(`return e2e.all(".task-launcher-recent").map((b) => e2e.norm(b.innerText));`);

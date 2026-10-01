@@ -37,8 +37,8 @@ import { SessionList } from "./components/SessionList";
 import { hideOpeningOverlay, showOpeningOverlay } from "./utils/sessionCreatorOverlay";
 import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon, TrackIcon } from "./components/ActivityBar";
 import { useTrackWatching } from "./track/useTrackWatching";
-import { editorCommandFor } from "./track/rules";
-import { getTrackState, noteOwnApproval } from "./track/store";
+import { attachedSessions, editorCommandFor, gateMovedLine, submitLineBytes } from "./track/rules";
+import { getTrackState, hasTurnHistory, noteOwnApproval } from "./track/store";
 import { trackApprove, trackPromote } from "./track/api";
 import { slugFromBranch } from "./track/rules";
 import { writeToSession } from "./api/sessions";
@@ -65,7 +65,7 @@ import { setSetting } from "./api/settings";
 import { SplitDirection, collectPanes } from "./state/layoutTypes";
 import { getDraggedSession } from "./components/SplitPane";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { focusTerminal, refitActive } from "./terminal/TerminalPool";
+import { focusTerminal, getTerminal, refitActive } from "./terminal/TerminalPool";
 import { useNativeMenuEvents } from "./hooks/useNativeMenuEvents";
 import { useMenuStateSync } from "./hooks/useMenuStateSync";
 import { useAutoUpdater } from "./hooks/useAutoUpdater";
@@ -88,7 +88,7 @@ import { OnboardingGate } from "./components/OnboardingGate";
 import { getAgent } from "./catalog/agentCatalog";
 import { getProjectsOrdered, getSessionProjects } from "./api/projects";
 import { getSessionWorktreeInfo } from "./api/git";
-import { writeTaskFeatureFile } from "./api/launcher";
+import { taskTrackPrompt, writeTaskFeatureFile } from "./api/launcher";
 import { handleUndeliveredTask, launchTask, normalizeRepoPath, type UndeliveredTask } from "./launcher/launchTask";
 import { TASK_LAUNCHES_KEY } from "./launcher/taskLauncher";
 import { LauncherReopen } from "./launcher/launcherReopen";
@@ -202,6 +202,8 @@ function AppContent() {
   const taskLauncherOpenRef = useRef(taskLauncherOpen);
   taskLauncherOpenRef.current = taskLauncherOpen;
   const launcherGenRef = useRef(0);
+  // Where the launcher waits to come back (see openSettings below).
+  const launcherReturnRef = useRef<null | { kind: "settings" } | { kind: "sign-in"; sessionId: string | null }>(null);
   const [launcherReopen] = useState(() => new LauncherReopen());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [cmdPaletteShortcut, setCmdPaletteShortcut] = useState("cmd_k");
@@ -982,6 +984,8 @@ function AppContent() {
   const openTaskLauncher = useCallback(async (fresh = false) => {
     // The open sheet is finishing a launch and will close: it opens again then.
     if (!fresh && !launcherReopen.requestOpen(!!taskLauncherOpenRef.current)) return;
+    // Opened again (⌘N, or the configuration it waited for closed): nothing waits any more.
+    launcherReturnRef.current = null;
     const s = activeSessionRef.current;
     let repo: string | null = null;
     if (s && !s.ssh_info) {
@@ -993,6 +997,42 @@ function AppContent() {
     }
     setTaskLauncherOpen((cur) => ({ repo, gen: cur && !fresh ? cur.gen : ++launcherGenRef.current }));
   }, [launcherReopen]);
+
+  /**
+   * Configuration opened from the launcher (Settings, Manage accounts, a
+   * sign-in) takes its place; the launcher keeps its draft (TaskLauncher
+   * saves it as it goes) and comes back exactly as it was when that
+   * configuration closes: Settings closing, or the sign-in terminal ending.
+   */
+  const openSettings = useCallback((tab: string) => {
+    if (taskLauncherOpenRef.current) {
+      launcherReturnRef.current = { kind: "settings" };
+      setTaskLauncherOpen(false);
+    }
+    setSettingsOpen(tab);
+  }, []);
+  const closeSettings = useCallback(() => {
+    setSettingsOpen(null);
+    if (launcherReturnRef.current?.kind === "settings") void openTaskLauncher();
+  }, [openTaskLauncher]);
+  /** A sign-in from the launcher (or from Settings opened from it): the launcher waits for that terminal. */
+  const launcherWaitsForSignIn = useCallback((): boolean => {
+    const from = !!taskLauncherOpenRef.current || launcherReturnRef.current?.kind === "settings";
+    if (from) launcherReturnRef.current = { kind: "sign-in", sessionId: null };
+    setTaskLauncherOpen(false);
+    return from;
+  }, []);
+  const signInStarted = useCallback((fromLauncher: boolean, sessionId: string | null) => {
+    if (!fromLauncher || launcherReturnRef.current?.kind !== "sign-in") return;
+    if (sessionId) launcherReturnRef.current = { kind: "sign-in", sessionId };
+    else void openTaskLauncher();
+  }, [openTaskLauncher]);
+  useEffect(() => {
+    const waiting = launcherReturnRef.current;
+    if (waiting?.kind !== "sign-in" || !waiting.sessionId) return;
+    const s = sessions.find((x) => x.id === waiting.sessionId);
+    if (!s || s.phase === "destroyed") void openTaskLauncher();
+  }, [sessions, openTaskLauncher]);
 
   /** The launcher sheet closed; a ⌘N pressed while it was launching opens a fresh one. */
   const onTaskLauncherClosed = useCallback(() => {
@@ -1008,24 +1048,26 @@ function AppContent() {
 
   /** ⌘⇧N: the full creator. */
   const openAdvancedCreator = useCallback(() => {
+    launcherReturnRef.current = null;
     setTaskLauncherOpen(false);
     setSessionCreatorOpen({});
   }, [setSessionCreatorOpen]);
 
   /** Sign in: the agent's own CLI in a terminal, where it asks the person to sign in. */
   const signInAgent = useCallback(async (agentId: string) => {
-    setTaskLauncherOpen(false);
+    const fromLauncher = launcherWaitsForSignIn();
     const session = await createSession({
       aiProvider: agentId,
       mode: "terminal",
       label: t("agentError.signInSessionLabel", { agent: getAgent(agentId)?.name ?? agentId }),
     });
     if (session) showSession(session.id);
-  }, [createSession, showSession, t]);
+    signInStarted(fromLauncher, session?.id ?? null);
+  }, [createSession, showSession, t, launcherWaitsForSignIn, signInStarted]);
 
   /** 2.0: sign an account Hermes added in: the CLI's sign-in, in that account's profile. */
   const signInAccount = useCallback(async (agentId: string, accountId: string) => {
-    setTaskLauncherOpen(false);
+    const fromLauncher = launcherWaitsForSignIn();
     const session = await createSession({
       aiProvider: agentId,
       mode: "terminal",
@@ -1033,7 +1075,8 @@ function AppContent() {
       agentLaunch: { accountId, purpose: "login" },
     });
     if (session) showSession(session.id);
-  }, [createSession, showSession, t]);
+    signInStarted(fromLauncher, session?.id ?? null);
+  }, [createSession, showSession, t, launcherWaitsForSignIn, signInStarted]);
 
   const runTaskLaunch = useCallback(async (req: TaskLaunchRequest): Promise<TaskLaunchResult> => {
     const result = await launchTask(req, {
@@ -1060,6 +1103,7 @@ function AppContent() {
       },
       worktreePath: async (sessionId, projectId) => (await getSessionWorktreeInfo(sessionId, projectId))?.worktreePath ?? null,
       writeFeatureFile: writeTaskFeatureFile,
+      trackPrompt: taskTrackPrompt,
       copyText: (text) => navigator.clipboard.writeText(text),
       readRecords: () => getSetting(TASK_LAUNCHES_KEY).catch(() => ""),
       writeRecords: (raw) => setSetting(TASK_LAUNCHES_KEY, raw),
@@ -1114,7 +1158,11 @@ function AppContent() {
     }
   }, [activeSession, createSession, state.layout, dispatch]);
   /** `r` in the Track panel: one tagged line to the writer's terminal. */
-  const sendLineToSession = useCallback((sessionId: string, line: string) => writeToSession(sessionId, utf8ToBase64(`${line}\r`)), []);
+  // Submitted as Enter would: a bracketed paste for a program that asked for one (see submitLineBytes).
+  const sendLineToSession = useCallback(
+    (sessionId: string, line: string) => writeToSession(sessionId, utf8ToBase64(submitLineBytes(line, getTerminal(sessionId)?.modes.bracketedPasteMode ?? false))),
+    [],
+  );
   /** Palette: approve the active worktree's waiting gate. */
   const approveActiveGate = useCallback(async () => {
     if (!activeSession) return;
@@ -1127,11 +1175,14 @@ function AppContent() {
     try {
       noteOwnApproval(activeSession.working_directory, feature.slug);
       const move = await trackApprove(activeSession.working_directory, feature.slug);
+      // The agent stopped at the gate: tell it (as the Track panel does).
+      const writer = attachedSessions(sessions, activeSession.working_directory, hasTurnHistory)[0];
+      if (writer && (hasTurnHistory(writer.id) || writer.ai_provider)) await sendLineToSession(writer.id, gateMovedLine(feature.slug, move, "approved")).catch(() => {});
       toastStore.addToast({ message: t("track.approvedToast", { slug: feature.slug, from: move.from, to: move.to }), type: "success", duration: 4000 });
     } catch (e) {
       toastStore.addToast({ message: String(e), type: "error", duration: 5000 });
     }
-  }, [activeSession, toastStore, t]);
+  }, [activeSession, toastStore, t, sessions, sendLineToSession]);
   /** Palette: "Make it a feature" for the active worktree (Light track). */
   const makeActiveFeature = useCallback(async () => {
     if (!activeSession) return;
@@ -1155,7 +1206,7 @@ function AppContent() {
     requestCloseSession,
     activeSessionId: state.activeSessionId,
     focusedPaneId: state.layout.focusedPaneId,
-    setSettingsOpen,
+    setSettingsOpen: (tab) => (tab === null ? closeSettings() : openSettings(tab)),
     setShortcutsOpen,
     setCostDashboardOpen,
     setSessionCreatorOpen,
@@ -1287,8 +1338,8 @@ function AppContent() {
             }}
             topAction={{ icon: PlusIcon, label: `${t("session.new")} (${shortcutLabel("file.new-session")})`, onClick: openNewSession }}
             bottomActions={[
-              { icon: PluginsIcon, label: t("app.plugins"), onClick: () => setSettingsOpen("plugins") },
-              { icon: SettingsIcon, label: t("app.settings"), onClick: () => setSettingsOpen("general") },
+              { icon: PluginsIcon, label: t("app.plugins"), onClick: () => openSettings("plugins") },
+              { icon: SettingsIcon, label: t("app.settings"), onClick: () => openSettings("general") },
             ]}
           />
         )}
@@ -1619,7 +1670,7 @@ function AppContent() {
           onNewSession={openNewSession}
           onToggleContext={() => dispatch({ type: "TOGGLE_CONTEXT" })}
           onToggleSessions={() => dispatch({ type: "TOGGLE_SIDEBAR" })}
-          onOpenSettings={(tab) => setSettingsOpen(tab || "general")}
+          onOpenSettings={(tab) => openSettings(tab || "general")}
           onOpenWorkspace={() => setWorkspaceOpen(true)}
           onOpenCostDashboard={fleetOn ? undefined : () => setCostDashboardOpen(true)}
           onToggleFlowMode={() => dispatch({ type: "TOGGLE_FLOW_MODE" })}
@@ -1683,7 +1734,7 @@ function AppContent() {
       {settingsOpen && (
         <Suspense fallback={null}>
         <Settings
-          onClose={() => setSettingsOpen(null)}
+          onClose={closeSettings}
           initialTab={settingsOpen}
           pluginRuntime={pluginRuntime}
           pluginRefreshTrigger={pluginUpdater.updateResults.length}
@@ -1759,10 +1810,8 @@ function AppContent() {
             onClose={onTaskLauncherClosed}
             onOpenAdvanced={openAdvancedCreator}
             onSignIn={(agentId) => void signInAgent(agentId)}
-            onManageAccounts={() => {
-              setTaskLauncherOpen(false);
-              setSettingsOpen("agents");
-            }}
+            onManageAccounts={() => openSettings("agents")}
+            onStartOver={() => setTaskLauncherOpen((cur) => (cur ? { ...cur, gen: ++launcherGenRef.current } : cur))}
             onLaunch={runSheetLaunch}
           />
         </Suspense>

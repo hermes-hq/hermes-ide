@@ -254,3 +254,22 @@
 .task-launcher-inline .task-launcher-footer { border-top: none; padding-top: 0; position: static; margin-bottom: 0; padding-bottom: 0; background: none; }
 
 .task-launcher-actions { display: flex; align-items: center; gap: var(--space-2); }
+
+/* Skip all, said in the chip row itself (not only in its menu). */
+.task-launcher-danger-warning {
+  padding: var(--space-1) calc(var(--space-1) * 2.5);
+  border-radius: var(--radius-md);
+  border: var(--control-border-width) solid var(--danger-border);
+  background: var(--danger-dim);
+  color: var(--danger-fg);
+  font-size: var(--text-xs);
+}
+
+/* The sheet came back with the unsent draft. */
+.task-launcher-restored {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--text-1);
+  font-size: var(--text-xs);
+}

@@ -77,3 +77,29 @@ export function switchAgent(choice: LaunchChoice, agentId: string, fresh: Launch
   else delete next.alsoOn;
   return next;
 }
+
+/**
+ * A starting choice without a dangerous approval mode (Skip all): the usual
+ * combination, what was last launched with an agent and the Settings
+ * default never put the launcher in it by themselves. A dangerous mode is
+ * replaced by `safe(agentId)` (the agent's safety default), for the second
+ * agent too. Presets and the person's own clicks keep it: those are
+ * explicit choices. `dropped`: something was replaced.
+ */
+export function withoutDanger(
+  choice: LaunchChoice,
+  caps: Readonly<Record<string, AgentCapabilities | undefined>>,
+  safe: (agentId: string) => string,
+): { choice: LaunchChoice; dropped: boolean } {
+  const isDanger = (c: LaunchChoice) => !!caps[c.agentId]?.approvalModes.find((m) => m.id === c.approvalModeId)?.danger;
+  let dropped = false;
+  const fix = (c: LaunchChoice): LaunchChoice => {
+    if (!isDanger(c)) return c;
+    dropped = true;
+    return { ...c, approvalModeId: safe(c.agentId) };
+  };
+  const main = fix(choice);
+  const out: LaunchChoice = main === choice ? { ...choice } : main;
+  if (choice.alsoOn) out.alsoOn = fix(choice.alsoOn);
+  return { choice: dropped ? out : choice, dropped };
+}

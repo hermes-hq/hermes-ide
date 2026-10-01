@@ -257,14 +257,28 @@ export async function pressAppShortcut(bridge, { action, pcKey }) {
   }
 }
 
-/** ⌘N: the launcher, settled on its starting choice. */
-export async function openLauncher(bridge) {
-  await pressAppShortcut(bridge, { action: "file.new-session", pcKey: "n" });
+/** The launcher sheet, settled on its starting choice. */
+export async function waitLauncherReady(bridge) {
   await bridge.waitFor("the task launcher (not the old creator)", `
     if (e2e.first(".session-creator")) throw new Error("the old New Session creator opened instead of the task launcher");
     return !!e2e.first(".task-launcher-sheet .task-launcher");
   `, { timeoutMs: 20_000 });
   await bridge.waitFor("the launcher's starting choice", `return e2e.first(".task-launcher")?.getAttribute("data-ready") === "true";`, { timeoutMs: 30_000 });
+}
+
+/**
+ * ⌘N: the launcher, settled on its starting choice. A sheet closed without a
+ * launch (Esc, Cancel, a click outside, Settings) comes back with its draft;
+ * `draft: "start-over"` (the default) presses Start over then, for a step
+ * that needs a fresh sheet; `draft: "keep"` keeps it.
+ */
+export async function openLauncher(bridge, { draft = "start-over" } = {}) {
+  await pressAppShortcut(bridge, { action: "file.new-session", pcKey: "n" });
+  await waitLauncherReady(bridge);
+  if (draft !== "keep" && (await bridge.eval(`return !!e2e.first(".task-launcher-start-over");`))) {
+    await bridge.click(".task-launcher-start-over");
+    await bridge.waitFor("a fresh launcher (Start over)", `return !e2e.first(".task-launcher-restored") && e2e.first(".task-launcher")?.getAttribute("data-ready") === "true";`, { timeoutMs: 30_000 });
+  }
 }
 
 /**
