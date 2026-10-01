@@ -80,6 +80,29 @@ impl HostSession {
             last_output_ms_ago: self.last_output.map(|t| t.elapsed().as_millis() as u64),
             started_at: self.started_at,
             killed: self.kill_requested,
+            foreground_busy: if self.exited {
+                Some(false)
+            } else {
+                self.foreground_busy()
+            },
+        }
+    }
+
+    /// Whether the terminal's foreground process group is another than the
+    /// session program's own (one `tcgetpgrp()` on the master).
+    fn foreground_busy(&self) -> Option<bool> {
+        #[cfg(unix)]
+        {
+            let foreground = self.master.process_group_leader()?;
+            let own = unsafe { libc::getpgid(self.pid as libc::pid_t) };
+            if own <= 0 || foreground <= 0 {
+                return None;
+            }
+            Some(foreground != own)
+        }
+        #[cfg(not(unix))]
+        {
+            None
         }
     }
 }

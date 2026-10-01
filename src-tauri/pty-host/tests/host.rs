@@ -552,3 +552,74 @@ fn a_host_with_nothing_to_do_exits_and_the_socket_folder_is_private() {
         "the socket's folder goes with the host when it is empty"
     );
 }
+
+#[test]
+fn input_bigger_than_one_frame_reaches_the_program_whole() {
+    // CHAOS-05: a paste over MAX_FRAME_BYTES used to go as one frame the
+    // host refused, and the whole paste was dropped.
+    let host = Host::start(60_000, 60_000);
+    let mut c = host.connect().unwrap();
+    c.spawn(
+        "count",
+        sh("stty raw -echo; head -c 5000000 | wc -c | tr -d ' '; echo count-done"),
+        env_min(),
+        "/",
+        24,
+        80,
+    )
+    .unwrap();
+    let mut attached = host.connect().unwrap().attach("count", 24, 80).unwrap();
+    attached
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    let mut reader = attached.take_reader().unwrap();
+    let mut writer = attached.writer();
+    std::thread::sleep(Duration::from_millis(300));
+    let big = vec![b'x'; 5_000_000];
+    let feeder = std::thread::spawn(move || writer.write_all(&big).map(|_| writer));
+    let text = read_until(&mut reader, "count-done", Duration::from_secs(30));
+    assert!(feeder.join().unwrap().is_ok(), "the write went through");
+    assert!(
+        text.contains("5000000"),
+        "every byte reached the program:\n{text}"
+    );
+}
+
+#[test]
+fn the_host_says_when_a_command_holds_the_terminal() {
+    // CHAOS-11: a quiet command (`sleep`) prints nothing, yet quitting
+    // would end it; the host tells from the terminal's foreground group.
+    let host = Host::start(60_000, 60_000);
+    let mut c = host.connect().unwrap();
+    c.spawn(
+        "shell",
+        vec!["/bin/sh".into(), "-i".into()],
+        env_min(),
+        "/",
+        24,
+        80,
+    )
+    .unwrap();
+    let busy = |c: &mut Connection| {
+        c.list()
+            .unwrap()
+            .into_iter()
+            .find(|s| s.id == "shell")
+            .and_then(|s| s.foreground_busy)
+    };
+    let wait_for = |c: &mut Connection, want: bool| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while busy(c) != Some(want) {
+            assert!(Instant::now() < deadline, "never saw busy = {want}");
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    };
+    wait_for(&mut c, false);
+    let attached = host.connect().unwrap().attach("shell", 24, 80).unwrap();
+    let mut writer = attached.writer();
+    writer.write_all(b"sleep 30\n").unwrap();
+    wait_for(&mut c, true);
+    // Ctrl+C ends it: the shell has the terminal again.
+    writer.write_all(b"\x03").unwrap();
+    wait_for(&mut c, false);
+}

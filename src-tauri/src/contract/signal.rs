@@ -434,9 +434,225 @@ pub fn to_session_event(record: &SignalRecord, expected_nonce: &str) -> Option<S
     .find(|e| !matches!(e, SessionEvent::Identity { .. }))
 }
 
+/// Turn boundaries from what an agent's hooks report (PLN-02): a hook
+/// agent only reports statuses, but features that ask "was the agent in a
+/// turn when this happened?" (the gate guard, the turn ledger, the
+/// Done-When checks) read `turn_start` / `turn_end`. A turn starts with
+/// the first sign of work (the prompt hook, a tool, a permission request)
+/// and ends at the agent's own turn end (`done_unread`), its failure
+/// (`error`) or its exit. Vendor-neutral: it reads the mapped events only.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct TurnTracker {
+    /// The number of the last turn that started (0: none yet).
+    last: u32,
+    running: bool,
+}
+
+impl TurnTracker {
+    /// The turn in progress, if any.
+    pub fn current(&self) -> Option<u32> {
+        self.running.then_some(self.last)
+    }
+
+    fn n(&self) -> std::num::NonZeroU32 {
+        std::num::NonZeroU32::new(self.last.max(1)).unwrap_or(std::num::NonZeroU32::MIN)
+    }
+
+    /// `events` (what one record means) with the turn events they imply:
+    /// a `turn_start` before the first sign of work, a `turn_end` or
+    /// `turn_failed` after the status that ends the turn.
+    pub fn frame(&mut self, events: Vec<SessionEvent>) -> Vec<SessionEvent> {
+        let mut out = Vec::with_capacity(events.len() + 1);
+        for event in events {
+            match &event {
+                SessionEvent::Status {
+                    at, source, status, ..
+                } => {
+                    let (at, source) = (*at, source.clone());
+                    match status.kind {
+                        AgentStatusKind::Working
+                        | AgentStatusKind::NeedsApproval
+                        | AgentStatusKind::NeedsAnswer
+                        | AgentStatusKind::PlanReady
+                            if !self.running =>
+                        {
+                            out.push(self.start(at, source));
+                            out.push(event);
+                        }
+                        AgentStatusKind::DoneUnread if self.running => {
+                            out.push(event);
+                            self.running = false;
+                            out.push(SessionEvent::TurnEnd {
+                                at,
+                                source,
+                                tags: None,
+                                n: self.n(),
+                            });
+                        }
+                        AgentStatusKind::Error if self.running => {
+                            let detail = status.detail.clone();
+                            out.push(event);
+                            out.push(self.fail(at, source, detail));
+                        }
+                        _ => out.push(event),
+                    }
+                }
+                SessionEvent::Exit { .. } => {
+                    // The store ends a running turn on an exit by itself.
+                    self.running = false;
+                    out.push(event);
+                }
+                _ => out.push(event),
+            }
+        }
+        out
+    }
+
+    fn start(&mut self, at: i64, source: Option<String>) -> SessionEvent {
+        self.last = self.last.saturating_add(1);
+        self.running = true;
+        SessionEvent::TurnStart {
+            at,
+            source,
+            tags: None,
+            n: self.n(),
+        }
+    }
+
+    /// The running turn failed (a usage limit stopped it, for one): its
+    /// `turn_failed`, or None when no turn runs.
+    pub fn fail_running(
+        &mut self,
+        at: i64,
+        source: Option<String>,
+        detail: String,
+    ) -> Option<SessionEvent> {
+        self.running.then(|| self.fail(at, source, detail))
+    }
+
+    fn fail(&mut self, at: i64, source: Option<String>, detail: String) -> SessionEvent {
+        self.running = false;
+        SessionEvent::TurnFailed {
+            at,
+            source,
+            tags: None,
+            n: self.n(),
+            detail,
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn rec(event: &str, payload: Value) -> SignalRecord {
+        SignalRecord {
+            v: 1,
+            ts: 1_790_000_000,
+            ts_ms: None,
+            session: "s".into(),
+            agent: "claude".into(),
+            nonce: "n".into(),
+            event: event.into(),
+            payload: payload.as_object().cloned().unwrap_or_default(),
+        }
+    }
+
+    fn kinds(events: &[SessionEvent]) -> Vec<String> {
+        events
+            .iter()
+            .map(|e| match e {
+                SessionEvent::Status { status, .. } => format!("status:{:?}", status.kind),
+                SessionEvent::TurnStart { n, .. } => format!("turn_start:{n}"),
+                SessionEvent::TurnEnd { n, .. } => format!("turn_end:{n}"),
+                SessionEvent::TurnFailed { n, .. } => format!("turn_failed:{n}"),
+                SessionEvent::Exit { .. } => "exit".into(),
+                other => format!("{other:?}").chars().take(12).collect(),
+            })
+            .collect()
+    }
+
+    fn through(t: &mut TurnTracker, event: &str, payload: Value) -> Vec<String> {
+        let mapped = map_signal_record(&rec(event, payload), "n", Confidence::Exact, "hook:claude");
+        kinds(&t.frame(mapped))
+    }
+
+    #[test]
+    fn a_prompt_starts_a_turn_and_the_stop_ends_it() {
+        let mut t = TurnTracker::default();
+        assert_eq!(
+            through(&mut t, "UserPromptSubmit", serde_json::json!({})),
+            ["turn_start:1", "status:Working"]
+        );
+        assert_eq!(t.current(), Some(1));
+        // More work inside the same turn starts nothing new.
+        assert_eq!(
+            through(&mut t, "PostToolUse", serde_json::json!({})),
+            ["status:Working"]
+        );
+        assert_eq!(
+            through(
+                &mut t,
+                "PermissionRequest",
+                serde_json::json!({"tool_name": "Bash"})
+            ),
+            ["status:NeedsApproval"]
+        );
+        assert_eq!(
+            through(&mut t, "Stop", serde_json::json!({})),
+            ["status:DoneUnread", "turn_end:1"]
+        );
+        assert_eq!(t.current(), None);
+        assert_eq!(
+            through(&mut t, "UserPromptSubmit", serde_json::json!({})),
+            ["turn_start:2", "status:Working"]
+        );
+    }
+
+    #[test]
+    fn a_stop_failure_fails_the_turn_and_an_exit_ends_it() {
+        let mut t = TurnTracker::default();
+        through(&mut t, "UserPromptSubmit", serde_json::json!({}));
+        assert_eq!(
+            through(&mut t, "StopFailure", serde_json::json!({"error": "boom"})),
+            ["status:Error", "turn_failed:1"]
+        );
+        through(&mut t, "UserPromptSubmit", serde_json::json!({}));
+        assert_eq!(
+            through(&mut t, "SessionEnd", serde_json::json!({})),
+            ["exit"]
+        );
+        assert_eq!(t.current(), None);
+    }
+
+    #[test]
+    fn statuses_outside_a_turn_add_no_turn_events() {
+        let mut t = TurnTracker::default();
+        // The start hook (idle) and a stray stop: nothing to frame.
+        assert_eq!(
+            through(&mut t, "SessionStart", serde_json::json!({})),
+            ["status:Idle"]
+        );
+        assert_eq!(
+            through(&mut t, "Stop", serde_json::json!({})),
+            ["status:DoneUnread"]
+        );
+        assert_eq!(t.fail_running(1, None, String::new()), None);
+        // Gemini's prompt hook starts one as well (vendor-neutral).
+        let mapped = map_signal_record(
+            &SignalRecord {
+                agent: "gemini".into(),
+                ..rec("BeforeAgent", serde_json::json!({}))
+            },
+            "n",
+            Confidence::Exact,
+            "hook:gemini",
+        );
+        assert_eq!(kinds(&t.frame(mapped)), ["turn_start:1", "status:Working"]);
+        assert!(t.fail_running(2, None, "limit".into()).is_some());
+        assert_eq!(t.current(), None);
+    }
 
     const LINE: &str = r#"{"v":1,"ts":1790000000,"session":"s1","agent":"claude","nonce":"n-abc","event":"PermissionRequest","payload":{"tool_name":"Bash"}}"#;
 

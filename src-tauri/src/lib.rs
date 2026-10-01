@@ -567,8 +567,14 @@ pub(crate) fn save_workspace_state(app: &tauri::AppHandle) {
     }
     do_save_workspace(app);
 
-    // Remove the startup marker to signal a clean shutdown
     if let Some(state) = app.try_state::<AppState>() {
+        // Everything saved goes into the database file itself (CHAOS-14).
+        if let Ok(db) = state.db.lock() {
+            if let Err(e) = db.checkpoint_wal() {
+                log::warn!("[hermes] could not fold the database log on quit: {e}");
+            }
+        }
+        // Remove the startup marker to signal a clean shutdown
         let _ = std::fs::remove_file(&state.startup_marker_path);
     }
 }
@@ -1017,6 +1023,7 @@ pub fn run() {
             plugin_identity::revoke_plugin_token,
             // Clipboard
             clipboard::copy_image_to_clipboard,
+            platform::read_clipboard_text,
             // Transcript watching
             transcript::start_transcript_watcher,
             transcript::stop_transcript_watcher,
@@ -1025,6 +1032,7 @@ pub fn run() {
             agent::restart_agent_session,
             agent::send_agent_input,
             agent::interrupt_agent,
+            agent::force_stop_agent,
             agent::close_agent_session,
             agent::check_claude_cli,
             agent::read_image_for_attachment,

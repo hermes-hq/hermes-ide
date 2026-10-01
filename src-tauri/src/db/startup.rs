@@ -75,6 +75,19 @@ impl StartupProblem {
 /// Managed in every run; `None` when the database opened normally.
 pub struct StartupProblemState(pub Option<StartupProblem>);
 
+impl super::Database {
+    /// Fold the write-ahead log into the database file and empty it, so
+    /// after a clean quit the `.db` file alone holds everything (CHAOS-14:
+    /// it used to stay in the `-wal` until the next start, and a copy or
+    /// backup of the `.db` alone looked empty). The next start opens it
+    /// as it is.
+    pub fn checkpoint_wal(&self) -> Result<(), String> {
+        self.conn
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(|e| e.to_string())
+    }
+}
+
 #[tauri::command]
 pub fn get_startup_problem(state: State<'_, StartupProblemState>) -> Option<StartupProblem> {
     state.0.clone()
@@ -83,6 +96,28 @@ pub fn get_startup_problem(state: State<'_, StartupProblemState>) -> Option<Star
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_checkpoint_leaves_everything_in_the_database_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("data.db");
+        let db = super::super::Database::new(&path).unwrap();
+        db.set_setting("theme", "frosted-dark").unwrap();
+        db.checkpoint_wal().unwrap();
+        let wal = dir.path().join("data.db-wal");
+        let wal_len = std::fs::metadata(&wal).map(|m| m.len()).unwrap_or(0);
+        assert_eq!(wal_len, 0, "the log is empty");
+        // The .db file alone has the setting.
+        let copy = dir.path().join("copy.db");
+        std::fs::copy(&path, &copy).unwrap();
+        let conn = rusqlite::Connection::open(&copy).unwrap();
+        let theme: String = conn
+            .query_row("SELECT value FROM settings WHERE key = 'theme'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(theme, "frosted-dark");
+    }
 
     #[test]
     fn newer_schema_problem_names_both_versions_and_promises_no_change() {

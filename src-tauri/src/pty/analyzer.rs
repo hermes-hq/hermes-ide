@@ -6,10 +6,175 @@ use crate::pty::patterns::*;
 
 // ─── Output Analyzer (uses Provider Registry) ───────────────────────
 
+/// The terminal's lines as a person saw them, for the scrollback snapshot a
+/// restored session shows (CHAOS-03): output arrives in arbitrary chunks
+/// (an echoed keystroke is a chunk of its own), so a line ends only at a
+/// newline, and a carriage return, a backspace or a cursor move goes back
+/// over what the line already has (a shell redrawing its prompt, a
+/// progress bar) instead of starting a new line. A full-screen program's
+/// screen (the alternate screen) is not history and is left out.
+struct SnapshotLines {
+    parser: vte::Parser,
+    screen: SnapshotScreen,
+}
+
+impl Default for SnapshotLines {
+    fn default() -> Self {
+        Self {
+            parser: vte::Parser::new(),
+            screen: SnapshotScreen::default(),
+        }
+    }
+}
+
+#[derive(Debug, Default)]
+struct SnapshotScreen {
+    done: String,
+    line: Vec<char>,
+    col: usize,
+    alternate: bool,
+}
+
+impl SnapshotLines {
+    const MAX_BYTES: usize = 16_000;
+    const MAX_LINE: usize = 4_000;
+
+    fn feed(&mut self, raw: &[u8]) {
+        self.parser.advance(&mut self.screen, raw);
+    }
+
+    fn text(&self) -> String {
+        let s = &self.screen;
+        let current: String = s.line.iter().collect();
+        let current = current.trim_end();
+        if current.is_empty() {
+            s.done.clone()
+        } else {
+            format!("{}{}\n", s.done, current)
+        }
+    }
+
+    fn clear(&mut self) {
+        let alternate = self.screen.alternate;
+        self.screen = SnapshotScreen {
+            alternate,
+            ..Default::default()
+        };
+    }
+}
+
+impl SnapshotScreen {
+    fn put(&mut self, c: char) {
+        if self.col < self.line.len() {
+            self.line[self.col] = c;
+        } else if self.col < SnapshotLines::MAX_LINE {
+            while self.line.len() < self.col {
+                self.line.push(' ');
+            }
+            self.line.push(c);
+        } else {
+            return;
+        }
+        self.col += 1;
+    }
+
+    fn commit(&mut self) {
+        let text: String = self.line.iter().collect();
+        self.done.push_str(text.trim_end());
+        self.done.push('\n');
+        self.line.clear();
+        self.col = 0;
+        if self.done.len() > SnapshotLines::MAX_BYTES {
+            let mut drain = self.done.len() - SnapshotLines::MAX_BYTES;
+            while drain < self.done.len() && !self.done.is_char_boundary(drain) {
+                drain += 1;
+            }
+            // Whole lines only.
+            if let Some(nl) = self.done[drain..].find('\n') {
+                drain += nl + 1;
+            }
+            self.done.drain(..drain);
+        }
+    }
+}
+
+impl vte::Perform for SnapshotScreen {
+    fn print(&mut self, c: char) {
+        if !self.alternate {
+            self.put(c);
+        }
+    }
+
+    fn execute(&mut self, byte: u8) {
+        if self.alternate {
+            return;
+        }
+        match byte {
+            b'\n' => self.commit(),
+            b'\r' => self.col = 0,
+            0x08 => self.col = self.col.saturating_sub(1),
+            b'\t' => {
+                let next = (self.col / 8 + 1) * 8;
+                while self.col < next {
+                    self.put(' ');
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn csi_dispatch(
+        &mut self,
+        params: &vte::Params,
+        intermediates: &[u8],
+        _ignore: bool,
+        action: char,
+    ) {
+        let first = params
+            .iter()
+            .next()
+            .and_then(|p| p.first().copied())
+            .unwrap_or(0);
+        if intermediates == b"?" {
+            // The alternate screen (1049, 1047, 47) on and off.
+            if matches!(first, 1049 | 1047 | 47) {
+                match action {
+                    'h' => self.alternate = true,
+                    'l' => self.alternate = false,
+                    _ => {}
+                }
+            }
+            return;
+        }
+        if self.alternate || !intermediates.is_empty() {
+            return;
+        }
+        let n = (first as usize).max(1);
+        match action {
+            // Erase in line: from the cursor (0), to it (1), all of it (2).
+            'K' => match first {
+                0 => self.line.truncate(self.col),
+                1 => {
+                    for c in self.line.iter_mut().take(self.col + 1) {
+                        *c = ' ';
+                    }
+                }
+                _ => self.line.clear(),
+            },
+            'D' => self.col = self.col.saturating_sub(n),
+            'C' => self.col = (self.col + n).min(SnapshotLines::MAX_LINE),
+            'G' => self.col = n - 1,
+            _ => {}
+        }
+    }
+}
+
 pub struct OutputAnalyzer {
     registry: ProviderRegistry,
     pub active_provider_idx: Option<usize>,
     stripped_buffer: String,
+    /// What the scrollback snapshot saves (see [`SnapshotLines`]).
+    snapshot: SnapshotLines,
     line_count: u64,
     pub detected_agent: Option<AgentInfo>,
     pub is_busy: bool,
@@ -154,8 +319,19 @@ impl vte::Perform for OscCollector {
                 }
             }
             b"9" => {
-                // `9;4;<state>;<pct>` is a progress bar, not a notification.
-                if params[1] == b"4" && params.len() >= 3 {
+                // ConEmu's `9;<n>;...` commands (Windows Terminal and
+                // PowerShell prompts use them) are not notifications (XP-06):
+                // `9;9;<path>` reports the working folder, `9;4` is a
+                // progress bar, and the others set titles, run macros or
+                // mark prompts.
+                if let Some(code) = conemu_code(params[1]) {
+                    if code == 9 && params.len() >= 3 {
+                        let path = String::from_utf8_lossy(&params[2..].join(&b';')).to_string();
+                        let path = path.trim().trim_matches('"').trim();
+                        if !path.is_empty() {
+                            self.last = Some(path.to_string());
+                        }
+                    }
                     return;
                 }
                 let body = sanitize(&params[1..].join(&b';'));
@@ -199,6 +375,14 @@ impl vte::Perform for OscCollector {
     }
 }
 
+/// The ConEmu command number of an OSC 9 sequence (`9;<1..12>;...`), or
+/// None for a plain `9;<text>` notification.
+fn conemu_code(first: &[u8]) -> Option<u8> {
+    let text = std::str::from_utf8(first).ok()?;
+    let n: u8 = text.parse().ok()?;
+    (1..=12).contains(&n).then_some(n)
+}
+
 /// Path from an OSC 7 `file://host/path` URI, percent-decoded.
 pub(crate) fn osc7_path(uri: &str) -> Option<String> {
     let rest = uri.strip_prefix("file://")?;
@@ -218,6 +402,7 @@ impl OutputAnalyzer {
             registry: ProviderRegistry::new(),
             active_provider_idx: None,
             stripped_buffer: String::new(),
+            snapshot: SnapshotLines::default(),
             line_count: 0,
             detected_agent: None,
             is_busy: false,
@@ -273,6 +458,7 @@ impl OutputAnalyzer {
         // ANSI escapes are stripped. Used by the input path to suppress
         // line-buffer recording while a TUI owns the screen.
         Self::update_alt_screen_state(&mut self.in_alternate_screen, raw);
+        self.snapshot.feed(raw);
 
         // Strip ANSI escapes once — reused for busy detection, cost/token scanning,
         // and line-by-line analysis below.
@@ -713,11 +899,13 @@ impl OutputAnalyzer {
         }
     }
 
+    /// The terminal's recent lines, for the scrollback snapshot.
     pub(crate) fn get_stripped_output(&self) -> String {
-        self.stripped_buffer.clone()
+        self.snapshot.text()
     }
 
     pub(crate) fn clear_stripped_output(&mut self) {
+        self.snapshot.clear();
         self.stripped_buffer.clear();
     }
 }
@@ -802,6 +990,37 @@ impl OutputAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_snapshot_keeps_a_typed_command_on_one_line() {
+        // CHAOS-03: each echoed keystroke arrives as a read of its own.
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b[1mtest@demo\x1b[0m % ");
+        for c in "echo restore-me-please".bytes() {
+            a.process(&[c]);
+        }
+        a.process(b"\r\nrestore-me-");
+        a.process(b"please\r\n");
+        let out = a.get_stripped_output();
+        assert_eq!(
+            out,
+            "test@demo % echo restore-me-please\nrestore-me-please\n"
+        );
+    }
+
+    #[test]
+    fn the_snapshot_applies_carriage_returns_and_backspaces() {
+        let mut a = OutputAnalyzer::new();
+        // A typo fixed with backspace, then a progress line redrawn in place.
+        a.process(b"$ lss\x08 \x08 -la\r\n");
+        a.process(b"10%\r50%\r100%\r\n");
+        // A full-screen program's screen is left out.
+        a.process(b"\x1b[?1049h");
+        a.process(b"vim screen\r\n");
+        a.process(b"\x1b[?1049l");
+        a.process(b"done");
+        assert_eq!(a.get_stripped_output(), "$ ls -la\n100%\ndone\n");
+    }
 
     #[test]
     fn clearing_the_snapshot_output_forgets_earlier_lines_only() {
@@ -1095,6 +1314,25 @@ mod tests {
             a.process(part);
         }
         assert_eq!(a.take_pending_cwd().as_deref(), Some(path.as_str()));
+    }
+
+    #[test]
+    fn conemu_cwd_reports_set_the_folder_and_are_never_notifications() {
+        // XP-06: PowerShell prompts (Windows Terminal's shell integration)
+        // print `OSC 9;9;"<path>"`; it used to read as "asked you".
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b]9;9;\"C:\\Work\\demo\"\x07PS> ");
+        assert_eq!(a.current_cwd.as_deref(), Some(r"C:\Work\demo"));
+        a.process(b"\x1b]9;9;/srv/demo\x1b\\");
+        assert_eq!(a.current_cwd.as_deref(), Some("/srv/demo"));
+        // Other ConEmu commands (prompt marks, titles, progress) say nothing.
+        a.process(b"\x1b]9;12\x07\x1b]9;3;title\x07\x1b]9;4;1;50\x07\x1b]9;2;hi\x07");
+        assert!(a.take_pending_notifications().is_empty());
+        // A plain OSC 9 notification is still one.
+        a.process(b"\x1b]9;Build finished\x07");
+        let got = a.take_pending_notifications();
+        assert_eq!(got.len(), 1);
+        assert_eq!(got[0].body, "Build finished");
     }
 
     #[test]

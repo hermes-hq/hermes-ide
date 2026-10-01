@@ -294,28 +294,156 @@ pub struct HostStatus {
     pub quit_decision: Option<bool>,
 }
 
-/// Hosted sessions whose program is busy or has an agent in it: quitting
-/// asks whether to keep these running.
-pub fn working_hosted_sessions(mgr: &PtyManager) -> Vec<SessionUpdate> {
-    let mut out: Vec<SessionUpdate> = mgr
-        .sessions
+/// Whether what the agent itself last reported means quitting interrupts
+/// it: at work, or waiting on the person (XP-12).
+fn reported_busy(kind: Option<crate::contract::AgentStatusKind>) -> bool {
+    use crate::contract::AgentStatusKind as K;
+    matches!(
+        kind,
+        Some(K::Working | K::NeedsApproval | K::NeedsAnswer | K::Starting)
+    )
+}
+
+/// A live session quitting may interrupt, and what is known about it before
+/// the terminal is asked (see [`working_sessions`]).
+struct QuitCandidate {
+    update: SessionUpdate,
+    hosted: bool,
+    probe: QuitProbe,
+}
+
+/// What decides whether a session is working when quitting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct QuitProbe {
+    /// Already known to be working (its screen, its agent, its hooks).
+    known: bool,
+    shell_pid: Option<u32>,
+    /// Whether the shell owns the terminal, when the terminal can say.
+    shell_owns: Option<bool>,
+}
+
+impl QuitProbe {
+    /// Working, given what the host said about the terminal (`host_busy`,
+    /// None when it could not tell) and, as the last resort, whether the
+    /// shell sits at its prompt (no child process).
+    fn working(&self, host_busy: Option<bool>, shell_at_prompt: impl FnOnce(u32) -> bool) -> bool {
+        if self.known {
+            return true;
+        }
+        if let Some(owns) = self.shell_owns {
+            return !owns;
+        }
+        if let Some(busy) = host_busy {
+            return busy;
+        }
+        self.shell_pid.is_some_and(|pid| !shell_at_prompt(pid))
+    }
+}
+
+fn quit_candidates(mgr: &PtyManager, hosted_only: bool) -> Vec<QuitCandidate> {
+    mgr.sessions
         .values()
-        .filter(|ps| ps.transport.hosted())
+        .filter(|ps| !hosted_only || ps.transport.hosted())
         .filter_map(|ps| {
             let s = ps.session.lock().ok()?;
             let live = !matches!(
                 s.phase,
                 SessionPhase::Destroyed | SessionPhase::Disconnected | SessionPhase::Closing
             );
-            let working = matches!(
+            if !live {
+                return None;
+            }
+            let known = matches!(
                 s.phase,
                 SessionPhase::Busy | SessionPhase::NeedsInput | SessionPhase::LaunchingAgent
-            ) || s.detected_agent.is_some();
-            (live && working).then(|| SessionUpdate::from(&*s))
+            ) || s.detected_agent.is_some()
+                || reported_busy(s.reported_status);
+            let shell_pid = ps.transport.pid();
+            let shell_owns = if known {
+                None
+            } else {
+                shell_pid.and_then(|pid| ps.transport.shell_owns_terminal(pid))
+            };
+            Some(QuitCandidate {
+                update: SessionUpdate::from(&*s),
+                hosted: ps.transport.hosted(),
+                probe: QuitProbe {
+                    known,
+                    shell_pid,
+                    shell_owns,
+                },
+            })
         })
+        .collect()
+}
+
+/// Sessions whose program quitting would end (CHAOS-11, XP-05): busy on
+/// screen, an agent in it or reporting work, or a command holding the
+/// terminal however quiet it is (`sleep`, a silent script, an idle REPL):
+/// the terminal's foreground process group is not the shell's, or, where
+/// the terminal cannot say, the shell has a child process. With
+/// `hosted_only`, only sessions that live in the session host.
+///
+/// The PTY manager lock is held only to read the sessions; the process
+/// table and the host are asked after it is released.
+pub fn working_sessions(
+    app: &AppHandle,
+    state: &AppState,
+    hosted_only: bool,
+) -> Vec<SessionUpdate> {
+    let candidates = {
+        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        quit_candidates(&mgr, hosted_only)
+    };
+    let needs_host = candidates
+        .iter()
+        .any(|c| !c.probe.known && c.hosted && c.probe.shell_owns.is_none());
+    let host_busy = if needs_host {
+        host_foreground(app)
+    } else {
+        Default::default()
+    };
+    let mut out: Vec<SessionUpdate> = candidates
+        .into_iter()
+        .filter(|c| {
+            c.probe.working(
+                host_busy.get(&c.update.id).copied().flatten(),
+                crate::pty::commands::shell_at_prompt_by_process_table,
+            )
+        })
+        .map(|c| c.update)
         .collect();
     out.sort_by(|a, b| a.created_at.cmp(&b.created_at));
     out
+}
+
+/// What the host says about each session's terminal: whether a program
+/// other than the shell holds its foreground (None: it cannot tell).
+fn host_foreground(app: &AppHandle) -> std::collections::HashMap<String, Option<bool>> {
+    #[cfg(unix)]
+    {
+        let Ok(paths) = paths(app) else {
+            return Default::default();
+        };
+        match unix::connect(&paths, std::time::Duration::from_secs(2)) {
+            Ok(mut conn) => conn
+                .list()
+                .map(|l| l.into_iter().map(|s| (s.id, s.foreground_busy)).collect())
+                .unwrap_or_default(),
+            Err(_) => Default::default(),
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = app;
+        Default::default()
+    }
+}
+
+/// Hosted sessions quitting would interrupt (the ones "keep running or
+/// stop?" is about).
+pub fn working_hosted_sessions(app: &AppHandle, state: &AppState) -> Vec<SessionUpdate> {
+    working_sessions(app, state, true)
 }
 
 fn hosted_session_ids(mgr: &PtyManager) -> Vec<String> {
@@ -329,15 +457,57 @@ fn hosted_session_ids(mgr: &PtyManager) -> Vec<String> {
     ids
 }
 
-/// Ends every hosted session's program (the host then exits on its own).
-pub fn stop_all_hosted(state: &AppState) {
-    let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    for (id, ps) in mgr.sessions.iter_mut() {
-        if ps.transport.hosted() {
-            if let Err(e) = ps.transport.kill() {
-                log::warn!("[session-host] could not stop {id}: {e}");
+/// Ends every hosted session's program (the host then exits on its own),
+/// including the ones no window shows: programs left from a run that ended
+/// before it saved them (CHAOS-04), which would otherwise outlive every
+/// later quit.
+pub fn stop_all_hosted(app: &AppHandle, state: &AppState) {
+    let owned: Vec<String> = {
+        let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+        for (id, ps) in mgr.sessions.iter_mut() {
+            if ps.transport.hosted() {
+                if let Err(e) = ps.transport.kill() {
+                    log::warn!("[session-host] could not stop {id}: {e}");
+                }
             }
         }
+        mgr.sessions.keys().cloned().collect()
+    };
+    stop_unowned(app, &owned);
+}
+
+/// Live host sessions that are not in `owned`.
+pub fn unowned_hosted_session_ids(app: &AppHandle, owned: &[String]) -> Vec<String> {
+    let mut ids: Vec<String> = live_hosted_session_ids(app)
+        .into_iter()
+        .filter(|id| !owned.contains(id))
+        .collect();
+    ids.sort();
+    ids
+}
+
+fn stop_unowned(app: &AppHandle, owned: &[String]) {
+    #[cfg(unix)]
+    {
+        let ghosts = unowned_hosted_session_ids(app, owned);
+        if ghosts.is_empty() {
+            return;
+        }
+        let Ok(paths) = paths(app) else {
+            return;
+        };
+        if let Ok(mut conn) = unix::connect(&paths, std::time::Duration::from_secs(2)) {
+            for id in ghosts {
+                log::info!("[session-host] stopping {id}, which no window showed");
+                if let Err(e) = conn.kill(&id) {
+                    log::warn!("[session-host] could not stop {id}: {e}");
+                }
+            }
+        }
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = (app, owned);
     }
 }
 
@@ -352,29 +522,30 @@ pub fn on_exit_requested(app: &AppHandle) -> bool {
         .try_state::<SessionHostState>()
         .and_then(|s| s.quit_decision.lock().ok().map(|d| *d))
         .unwrap_or(None);
-    let working = {
-        let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-        working_hosted_sessions(&mgr)
-    };
-    match decision {
-        None if !working.is_empty() => {
-            log::info!(
-                "[session-host] quit requested with {} working hosted session(s); asking",
-                working.len()
-            );
-            let _ = app.emit(QUIT_REQUESTED_EVENT, &working);
-            true
-        }
-        Some(true) => {
+    if let Some(keep) = decision {
+        // Answered: the exit goes ahead, and the hosted sessions end (or
+        // not) once the workspace is saved (stop_hosted_unless_kept);
+        // stopping them now would let the save see them ended and leave
+        // them out of the workspace.
+        if keep {
             log::info!("[session-host] quitting; hosted sessions keep running");
-            false
         }
-        // Nothing is working, or the user chose to stop: the exit goes
-        // ahead, and the hosted sessions end once the workspace is saved
-        // (stop_hosted_unless_kept) — stopping them now would let the save
-        // see them ended and leave them out of the workspace.
-        _ => false,
+        return false;
     }
+    // Every session quitting would interrupt, hosted or not (XP-05): one in
+    // this process ends with the app, so it is asked about as well (the
+    // dialog then offers no "keep running" for it).
+    let working = working_sessions(app, &state, false);
+    if working.is_empty() {
+        return false;
+    }
+    log::info!(
+        "[session-host] quit requested with {} working session(s) ({} hosted); asking",
+        working.len(),
+        working.iter().filter(|s| s.hosted).count()
+    );
+    let _ = app.emit(QUIT_REQUESTED_EVENT, &working);
+    true
 }
 
 /// Called when the exit really goes ahead, after the workspace was saved:
@@ -392,13 +563,10 @@ pub fn stop_hosted_unless_kept(app: &AppHandle) {
         .unwrap_or(None);
     let stop = match decision {
         Some(keep) => !keep,
-        None => {
-            let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-            working_hosted_sessions(&mgr).is_empty()
-        }
+        None => working_hosted_sessions(app, &state).is_empty(),
     };
     if stop {
-        stop_all_hosted(&state);
+        stop_all_hosted(app, &state);
     }
 }
 
@@ -411,15 +579,21 @@ pub async fn session_host_status(
 ) -> Result<HostStatus, String> {
     use tauri::Manager;
     let paths = paths(&app)?;
-    let (hosted, working) = {
+    let hosted = {
         let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-        (
-            hosted_session_ids(&mgr),
-            working_hosted_sessions(&mgr)
+        hosted_session_ids(&mgr)
+    };
+    let working = {
+        let app = app.clone();
+        tokio::task::spawn_blocking(move || {
+            let state = app.state::<AppState>();
+            working_hosted_sessions(&app, &state)
                 .into_iter()
                 .map(|s| s.id)
-                .collect::<Vec<_>>(),
-        )
+                .collect::<Vec<_>>()
+        })
+        .await
+        .map_err(|e| e.to_string())?
     };
     let quit_decision = app
         .try_state::<SessionHostState>()
@@ -495,8 +669,8 @@ pub fn session_host_quit(
 
 /// Ends every hosted program without quitting.
 #[tauri::command]
-pub fn session_host_stop_all(state: State<'_, AppState>) -> Result<(), String> {
-    stop_all_hosted(&state);
+pub fn session_host_stop_all(app: AppHandle, state: State<'_, AppState>) -> Result<(), String> {
+    stop_all_hosted(&app, &state);
     Ok(())
 }
 
@@ -816,6 +990,45 @@ mod unix {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_quiet_command_counts_as_working_when_quitting() {
+        let probe = |known, shell_owns| QuitProbe {
+            known,
+            shell_pid: Some(42),
+            shell_owns,
+        };
+        let never = |_: u32| -> bool { panic!("the process table is the last resort") };
+        // Busy on screen, an agent, or its hooks said so.
+        assert!(probe(true, None).working(None, never));
+        // `sleep 100` prints nothing but holds the terminal.
+        assert!(probe(false, Some(false)).working(None, never));
+        assert!(!probe(false, Some(true)).working(Some(true), never));
+        // A hosted terminal: the host answers for it.
+        assert!(probe(false, None).working(Some(true), never));
+        assert!(!probe(false, None).working(Some(false), never));
+        // Nobody can tell: a shell with a child process is working.
+        assert!(probe(false, None).working(None, |_| false));
+        assert!(!probe(false, None).working(None, |_| true));
+        let no_pid = QuitProbe {
+            known: false,
+            shell_pid: None,
+            shell_owns: None,
+        };
+        assert!(!no_pid.working(None, never));
+    }
+
+    #[test]
+    fn what_the_agent_reported_decides_before_the_screen() {
+        use crate::contract::AgentStatusKind as K;
+        for kind in [K::Working, K::NeedsApproval, K::NeedsAnswer, K::Starting] {
+            assert!(reported_busy(Some(kind)), "{kind:?}");
+        }
+        for kind in [K::Idle, K::DoneUnread, K::Exited, K::Error, K::Limited] {
+            assert!(!reported_busy(Some(kind)), "{kind:?}");
+        }
+        assert!(!reported_busy(None));
+    }
 
     #[test]
     fn paths_are_keyed_by_the_data_folder_and_short_enough_for_a_socket() {

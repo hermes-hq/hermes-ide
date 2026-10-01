@@ -293,6 +293,10 @@ pub struct Signals {
     /// agent's app server reports, passed as this launch's hook state).
     #[serde(default)]
     pub hook_trust: Option<String>,
+    /// The shell the agent runs a hook command string with on Windows
+    /// (`powershell` for Gemini), so the command is written in its syntax.
+    #[serde(default)]
+    pub hook_shell: Option<String>,
 }
 
 fn default_confidence() -> String {

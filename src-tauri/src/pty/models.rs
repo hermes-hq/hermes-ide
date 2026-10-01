@@ -288,6 +288,11 @@ pub struct Session {
     /// it carries this nonce.
     #[serde(skip)]
     pub signal_nonce: Option<String>,
+    /// The last status the agent's own hooks reported (CHAOS-11/XP-12):
+    /// quitting asks about a session whose agent said it is working or
+    /// waiting on the person, whatever its screen looks like.
+    #[serde(skip)]
+    pub reported_status: Option<crate::contract::AgentStatusKind>,
     /// The task typed into the task launcher (F15): the agent's first prompt
     /// on its first start. Never saved; a restored session resumes instead.
     #[serde(skip)]
