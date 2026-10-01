@@ -373,10 +373,9 @@ async function returningUser(bridge) {
   // Skip the first-launch welcome the way a returning user's data does.
   await bridge.eval(`
     await window.__TAURI_INTERNALS__.invoke("set_setting", { key: "onboarding_completed", value: "true" });
-    setTimeout(() => location.reload(), 50);
     return true;
   `);
-  await sleep(1500);
+  await bridge.reload();
   await bridge.waitFor(
     "the app UI after the reload",
     `return document.readyState === "complete" && !!window.__HERMES_E2E__ && !e2e.first(".onboarding-backdrop, .onboarding-dialog");`,

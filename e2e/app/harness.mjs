@@ -140,6 +140,31 @@ export class Bridge {
     return out.value;
   }
 
+  /**
+   * Reload the page in the main webview and wait for the new page.
+   *
+   * An eval's result is parked on `window` until the bridge polls it, so a
+   * script that reloads its own page (`setTimeout(() => location.reload(),
+   * 50)`) can wipe its result first: the eval then times out although the
+   * reload happened. Here the page reloads only once the bridge has
+   * collected this call's result.
+   */
+  async reload({ timeoutMs = 30_000 } = {}) {
+    const token = JSON.stringify(`reload-${process.pid}-${Date.now()}-${Math.random()}`);
+    await this.eval(`
+      window.__HERMES_E2E_PAGE__ = ${token};
+      const parked = () => Object.values(window.__HERMES_E2E_RESULTS__ || {}).some((v) => String(v).includes(${token}));
+      const timer = setInterval(() => { if (!parked()) { clearInterval(timer); location.reload(); } }, 10);
+      return ${token};
+    `);
+    await sleep(500);
+    await this.waitFor(
+      "the page to reload",
+      `return window.__HERMES_E2E_PAGE__ !== ${token} && document.readyState === "complete";`,
+      { timeoutMs },
+    );
+  }
+
   /** Poll `script` until it returns something truthy; returns that value. */
   async waitFor(description, script, { timeoutMs = 15_000, intervalMs = 100 } = {}) {
     const deadline = Date.now() + timeoutMs;
