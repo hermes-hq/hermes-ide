@@ -13,7 +13,8 @@ import {
   isToolUseBlock,
   isImageBlock,
 } from "./types";
-import { softInterruptAgent } from "../api/agent";
+import { forceStopAgent, softInterruptAgent } from "../api/agent";
+import { Button } from "../components/ui";
 import { useSession } from "../state/SessionContext";
 import { deriveActivity } from "./messageStore";
 import type { AgentSessionState, CompactionMark, RenderedMessage } from "./messageStore";
@@ -92,6 +93,38 @@ function useAgentSessionSnapshot(sessionId: string) {
  *   - agent-stderr-{sessionId} — stderr text chunks (surfaced on error)
  *   - agent-exit-{sessionId}   — process exit
  */
+/**
+ * CHAOS-20: where an agent stopped unexpectedly (its process crashed or was
+ * killed mid-answer): the id of the last message at that moment, per
+ * session. The live notice goes once the agent starts again; this marker
+ * stays in the conversation, so nothing hides that the answer above it is
+ * incomplete. Module-level so it survives switching sessions.
+ */
+const crashMarks = new Map<string, Set<string>>();
+/** Sessions whose agent the person force-stopped: that exit is no crash. */
+const forcedStops = new Set<string>();
+
+/** Whether an exit means the agent stopped unexpectedly. */
+export function isUnexpectedExit(exit: { code: number | null; signal: string | null } | null): boolean {
+  return !!exit && (!!exit.signal || (exit.code !== null && exit.code !== 0));
+}
+
+/** How long after ◼ Stop a turn that is still running counts as hung. */
+export const FORCE_STOP_AFTER_MS = 5_000;
+
+/**
+ * The working timer's start: never before the person's latest message, so a
+ * new turn after a crash counts from 0, not from the dead turn (CHAOS-20).
+ */
+export function turnTimerStart(since: number | null, messages: readonly { role: string; timestamp?: number }[]): number | null {
+  if (since === null) return null;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    const m = messages[i];
+    if (m.role === "user") return Math.max(since, m.timestamp ?? since);
+  }
+  return since;
+}
+
 export function AgentSessionView({ sessionId, workspacePathCount }: AgentSessionViewProps) {
   // Resilient envelope sender — wraps `send_agent_input` IPC with a
   // respawn-on-not-found retry.  Used by the interactive cards
@@ -242,6 +275,19 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
     [typedErrors, state, stderr, exitInfo, snapshot.protocolError, agentName, t],
   );
   const [retrying, setRetrying] = useState(false);
+  const [, setCrashMarkVersion] = useState(0);
+  const lastMessageId = state.messages.length > 0 ? state.messages[state.messages.length - 1].id : null;
+  useEffect(() => {
+    if (!exitInfo) return;
+    if (forcedStops.delete(sessionId)) return;
+    if (!isUnexpectedExit(exitInfo) || lastMessageId === null) return;
+    const marks = crashMarks.get(sessionId) ?? new Set<string>();
+    if (marks.has(lastMessageId)) return;
+    marks.add(lastMessageId);
+    crashMarks.set(sessionId, marks);
+    setCrashMarkVersion((v) => v + 1);
+  }, [exitInfo, lastMessageId, sessionId]);
+  const marks = crashMarks.get(sessionId);
   const { respawnAgent, createSession } = sessionCtx;
   const handleRetry = () => {
     setRetrying(true);
@@ -371,6 +417,16 @@ export function AgentSessionView({ sessionId, workspacePathCount }: AgentSession
 
             for (const [i, c] of (compactionsAfter.get(message.id) ?? []).entries()) {
               out.push(<CompactionDivider key={`${message.id}-compact-${i}`} mark={c} />);
+            }
+
+            // Where the agent stopped unexpectedly; while the live notice
+            // still says so (the last message, exit shown), it is not repeated.
+            if (marks?.has(message.id) && !(exitInfo && idx === arr.length - 1)) {
+              out.push(
+                <div key={`${message.id}-crash`} className="agent-crash-marker" role="note">
+                  {t("agentView.crashMarker", { agent: agentName })}
+                </div>,
+              );
             }
 
             return out;
@@ -801,6 +857,7 @@ interface AgentHeaderProps {
 // header — and its activity-derivation work — to re-run. Default shallow
 // equality is correct: AgentHeaderProps are all primitives or stable refs.
 const AgentHeader = memo(function AgentHeader({ state, sessionId, workspacePathCount }: AgentHeaderProps) {
+  const t = useAgentErrorTranslate();
   const model = state.initEvent?.model;
   const cwd = state.initEvent?.cwd;
   const rate = state.rateLimitInfo;
@@ -820,6 +877,40 @@ const AgentHeader = memo(function AgentHeader({ state, sessionId, workspacePathC
         : "thinking";
 
   const isWorking = state.initialized && activity.status !== "idle";
+  const since = turnTimerStart(activity.since, state.messages);
+
+  // CHAOS-10: ◼ Stop asks the agent to stop its turn. One that does not
+  // within a few seconds is hung: say so and offer Force stop (the agent's
+  // process is stopped; the conversation stays and the next message
+  // resumes it). Pressing Stop again does the same at once.
+  const [stopAskedAt, setStopAskedAt] = useState<number | null>(null);
+  const [unresponsive, setUnresponsive] = useState(false);
+  useEffect(() => {
+    if (!isWorking) {
+      setStopAskedAt(null);
+      setUnresponsive(false);
+    }
+  }, [isWorking]);
+  useEffect(() => {
+    if (stopAskedAt === null) return;
+    const timer = setTimeout(() => setUnresponsive(true), Math.max(0, FORCE_STOP_AFTER_MS - (Date.now() - stopAskedAt)));
+    return () => clearTimeout(timer);
+  }, [stopAskedAt]);
+  const forceStop = () => {
+    forcedStops.add(sessionId);
+    setUnresponsive(false);
+    forceStopAgent(sessionId).catch((err) => console.warn("[agent] force stop failed:", err));
+  };
+  const onStop = () => {
+    if (stopAskedAt !== null) {
+      forceStop();
+      return;
+    }
+    setStopAskedAt(Date.now());
+    softInterruptAgent(sessionId).catch((err) =>
+      console.warn("[agent] soft-interrupt failed:", err),
+    );
+  };
   const tickerLabel = !state.initialized
     ? "Ready"
     : activity.status === "running"
@@ -830,7 +921,7 @@ const AgentHeader = memo(function AgentHeader({ state, sessionId, workspacePathC
           ? "Awaiting Claude"
           : "Ready";
 
-  const cwdLabel = cwd ? cwd.split("/").pop() ?? cwd : null;
+  const cwdLabel = cwd ? cwd.split(/[\\/]/).filter(Boolean).pop() ?? cwd : null;
 
   // Three-zone grid: [status] [title] [meta].  Title is the only
   // flexible cell; it truncates with ellipsis on narrow panes so the
@@ -852,10 +943,10 @@ const AgentHeader = memo(function AgentHeader({ state, sessionId, workspacePathC
         {isWorking ? (
           <>
             <span className="agent-session-ticker">{tickerLabel}</span>
-            {activity.since !== null ? (
+            {since !== null ? (
               <>
                 <span className="agent-session-flag-sep" aria-hidden="true">·</span>
-                <ElapsedCounter since={activity.since} />
+                <ElapsedCounter since={since} />
               </>
             ) : null}
           </>
@@ -908,15 +999,19 @@ const AgentHeader = memo(function AgentHeader({ state, sessionId, workspacePathC
         {showRateNotice ? (
           <span className="agent-rate-notice">Rate limit · {rate!.status}</span>
         ) : null}
+        {isWorking && unresponsive ? (
+          <span className="agent-session-hung" role="status">
+            {t("agentView.notResponding")}
+            <Button size="sm" variant="danger" className="agent-session-force-stop" onClick={forceStop}>
+              {t("agentView.forceStop")}
+            </Button>
+          </span>
+        ) : null}
         {isWorking ? (
           <button
             type="button"
             className="agent-session-stop"
-            onClick={() => {
-              softInterruptAgent(sessionId).catch((err) =>
-                console.warn("[agent] soft-interrupt failed:", err),
-              );
-            }}
+            onClick={onStop}
             title="Stop this turn (Esc)"
             aria-label="Stop the current turn"
           >

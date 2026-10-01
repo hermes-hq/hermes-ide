@@ -119,13 +119,20 @@ function splitArray(inner: string, line: number): string[] {
   return parts.map((p) => p.trim()).filter((p, i, arr) => !(p === "" && i === arr.length - 1));
 }
 
+/**
+ * A value: a scalar, or an array of scalars. worktree.toml never needs an
+ * array inside an array, and refusing one keeps the parse flat: a file of
+ * thousands of nested brackets used to recurse until the stack overflowed
+ * and blocked the window meanwhile (CHAOS-17).
+ */
 function parseValue(raw: string, line: number): TomlValue {
   const t = raw.trim();
   if (t[0] === "[") {
     if (t[t.length - 1] !== "]") throw new TomlError("unterminated array", line);
     return splitArray(t.slice(1, -1), line).map((p) => {
       if (p === "") throw new TomlError("empty array element", line);
-      return parseValue(p, line);
+      if (p[0] === "[") throw new TomlError("arrays may not be nested", line);
+      return parseScalar(p, line);
     });
   }
   return parseScalar(t, line);

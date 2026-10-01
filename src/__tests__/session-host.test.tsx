@@ -71,7 +71,9 @@ describe("QuitWithAgentsDialog", () => {
     render(<QuitWithAgentsDialog sessions={sessions} onKeep={onKeep} onStop={onStop} onCancel={onCancel} />, { wrapper: I18nProvider });
     expect(screen.getByRole("dialog")).toHaveTextContent("Fix the parser");
     expect(screen.getByRole("dialog")).toHaveTextContent("Docs");
-    expect(screen.getByRole("dialog")).toHaveTextContent("2 session(s)");
+    expect(screen.getByRole("dialog")).toHaveTextContent("2 sessions are still working");
+    // No promise to "pick up where they were" (CHAOS-19).
+    expect(screen.getByRole("dialog")).not.toHaveTextContent("pick up");
 
     fireEvent.click(screen.getByRole("button", { name: /keep running/i }));
     expect(onKeep).toHaveBeenCalledTimes(1);
@@ -83,6 +85,57 @@ describe("QuitWithAgentsDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
     expect(onCancel).toHaveBeenCalledTimes(1);
     expect(onKeep).toHaveBeenCalledTimes(1);
+  });
+
+  it("words programs as programs, agents as agents, and both together (CHAOS-19)", () => {
+    const noop = () => {};
+    const { rerender } = render(
+      <QuitWithAgentsDialog sessions={[{ id: "p1", label: "npm run dev", agent: false }]} onKeep={noop} onStop={noop} onCancel={noop} />,
+      { wrapper: I18nProvider },
+    );
+    expect(screen.getByRole("dialog")).toHaveTextContent("A program is still running");
+    expect(screen.getByRole("dialog")).toHaveTextContent("1 session is still working");
+    expect(screen.getByRole("dialog")).not.toHaveTextContent("agent");
+    rerender(
+      <QuitWithAgentsDialog
+        sessions={[{ id: "p1", label: "npm run dev", agent: false }, { id: "a1", label: "Fix login" }]}
+        onKeep={noop}
+        onStop={noop}
+        onCancel={noop}
+        queuedCount={2}
+      />,
+    );
+    expect(screen.getByRole("dialog")).toHaveTextContent("Agents and programs are still running");
+    expect(screen.getByRole("dialog")).toHaveTextContent("2 queued tasks have not started yet.");
+  });
+
+  it("without the session host, quitting stops them: no Keep running, Enter cancels (XP-05)", () => {
+    const onKeep = vi.fn();
+    const onStop = vi.fn();
+    const onCancel = vi.fn();
+    render(
+      <QuitWithAgentsDialog sessions={[{ id: "w1", label: "Fix login", hosted: false }, { id: "w2", label: "Build", hosted: false, agent: false }]} onKeep={onKeep} onStop={onStop} onCancel={onCancel} />,
+      { wrapper: I18nProvider },
+    );
+    expect(screen.getByRole("dialog")).toHaveTextContent("2 sessions are still working. Quitting stops them.");
+    expect(screen.queryByRole("button", { name: /keep running/i })).toBeNull();
+    fireEvent.keyDown(window, { key: "Enter" });
+    expect(onCancel).toHaveBeenCalledTimes(1);
+    expect(onKeep).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /stop and quit/i }));
+    expect(onStop).toHaveBeenCalledTimes(1);
+  });
+
+  it("with the host, a session that cannot keep running says it stops anyway", () => {
+    const noop = () => {};
+    render(
+      <QuitWithAgentsDialog sessions={[{ id: "h1", label: "Hosted" }, { id: "i1", label: "In process", hosted: false }]} onKeep={noop} onStop={noop} onCancel={noop} />,
+      { wrapper: I18nProvider },
+    );
+    const rows = screen.getAllByRole("listitem");
+    expect(rows[0]).not.toHaveTextContent("stops when Hermes quits");
+    expect(rows[1]).toHaveTextContent("stops when Hermes quits");
+    expect(screen.getByRole("button", { name: /keep running/i })).toBeTruthy();
   });
 
   it("Enter keeps them running and Escape cancels; a backdrop click cancels too", () => {

@@ -875,9 +875,10 @@ function AppContent() {
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | null = null;
-    listen<{ id: string; label: string }[]>("session-host-quit-requested", (event) => {
+    listen<{ id: string; label: string; hosted?: boolean; detected_agent?: unknown; ai_provider?: string | null }[]>("session-host-quit-requested", (event) => {
       if (cancelled) return;
-      setQuitAsk(event.payload.map((s) => ({ id: s.id, label: s.label })));
+      // Whether each can keep running (hosted) and is an agent or a program.
+      setQuitAsk(event.payload.map((s) => ({ id: s.id, label: s.label, hosted: s.hosted !== false, agent: !!(s.detected_agent || s.ai_provider) })));
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
     });

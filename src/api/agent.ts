@@ -91,6 +91,13 @@ export function softInterruptAgent(sessionId: string): Promise<void> {
   return sendAgentInput(sessionId, { type: "_hermes_control", op: "interrupt" });
 }
 
+/** Force stop (CHAOS-10): the agent ignored the soft interrupt, so its
+ *  process is stopped (SIGINT, then SIGKILL). The conversation stays: the
+ *  next message resumes it in a new process. */
+export function forceStopAgent(sessionId: string): Promise<void> {
+  return invoke("force_stop_agent", { sessionId });
+}
+
 /**
  * Live-flip the bridge's permission mode without a respawn.  Mirrors the
  * SDK's runtime `setPermissionMode` so a chip flip takes effect on the
