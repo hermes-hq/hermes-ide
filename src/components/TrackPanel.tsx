@@ -9,16 +9,22 @@
  *   s            skip the phase
  *
  * Keys work while the panel has focus (click it or tab to it); the same
- * actions are in the command palette. The panel never types into a terminal
- * on its own: `r` sends one tagged line because the person pressed it.
+ * actions are in the command palette. The panel types into the writer's
+ * terminal only because the person pressed something: `r` sends one tagged
+ * line with their edits, and an approval (or a skip) tells the agent, which
+ * stopped at the gate, to run `hi phase` for the next phase.
+ *
+ * It says in plain words what is happening and what the person does next,
+ * shows how far each phase file got, and warns when the writer runs in
+ * Skip all (nothing then stops it at a gate but itself).
  */
 import "../styles/components/TrackPanel.css";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { SessionData } from "../types/session";
 import { useTrack, noteOwnApproval, phaseFileOf, hasTurnHistory, type TrackFeatureState } from "../track/store";
 import { trackApprove, trackFilePath, trackPromote, trackReadFile, trackSkip, trackWriteReview } from "../track/api";
-import { attachedSessions, PHASE_LINE_CAP, slugFromBranch, TRACK_PHASES } from "../track/rules";
-import { subscribeSessionEvents } from "../agent/contract/sessionEventStore";
+import { attachedSessions, gateMovedLine, PHASE_FILE, PHASE_LINE_CAP, skipsAllApprovals, slugFromBranch, TRACK_PHASES } from "../track/rules";
+import { subscribeSessionEvents, useSessionEvents } from "../agent/contract/sessionEventStore";
 import { FEATURE_TRACKS, type FeatureTrack } from "../agent/contract/featureFrontMatter";
 import { useToastStore } from "../hooks/useToastStore";
 import { useI18n } from "../i18n/I18nProvider";
@@ -65,6 +71,9 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
     return attachedSessions(inWorktree, worktree, (id) => has.has(id));
   }, [inWorktree, worktree, withHistory]);
   const writer = attached[0] ?? null;
+  const writerEvents = useSessionEvents(writer?.id ?? "");
+  // Only an agent is told that a gate moved (a plain shell would run the line).
+  const writerIsAgent = !!writer && (withHistory.split("\u0000").includes(writer.id) || !!writer.ai_provider);
   const role = writer ? (writer.id === session.id ? "writer" : "reader") : "none";
   const [preview, setPreview] = useState<{ name: string; text: string } | null>(null);
   const [promoteTrack, setPromoteTrack] = useState<FeatureTrack>("Light");
@@ -83,32 +92,49 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
 
   const say = useCallback((message: string, type: "info" | "success" | "warning" | "error" = "info") => toast.addToast({ message, type, duration: 4000 }), [toast]);
 
+  /** The agent stopped at the gate: tell it the gate moved (the person just pressed approve or skip). */
+  const tellWriter = useCallback(
+    async (move: { from: string; to: string }, how: "approved" | "skipped"): Promise<boolean> => {
+      if (!slug || !writer || !writerIsAgent) return false;
+      try {
+        await onSendToWriter(writer.id, gateMovedLine(slug, move, how));
+        return true;
+      } catch (e) {
+        console.warn("[TrackPanel] could not tell the writer:", e);
+        return false;
+      }
+    },
+    [slug, writer, writerIsAgent, onSendToWriter],
+  );
+
   const approve = useCallback(async () => {
     if (!slug || !waiting || busy) return;
     setBusy(true);
     try {
       noteOwnApproval(worktree, slug);
       const move = await trackApprove(worktree, slug);
-      say(t("track.approvedToast", { slug, from: move.from, to: move.to }), "success");
+      const told = await tellWriter(move, "approved");
+      say(told ? t("track.approvedToldToast", { slug, from: move.from, to: move.to, writer: writer?.label || t("track.theWriter") }) : t("track.approvedToast", { slug, from: move.from, to: move.to }), "success");
     } catch (e) {
       say(String(e), "error");
     } finally {
       setBusy(false);
     }
-  }, [slug, waiting, busy, worktree, say, t]);
+  }, [slug, waiting, busy, worktree, say, t, tellWriter, writer]);
 
   const skip = useCallback(async () => {
     if (!slug || !meta || meta.phase === "done" || busy) return;
     setBusy(true);
     try {
       const move = await trackSkip(worktree, slug);
+      await tellWriter(move, "skipped");
       say(t("track.skippedToast", { slug, from: move.from, to: move.to }), "info");
     } catch (e) {
       say(String(e), "error");
     } finally {
       setBusy(false);
     }
-  }, [slug, meta, busy, worktree, say, t]);
+  }, [slug, meta, busy, worktree, say, t, tellWriter]);
 
   const openPreview = useCallback(async () => {
     if (!slug) return;
@@ -199,6 +225,20 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
 
   const phases = meta ? TRACK_PHASES[meta.track] : [];
   const doneIdx = meta ? (meta.phase === "done" ? phases.length : phases.indexOf(meta.phase)) : -1;
+  const nextPhase = meta && doneIdx >= 0 && doneIdx < phases.length - 1 ? phases[doneIdx + 1] : "done";
+  // The writer's permission mode, as the agent reports it, else as it was launched.
+  const writerMode = writerIsAgent && writer ? writerEvents.identity.permissionMode ?? writer.permission_mode : null;
+  const explain = !meta
+    ? null
+    : meta.phase === "done"
+      ? t("track.explainDone")
+      : waiting
+        ? t("track.explainWaiting", { phase: meta.phase, file: phaseFile ?? "feature.md", next: nextPhase, shortcut: fmt("{mod}⏎") })
+        : meta.gate === "approved"
+          ? t(writerIsAgent ? "track.explainApproved" : "track.explainApprovedNoWriter", { phase: meta.phase })
+          : phaseFile
+            ? t(phaseFileInfo ? "track.explainWorking" : "track.explainNotStarted", { phase: meta.phase, file: phaseFile, lines: String(phaseFileInfo?.lines ?? 0), cap: String(cap ?? "") })
+            : t("track.explainImplementing", { phase: meta.phase });
 
   return (
     <aside
@@ -270,12 +310,19 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
                     {cls === "done" ? "✓" : cls === "waiting" ? "◆" : cls === "current" ? "›" : "·"}
                   </span>
                   <span className="track-phase-name">{p}</span>
-                  {p === meta.phase && phaseFileInfo && (
-                    <span className="track-phase-lines mono">
-                      {phaseFileInfo.lines}
-                      {cap ? `/${cap}` : ""}
-                    </span>
-                  )}
+                  {(() => {
+                    // How far each phase's file got (what the agent wrote so far).
+                    const name = PHASE_FILE[p];
+                    const info = name ? feature.files.find((f) => f.name === name) : undefined;
+                    if (!info) return null;
+                    const pc = PHASE_LINE_CAP[p];
+                    return (
+                      <span className="track-phase-lines mono" data-file={name}>
+                        {info.lines}
+                        {pc ? `/${pc}` : ""}
+                      </span>
+                    );
+                  })()}
                 </li>
               );
             })}
@@ -286,6 +333,17 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
               </li>
             )}
           </ol>
+
+          {explain && (
+            <p className="track-explain" data-testid="track-explain">
+              {explain}
+            </p>
+          )}
+          {skipsAllApprovals(writerMode) && meta.phase !== "done" && (
+            <p className="track-skip-all" role="note" data-testid="track-skip-all">
+              {t("track.skipAllWarning")}
+            </p>
+          )}
 
           <div className={`track-gate track-gate-${meta.gate}`} data-testid="track-gate">
             {waiting && (

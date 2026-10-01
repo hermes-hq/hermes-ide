@@ -13,7 +13,9 @@
 //             current row; every piece of text in every row (metadata
 //             included) is ≥ 4.5:1 on what it is drawn on; a row's model
 //             and permission-mode tags are 18 px and share one line,
-//             clear of the row's Close
+//             clear of the row's Close; both rows show both tags, and keep
+//             the model when Hermes's own identity update (no model) comes
+//             after the agent's (the order the CI runners saw)
 //   header    the pane header line is 28 px; its chips are 24 px Chips
 //   strip     28 px, its inbox button a 28 px Button, its text ≥ 4.5:1
 //   close     every close / remove / dismiss button in the chrome is the one
@@ -486,11 +488,11 @@ async function checkSidebar(bridge, theme, active, other) {
   logContrast(`${theme}: all session rows`, m.text);
   // Density: the model and permission tags are tag-sized chips that share one line.
   log(`  ${theme}: identity tags ${JSON.stringify(m.identity.map((r) => r.map((c) => `${c.text} ${c.w}×${c.h}px in a ${c.line}px line`)))}`);
-  // Each row shows the tags its agent has reported. On the macOS CI runner
-  // the first session's model (from its start signal) did not show while
-  // its permission mode did; which tags arrive is not this check's subject.
-  // One row with both tags is what the density checks below need.
-  check(m.identity.length === 2 && m.identity.every((r) => r.length >= 1) && m.identity.some((r) => r.length >= 2), `${theme}: both rows show their tags, and a row shows its model and permission tags together (${m.identity.map((r) => r.length).join(", ")})`);
+  // Each row shows both tags its agent reported: its model (from its start
+  // signal) and its permission mode. (On the CI runners a row's model went
+  // missing: Hermes's own identity update, which has no model, arrived after
+  // the agent's and replaced it. Identity now merges field by field.)
+  check(m.identity.length === 2 && m.identity.every((r) => r.length === 2), `${theme}: both rows show their model and permission tags (${m.identity.map((r) => r.length).join(", ")})`);
   check(m.identity.every((r) => r.every((c) => c.h === 18)), `${theme}: the tags are 18 px (badge height), not 24 px chips (${m.identity.flat().map((c) => c.h).join(", ")})`);
   check(m.identity.every((r) => r.every((c) => Math.abs(c.top - r[0].top) < 0.5)), `${theme}: a row's tags sit on one line`);
   check(m.identity.every((r) => r.every((c) => !c.underClose)), `${theme}: no tag runs under the row's Close`);
@@ -776,6 +778,20 @@ try {
   assert(activeId === B, `the session created last is in view (${activeId})`);
   const activeLabel = await bridge.eval(`return e2e.norm(e2e.first(".session-item-active .session-item-name")?.innerText ?? "");`);
   log(`  sessions: A=${A}, B=${B} ("${activeLabel}")`);
+  // Both rows show the model their agent named, and keep it when Hermes's
+  // own view of the terminal (no model, the launch's permission mode) is
+  // reported after the agent's: the order the CI runners saw.
+  const modelTags = () => bridge.eval(`return e2e.all(".session-item-identity-row").map((r) => [...r.querySelectorAll(".session-model-chip")].map((c) => e2e.norm(c.innerText)).join(","));`);
+  await bridge.waitFor("both rows to show their agent's model", `return e2e.all(".session-item-identity-row .session-model-chip").length === 2;`, { timeoutMs: 15_000 });
+  for (const id of [A, B]) {
+    const snap = await bridge.eval(`return window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(id)}).identity;`);
+    const injected = await bridge.eval(`return window.__HERMES_E2E__.injectSessionEvent(${JSON.stringify(id)}, ${JSON.stringify({ type: "identity", at: Date.now(), source: "hermes", vendorSessionId: null, model: null, permissionMode: "acceptEdits" })});`);
+    assert(injected, `Hermes's terminal identity (no model) replayed for ${id} after the agent's (${JSON.stringify(snap)})`);
+  }
+  await sleep(300);
+  const tagsAfter = await modelTags();
+  assert(tagsAfter.length === 2 && tagsAfter.every((t) => t === "fake-default-model"), `a later identity without a model keeps each row's model tag (${JSON.stringify(tagsAfter)})`);
+
   // The header chips of a Claude session: the instruction-files chip.
   await bridge.waitFor("the header's instruction-files chip", `return !!e2e.first(".split-pane-label .agent-rules-chip");`, { timeoutMs: 20_000 });
 

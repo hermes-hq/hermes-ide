@@ -6,7 +6,10 @@
 //   1. the repository becomes (or already is) a Hermes project;
 //   2. each agent gets a session on its own new branch (the worktree is
 //      made by createSession through the honest-isolation path), with the
-//      task as its first prompt;
+//      task as its first prompt — for a task tracked as a feature, the task
+//      wrapped in the track's rules and the first phase's instructions, so
+//      the agent writes questions.md and stops at the gate instead of doing
+//      the whole task;
 //   3. a Full-track task gets its first feature.md in each worktree;
 //   4. an agent that cannot take a first prompt gets the task on the
 //      clipboard instead (Hermes never types it for the user);
@@ -39,6 +42,8 @@ export interface LaunchTaskDeps {
   place(sessionId: string, index: number, firstSessionId: string | null): void;
   worktreePath(sessionId: string, projectId: string): Promise<string | null>;
   writeFeatureFile(checkout: string, slug: string, contents: string): Promise<string>;
+  /** The first prompt of a Full-track task (taskTrackPrompt). */
+  trackPrompt?(repoRoot: string, slug: string, task: string): Promise<string>;
   copyText(text: string): Promise<void>;
   readRecords(): Promise<string>;
   writeRecords(raw: string): Promise<void>;
@@ -70,6 +75,17 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
   const projectId = await deps.projectFor(req.repoRoot);
   const label = taskLabel(task);
   const records: TaskLaunchRecord[] = [];
+  const slug = taskSlug(task) || "task";
+  // A Full track drives the agent phase by phase from its first prompt. When
+  // the prompt cannot be built the launch still goes, with the bare task.
+  let firstPrompt = task;
+  if (req.track === "Full" && deps.trackPrompt) {
+    try {
+      firstPrompt = await deps.trackPrompt(req.repoRoot, slug, task);
+    } catch (err) {
+      console.warn("[launchTask] could not build the feature track's first prompt:", err);
+    }
+  }
 
   for (const [i, agent] of req.agents.entries()) {
     const custom = getAgent(agent.id)?.custom === true;
@@ -84,7 +100,7 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
       branchSelections: agent.worktree
         ? { [projectId]: { branch: agent.branch, createNew: agent.createBranch, ...(agent.createBranch && agent.baseBranch ? { baseBranch: agent.baseBranch } : {}) } }
         : undefined,
-      initialPrompt: task,
+      initialPrompt: firstPrompt,
       permissionMode: agent.launch.permissionMode,
       customPrefix: agent.launch.customPrefix || undefined,
       customSuffix: agent.launch.customSuffix || undefined,
@@ -128,11 +144,10 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
   }
 
   if (result.copiedFor.length > 0) {
-    await deps.copyText(task).catch((err) => console.warn("[launchTask] could not copy the task:", err));
+    await deps.copyText(firstPrompt).catch((err) => console.warn("[launchTask] could not copy the task:", err));
   }
 
   if (req.track === "Full") {
-    const slug = taskSlug(task) || "task";
     const contents = featureMarkdown({ slug, task, doneWhen: req.doneWhen });
     for (const id of result.sessionIds) {
       try {

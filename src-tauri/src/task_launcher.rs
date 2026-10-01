@@ -132,7 +132,34 @@ pub fn write_feature_file(checkout: &Path, slug: &str, contents: &str) -> Result
     }
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     std::fs::write(&file, contents).map_err(|e| e.to_string())?;
+    // The phase prompts `hi phase` reads and the /hermes-phase command, as
+    // `hi feature new` leaves them; a failure here does not undo the feature.
+    if let Err(e) = hermes_track::seed_repo_files(checkout) {
+        log::warn!("[launcher] could not seed the phase prompts: {e}");
+    }
     Ok(file)
+}
+
+/// The first prompt of a task tracked as a feature (Full track): the task
+/// with the track's rules and its first phase's instructions, read from the
+/// repository's `.hermes/phases/` (else the built-in ones). The agent starts
+/// with this instead of the bare task, so it works phase by phase and stops
+/// at each gate.
+pub fn track_prompt(repo_root: &Path, slug: &str, task: &str) -> Result<String, String> {
+    if !valid_slug(slug) {
+        return Err(format!("not a valid feature name: {slug:?}"));
+    }
+    Ok(hermes_track::first_prompt(
+        repo_root,
+        slug,
+        hermes_track::Track::Full,
+        task,
+    ))
+}
+
+#[tauri::command]
+pub fn task_track_prompt(repo_root: String, slug: String, task: String) -> Result<String, String> {
+    track_prompt(Path::new(&repo_root), &slug, &task)
 }
 
 #[tauri::command]
@@ -159,6 +186,33 @@ mod tests {
                 .unwrap();
         }
         repo
+    }
+
+    #[test]
+    fn a_full_track_task_starts_with_the_questions_phase_and_seeds_the_prompts() {
+        let dir = tempfile::tempdir().unwrap();
+        repo_with_commit(dir.path());
+        let prompt =
+            track_prompt(dir.path(), "fail-notice", "Build the failure notification").unwrap();
+        assert!(
+            prompt.contains("Build the failure notification"),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains("Current phase: questions (1 of 6)."),
+            "{prompt}"
+        );
+        assert!(
+            prompt.contains(".hermes/features/fail-notice/questions.md"),
+            "{prompt}"
+        );
+        assert!(prompt.contains("`hi phase done`, then STOP"), "{prompt}");
+        assert!(track_prompt(dir.path(), "Bad Slug", "x").is_err());
+        let file =
+            write_feature_file(dir.path(), "fail-notice", "---\nslug: fail-notice\n---\n").unwrap();
+        assert!(file.exists());
+        assert!(dir.path().join(".hermes/phases/questions.md").exists());
+        assert!(dir.path().join(".claude/commands/hermes-phase.md").exists());
     }
 
     #[test]

@@ -178,7 +178,8 @@ try {
   await typeInto(bridge, ".task-launcher-check-input", "npm run check");
   assert(!(await bridge.eval(`return /\\bSize\\b/.test(e2e.first(".task-launcher-options").innerText);`)), "there is no Size choice any more");
   const featureNote = await bridge.eval(`return e2e.norm(e2e.first(".task-launcher-feature").innerText);`);
-  assert(/Questions → research → design → plan before any code/.test(featureNote), "Track as a feature explains itself");
+  assert(/Questions → research → design → structure → plan → implement, before any code/.test(featureNote) && /Not the same as Claude Code's own plan mode \(Approval › Plan first\)/.test(featureNote), `Track as a feature explains itself, and that it is not Claude's plan mode ("${featureNote}")`);
+  assert((await bridge.eval(`return e2e.all(".task-launcher-opt-label").map((l) => e2e.norm(l.innerText));`)).includes("Feature track"), "its row is called Feature track (not Planning)");
   await bridge.click(".task-launcher-feature-box");
   await bridge.click(".task-launcher-also-toggle");
   await bridge.waitFor("the second agent's choices", `return !!e2e.first(".task-launcher-also-agent");`);
@@ -216,13 +217,16 @@ try {
   assert(rc && rx, "claude and codex both started");
   assert(rc.sessionIdArg && rc.settingsFile, "claude was started by the launch helper");
   assert(hasSeq(rc.argv, ["--permission-mode", "plan"]), "claude: --permission-mode plan");
-  assert(rc.argv.some((a) => String(a).startsWith(TASK)), "claude: the task is its first prompt");
+  // Tracked as a feature: the first prompt is the track's (the task, the
+  // questions phase, the gate), not the bare task.
+  const trackPrompt = (argv) => argv.find((a) => String(a).startsWith("Hermes Feature Track (Full)")) ?? "";
+  assert(trackPrompt(rc.argv).includes(TASK) && /Current phase: questions \(1 of 6\)/.test(trackPrompt(rc.argv)) && /hi phase done`, then STOP/.test(trackPrompt(rc.argv)), "claude: its first prompt is the feature track's, with the task");
   assert(hasSeq(rc.argv, ["--channels", "plugin:proof"]), "claude: --channels plugin:proof");
   assert(hasSeq(rc.argv, ["--model", "opus"]) && hasSeq(rc.argv, ["--effort", "high"]) && rc.argv.at(-1) === "--extra-proof", "claude: --model opus --effort high, and --extra-proof last");
   if (PREFIX) assert(rc.env.HERMES_PREFIX_PROOF === "launcher", "claude ran through the Settings prefix");
   assert(rx.argv.includes("--dangerously-bypass-approvals-and-sandbox"), "codex: its own approval (Skip all)");
   assert(hasSeq(rx.argv, ["-m", CODEX_MODEL]) && codexEffort(rx.argv, "high"), "codex: its own model and effort");
-  assert(rx.argv.some((a) => String(a).startsWith(TASK)), "codex: the same task");
+  assert(trackPrompt(rx.argv).includes(TASK), "codex: the same task, in the same track prompt");
   const develop = fx.git("rev-parse", "develop");
   const wts = fx.worktrees();
   const wtClaude = wts.find((w) => w.branch === "hermes/fix-the-flaky-login-test");

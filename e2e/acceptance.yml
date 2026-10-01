@@ -470,6 +470,64 @@ features:
       FIX-overlay-focus-2:
         text: "Opening the inbox, the command palette or the task launcher closes whichever of the others is open; the launcher keeps what was typed"
         scenarios: [FIX-overlay-focus.mjs]
+  FIX-launcher-draft:
+    # A bug fix, not new 2.0 work (the maintainer's test of 2.0). Negative
+    # control (run by hand): a build of main before the fix ends in
+    # RESULT: FAIL (no launcher after Settings closes; the draft was lost).
+    name: "What was typed in the launcher survives configuration and closing it by accident"
+    status: shipped
+    criteria:
+      FIX-launcher-draft-1:
+        text: "Opening Settings (Manage accounts, the Settings button, the app menu) from the open launcher keeps its task, every chip and the options, and the launcher comes back exactly as it was when Settings closes"
+        scenarios: [FIX-launcher-draft.mjs]
+      FIX-launcher-draft-2:
+        text: "Sign in from the launcher gives way to the sign-in terminal, and the launcher comes back as it was once that terminal is closed"
+        scenarios: [FIX-launcher-draft.mjs]
+      FIX-launcher-draft-3:
+        text: "Esc or a click outside closes the launcher but ⌘N brings the same draft back, saying so with Start over; only Start over or a launch forgets it"
+        scenarios: [FIX-launcher-draft.mjs, F15-launcher-flow.mjs]
+  FIX-launcher-safety:
+    # A bug fix, not new 2.0 work. Negative control (run by hand): a build of
+    # main ends in RESULT: FAIL (no warning in the chip row).
+    name: "Skip all is never picked for the person, and plan mode is findable"
+    status: shipped
+    criteria:
+      FIX-launcher-safety-1:
+        text: "A fresh profile starts Claude in its safety default (Accept edits); neither the usual combination, the agent's last launch nor a Settings default puts the launcher in Skip all, and it says so"
+        scenarios: [FIX-launcher-safety.mjs]
+      FIX-launcher-safety-2:
+        text: "Skip all chosen by hand is said in red in the chip row itself, also that a feature track's gates then rely on the agent stopping"
+        scenarios: [FIX-launcher-safety.mjs]
+      FIX-launcher-safety-3:
+        text: "The approval chip says what its mode does, Plan first is named as Claude's own plan mode, and the Feature track option says it is not that"
+        scenarios: [FIX-launcher-safety.mjs, F15-launcher-chips.mjs]
+  FIX-track-drives-agent:
+    # A bug fix, not new 2.0 work. Negative control (run by hand): a build of
+    # main ends in RESULT: FAIL (the agent's first prompt is the bare task).
+    # The same with the real claude: REAL-track-claude.mjs (local only).
+    name: "Track as a feature drives the agent phase by phase"
+    status: shipped
+    criteria:
+      FIX-track-drives-agent-1:
+        text: "A task tracked as a feature starts the agent with the track's first prompt (the task, the phases, the questions phase, its file and the gate), and the worktree has feature.md, the phase prompts and the /hermes-phase command"
+        scenarios: [FIX-track-drives-agent.mjs, F15-launcher-chips.mjs, F15-task-launcher.mjs]
+      FIX-track-drives-agent-2:
+        text: "The Track panel says in plain words what the agent is doing and what the person does next, with each phase file's size, and warns when the agent runs in Skip all"
+        scenarios: [FIX-track-drives-agent.mjs]
+      FIX-track-drives-agent-3:
+        text: "Approving (or skipping) a gate tells the writer agent, in one line, to run hi phase for the next phase"
+        scenarios: [FIX-track-drives-agent.mjs, F28-feature-tracks.mjs]
+  FIX-identity-tags:
+    # Found on main's CI (UI-chrome on macOS shard 2): a row's model tag went
+    # missing when Hermes's own identity update came after the agent's.
+    # Negative control (run by hand): UI-chrome on a build of main ends in
+    # RESULT: FAIL at the replayed update.
+    name: "A session row keeps the model its agent reported"
+    status: shipped
+    criteria:
+      FIX-identity-tags-1:
+        text: "Identity reports from several sources merge field by field: a later one without the model never erases the model the agent named"
+        scenarios: [UI-chrome.mjs]
   FIX-spawn-no-freeze:
     # A bug fix, not new 2.0 work. Found as N20-session-host's "the webview
     # did not answer" on the macOS CI runner: a restored terminal never
@@ -1214,6 +1272,9 @@ features:
       F14-3:
         text: "Terminal sessions show no gauge rather than a guess"
         scenarios: [F14-context-gauge.mjs]
+      F14-4:
+        text: "The window is the agent's own for each model (Claude Code's 1M for the Claude 5 models, Codex's model_context_window); a model with no known window shows no gauge"
+        scenarios: [F14-context-gauge.mjs]
   F24:
     name: "Fleet performance: many terminals"
     # Behind the fleetPerf flag. Budgets per OS: e2e/app/fleet-budgets.json.
@@ -1250,6 +1311,16 @@ features:
         # e2e/app/scenarios/REAL-launcher-claude.mjs, local only like the others.
         text: "From ⌘N with a model and an effort chosen on the chips, claude runs as hi run -> claude with exactly one --model and one --effort of those values and the task as its first prompt"
         scenarios: ["REAL-launcher-claude.mjs@darwin,linux"]
+      REAL-5:
+        # e2e/app/scenarios/REAL-track-claude.mjs, local only like the others.
+        text: "Track as a feature with the real claude (haiku): it writes questions.md, runs hi phase done and stops with the code untouched; approving moves it to research and it starts research"
+        scenarios: ["REAL-track-claude.mjs@darwin,linux"]
+      REAL-6:
+        text: "The context gauge equals the real claude's own /context (window, tokens within 1 % of the window, percent within a point) on haiku and on a 1M-window model"
+        scenarios: ["REAL-context-claude.mjs@darwin,linux"]
+      REAL-7:
+        text: "The context gauge equals the real codex's own /status (window, tokens used within 0.1K) and footer percent; the real agy shows no gauge"
+        scenarios: ["REAL-context-codex.mjs@darwin,linux"]
   UI:
     name: "One consistent control set (UI kit foundation)"
     # Foundation only: tokens, the base.css reset, the components in

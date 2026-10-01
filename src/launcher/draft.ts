@@ -1,10 +1,13 @@
 // ─── The launcher's unsent draft ───────────────────────────────────────
 //
-// A click outside the launcher closes it but keeps what was typed and
-// chosen: ⌘N brings the same draft back. Cancel (Esc), a launch or an app
-// restart forget it. Kept in memory only.
+// However the launcher closes without launching — Esc, Cancel, a click
+// outside, or because Settings, a sign-in or another overlay took its place
+// — it keeps what was typed and chosen, and ⌘N (or the configuration
+// closing) brings the same draft back. Only a launch or "Start over" forgets
+// it. Kept in memory for the app session only.
 
 import type { LaunchChoice } from "../agent/capabilities/types";
+import type { SessionMode } from "../types/session";
 
 export interface LauncherDraft {
   task: string;
@@ -15,6 +18,13 @@ export interface LauncherDraft {
   checks: string[];
   checksEdited: boolean;
   expanded: boolean;
+  /** Terminal or Agent view, when the agent offers both. */
+  viewMode?: SessionMode;
+}
+
+/** Worth keeping: something was typed or chosen (an untouched sheet is not a draft). */
+export function isDraftWorthKeeping(d: { task: string; touched: boolean; expanded: boolean; branchEdited: boolean; checksEdited: boolean; restored: boolean }): boolean {
+  return d.restored || d.touched || d.expanded || d.branchEdited || d.checksEdited || d.task.trim() !== "";
 }
 
 let draft: LauncherDraft | null = null;

@@ -177,6 +177,32 @@ describe("launchTask", () => {
     expect(r.featureFiles).toEqual(["/fixture-home/wt/s1/.hermes/features/fix-the-login-bug/feature.md"]);
   });
 
+  it("a Full track starts the agent with the track's first prompt (questions, then the gate), not the bare task", async () => {
+    const trackPrompt = vi.fn(async (root: string, slug: string, task: string) => `TRACK(${root}|${slug}|${task})`);
+    const f = fakeDeps({ trackPrompt });
+    await launchTask(req({ track: "Full", agents: [agent("claude", "terminal", "hermes/fix-the-login-bug"), agent("codex", "terminal", "hermes/fix-the-login-bug-codex")] }), f.deps);
+    expect(trackPrompt).toHaveBeenCalledWith("/fixture-home/repo", "fix-the-login-bug", "Fix the login bug");
+    expect(f.created.map((o) => o.initialPrompt)).toEqual([
+      "TRACK(/fixture-home/repo|fix-the-login-bug|Fix the login bug)",
+      "TRACK(/fixture-home/repo|fix-the-login-bug|Fix the login bug)",
+    ]);
+    // The launch record keeps the task as the person wrote it.
+    expect(f.records().map((r) => r.task)).toEqual(["Fix the login bug", "Fix the login bug"]);
+    // Quick: the bare task, no track prompt asked for.
+    const q = fakeDeps({ trackPrompt });
+    trackPrompt.mockClear();
+    await launchTask(req(), q.deps);
+    expect(trackPrompt).not.toHaveBeenCalled();
+    expect(q.created[0].initialPrompt).toBe("Fix the login bug");
+  });
+
+  it("a Full track whose prompt cannot be built still launches, with the bare task", async () => {
+    const f = fakeDeps({ trackPrompt: vi.fn(async () => Promise.reject(new Error("no repo"))) });
+    const r = await launchTask(req({ track: "Full" }), f.deps);
+    expect(r.ok).toBe(true);
+    expect(f.created[0].initialPrompt).toBe("Fix the login bug");
+  });
+
   it("an agent that cannot take a first prompt gets the task on the clipboard", async () => {
     const f = fakeDeps();
     const r = await launchTask(req({ agents: [agent("goose", "terminal", "hermes/g")] }), f.deps);
