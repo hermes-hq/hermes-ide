@@ -824,6 +824,28 @@ describe("TaskLauncher: a base branch the repository does not have", () => {
     expect(onLaunch.mock.calls[0][0].agents[0]).toMatchObject({ baseBranch: "", createBranch: true, branch: "hermes/fix-the-release" });
   });
 
+  it("the applied preset stays the selected chip after its base falls back, even when that equals another preset; a change of the person ends it", async () => {
+    h.cap.presets = [
+      { id: "p1", name: "Opus plan", choice: stored("") } as never,
+      { id: "p2", name: "Release fix", choice: stored("release/gone") } as never,
+    ];
+    await open();
+    await typeTask("Fix the release");
+    fireEvent.keyDown(task(), { key: "2", ...modKey });
+    await settle();
+    expect(document.querySelector(".task-launcher-fallback")).not.toBeNull();
+    const selected = () => [...document.querySelectorAll(".task-launcher-preset.selected")].map((b) => b.textContent);
+    expect(selected()).toEqual([expect.stringContaining("Release fix")]);
+    // The person changes the choice and changes it back: the equal preset is the selected one again.
+    fireEvent.click(chip("where"));
+    choose(".task-launcher-menu .task-launcher-base", "develop");
+    await settle();
+    expect(selected()).toEqual([]);
+    choose(".task-launcher-menu .task-launcher-base", "");
+    await settle();
+    expect(selected()).toEqual([expect.stringContaining("Opus plan")]);
+  });
+
   it("the usual combination from another repository keeps its base only where that branch exists", async () => {
     h.cap.history = [{ repo: REPO, choice: stored("develop"), at: 1 } as never];
     const first = await open();

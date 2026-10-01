@@ -183,6 +183,10 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
   const [viewMode, setViewMode] = useState<SessionMode>("terminal");
   const [caps, setCaps] = useState<Record<string, AgentCapabilities>>({});
   const [presets, setPresets] = useState<CheckedPreset[]>([]);
+  // The preset the person applied and the choice it gave: its chip stays the
+  // selected one while the choice is that one, also after a fallback made it
+  // equal to another preset. Any other change of the choice ends it.
+  const [applied, setApplied] = useState<{ id: string; choice: LaunchChoice } | null>(null);
   const [capsErrors, setCapsErrors] = useState<Record<string, string>>({});
   const [capsLoaded, setCapsLoaded] = useState(false);
   const [capsAttempt, setCapsAttempt] = useState(0);
@@ -428,7 +432,9 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
     if (!choice || choice.where.kind !== "new-worktree" || !choice.where.baseBranch || !probed || !gitRoot) return;
     if (branchSet.has(choice.where.baseBranch)) return;
     const was = choice.where.baseBranch;
-    setChoice({ ...choice, where: { ...choice.where, baseBranch: "" } });
+    const next: LaunchChoice = { ...choice, where: { ...choice.where, baseBranch: "" } };
+    setChoice(next);
+    setApplied((a) => (a && a.choice === choice ? { ...a, choice: next } : a));
     setFallbacks((f) => ({
       source: f?.source ?? choiceSource.current ?? "repo",
       list: [...(f?.list ?? []), { field: "where", message: `${was} is not a branch of this repository; using the current branch`, was, now: null, code: "baseBranchMissing", params: { branch: was } }],
@@ -492,6 +498,7 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
       : { choice: preset.effective, issues: preset.issues, launchable: preset.launchable };
     choiceSource.current = preset.name;
     setChoice(checked.choice);
+    setApplied({ id: preset.id, choice: checked.choice });
     setFallbacks(checked.issues.length || !checked.launchable ? { source: preset.name, list: checked.issues, launchable: checked.launchable } : null);
     setMenu(null);
   }, [caps]);
@@ -1084,7 +1091,9 @@ export function TaskLauncher({ onLaunch, onClose, onOpenAdvanced, onSignIn, onMa
   };
 
   const noFirstPrompt = plannedAgents.filter((a) => a.mode === "terminal" && !agentTakesFirstPrompt(a.id));
-  const presetIndex = effective ? presets.findIndex((p) => sameCombo(rememberedForm(p.choice), rememberedForm(effective))) : -1;
+  const appliedIndex = applied && applied.choice === choice ? presets.findIndex((p) => p.id === applied.id) : -1;
+  const presetIndex =
+    appliedIndex >= 0 ? appliedIndex : effective ? presets.findIndex((p) => sameCombo(rememberedForm(p.choice), rememberedForm(effective))) : -1;
 
   const body = (
     <div className={`task-launcher${inline ? " task-launcher-inline" : ""}`} ref={sheetRef} onKeyDown={onSheetKey} data-ready={ready && choice ? "true" : "false"}>

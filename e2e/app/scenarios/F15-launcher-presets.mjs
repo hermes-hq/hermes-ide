@@ -228,11 +228,16 @@ try {
   await openLauncher(bridge);
   await typeInto(bridge, ".task-launcher-task", "Fix the release");
   await pressKey(bridge, ".task-launcher-task", "4", MOD);
-  await bridge.waitFor("preset 4 applied", `return e2e.all(".task-launcher-preset").some((b) => /Release fix/.test(b.innerText) && b.classList.contains("selected"));`);
   // The warning comes once the repository's branches are known (its probe is debounced).
   await bridge
     .waitFor("the base-branch warning", `return e2e.all(".task-launcher-fallback li").some((l) => l.getAttribute("data-field") === "where");`, { timeoutMs: 10_000 })
     .catch(() => log("  (no base-branch warning within 10 s)"));
+  // After the fallback the choice equals preset 1's: the chip of the preset applied stays the selected one.
+  const selectedChips = await bridge.waitFor(
+    "preset 4 applied",
+    `const sel = e2e.all(".task-launcher-preset.selected").map((b) => e2e.norm(b.innerText)); return sel.some((t) => /Release fix/.test(t)) && sel;`,
+  );
+  assert(selectedChips.length === 1, `only the applied preset's chip is selected (${JSON.stringify(selectedChips)})`);
   // "Hermes will run" is asked of the backend again after the fallback: it may trail the warning.
   await bridge
     .waitFor("the preview without the missing base", `return !/release\\/gone/.test(e2e.first(".task-launcher-command")?.textContent ?? "release/gone");`, { timeoutMs: 5_000 })
