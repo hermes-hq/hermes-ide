@@ -15,7 +15,8 @@
 //      (saved on Enter, exactly as a person does it)
 //   3. the agent blocks again, with a command, a question and file content
 //      in its status and attention events: the server receives exactly ONE
-//      POST whose JSON body has exactly agent, task and state — none of the
+//      POST whose JSON body has exactly agent, task, state and where (folder
+//      and session number) — none of the
 //      prompt, command or code
 //   4. a second request from the same agent before you looked at it sends
 //      nothing more (one message per blocked agent)
@@ -347,7 +348,8 @@ try {
   assert(req.method === "POST" && req.url === "/hook", `POST /hook (${req.method} ${req.url})`);
   assert(/^application\/json/.test(req.headers["content-type"] ?? ""), "a JSON body");
   const body = JSON.parse(req.body);
-  assert(JSON.stringify(Object.keys(body).sort()) === JSON.stringify(["agent", "state", "task"]), `the body has exactly agent, task and state: ${req.body}`);
+  assert(JSON.stringify(Object.keys(body).sort()) === JSON.stringify(["agent", "state", "task", "where"]), `the body has exactly agent, task, state and where: ${req.body}`);
+  assert(/^\S.* #\d+$|^#\d+$/.test(body.where), `where: the folder and the session's number ("${body.where}")`);
   assert(body.state === "needs_approval", "state: needs_approval");
   assert(typeof body.agent === "string" && body.agent.length > 0, `agent: "${body.agent}"`);
   assert(!label || body.task === label, `task is the session's name ("${body.task}")`);
@@ -386,7 +388,7 @@ try {
   const fresh = approvalFor();
   assert(fresh.length === 1, `the blocked Agent view session sent one message (got ${fresh.length})`);
   const gBody = JSON.parse(fresh[0].body);
-  assert(JSON.stringify(Object.keys(gBody).sort()) === JSON.stringify(["agent", "state", "task"]), `exactly agent, task and state: ${fresh[0].body}`);
+  assert(JSON.stringify(Object.keys(gBody).sort()) === JSON.stringify(["agent", "state", "task", "where"]), `exactly agent, task, state and where: ${fresh[0].body}`);
   assert(gBody.task === "", `a name taken from a prompt is not sent (task: "${gBody.task}")`);
   const rawAll = JSON.stringify(hook.requests);
   for (const w of PROMPT_WORDS) assert(!rawAll.includes(w), `no message carries the prompt ("${w}")`);

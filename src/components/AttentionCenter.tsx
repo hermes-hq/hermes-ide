@@ -3,22 +3,26 @@
 // F12 + N16, behind the `attentionInbox` feature flag (App.tsx mounts this
 // only when it is on). Lives in the title bar.
 //
-//   badge      the number of items Blocked on you; click or ⌘⇧I opens the
-//              inbox. The same count goes to the dock (macOS), the taskbar
-//              overlay (Windows) or the urgency hint (Linux).
-//   inbox      a listbox in two groups, Blocked on you and Ready for you,
-//              oldest first. ↑↓ select, Space peeks at the request detail
-//              (read-only), Enter jumps to the pane, M mutes the session
-//              for an hour, Esc closes.
+//   badge      the number of agents blocked on you (the sessions ⌘I visits);
+//              click or ⌘⇧I opens the inbox. The same count goes to the dock
+//              (macOS), the taskbar overlay (Windows) or the urgency hint
+//              (Linux). Hermes's own notices are named in its label apart.
+//   inbox      a listbox in up to three groups, Blocked on you, Hermes ·
+//              n notices and Ready for you, oldest first. ↑↓ select, Space
+//              peeks at the request detail (read-only), Enter jumps to the
+//              pane, M mutes the session for an hour, Esc closes.
 //   ⌘I         jumps to the session waiting longest; repeat to cycle. A
-//              short note says where in the line it is ("2 of 3").
+//              short note says where in the line it is ("2 of 3"), or that
+//              nothing is waiting.
 //   morning    agents already blocked when Hermes starts: the inbox opens
 //              by itself, once, as the morning view (how many wait on you,
 //              oldest first, each with its place in the line and whether
 //              its status is exact or guessed, and "Start today's tasks").
 //   notify     one OS notification per session (never for the session you
 //              look at in a focused window); a Blocked on you item also
-//              sends one away message when an address is configured.
+//              sends one away message when an address is configured and
+//              Hermes is not in front of you (see attention/notifier.ts). A
+//              failed away message raises one Hermes notice.
 //   awake      the machine stays awake while any session is working.
 //
 // Everything reads AgentStatus / inbox items only (the C0 contracts), so
@@ -29,10 +33,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { useInboxItems, raiseInboxItem, resolveInboxItem, resolveInboxItemsForSession, type InboxItem } from "../agent/contract/inbox";
 import { getSessionEventSnapshot, subscribeAllSessionEvents } from "../agent/contract/sessionEventStore";
 import { setAttentionBadge, setKeepAwake, sendAwayNotification } from "../api/attention";
+import { listAllWorktrees } from "../api/git";
+import { awayDelayMs, getAwayPrefs, loadAwayPrefs } from "../attention/awayPrefs";
+import { AWAY_FAILURE_SOURCE, awayFailureNotices, clearAwayFailureNotices, noteAwayResult } from "../attention/awayStatus";
 import { attentionDebug, pushCapped } from "../attention/debug";
-import { agentLabel, awayPayload, itemState, notificationText, stateKey } from "../attention/describe";
+import { agentLabel, awayPayload, awayWhere, itemState, notificationText, stateKey } from "../attention/describe";
 import { forgetUserLabel } from "../attention/userLabels";
-import { blockedCount, blockedSessionOrder, groupInbox, inboxKindForStatus, inboxRows, isMuted, nextBlockedSession } from "../attention/model";
+import { blockedCount, blockedSessionOrder, groupInbox, inboxKindForStatus, inboxRows, isMuted, nextBlockedSession, noticeCount, sessionCount } from "../attention/model";
 import { muteSession, unmuteSession, useMutes, getMutes } from "../attention/mutes";
 import { createNotifier, type Notifier } from "../attention/notifier";
 import { startStatusBridge, trustedStatus, type StatusBridge } from "../attention/statusBridge";
@@ -66,6 +73,8 @@ interface AttentionCenterProps {
 export const MORNING_WINDOW_MS = 45_000;
 /** How long the "2 of 3" note stays after ⌘I. */
 const POSITION_NOTE_MS = 3_000;
+/** How often waiting away messages are checked (the delay is in minutes). */
+const AWAY_TICK_MS = 5_000;
 
 /** Windows/Linux chords of the two attention shortcuts (see app-shortcuts.json). */
 const PC_CHORDS = ["{ctrl}{shift}I", "{ctrl}{shift}A"];
@@ -101,9 +110,16 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
   latest.current = { sessions, activeSessionId, t, onJump };
 
   const now = Date.now();
+  // Agents blocked on you: the same sessions ⌘I visits. Hermes's own notices
+  // are counted apart and never as agents.
   const count = blockedCount(items, mutes, now);
+  const notices = noticeCount(items);
   const groups = useMemo(() => groupInbox(items), [items]);
   const rows = useMemo(() => inboxRows(items), [items]);
+  const badgeLabel = [
+    t(count === 1 ? "attention.badgeLabelOne" : "attention.badgeLabel", { count }),
+    ...(notices > 0 ? [t(notices === 1 ? "attention.noticesOne" : "attention.noticesMany", { count: notices })] : []),
+  ].join(" · ");
 
   const announce = useCallback((text: string) => {
     // Clear first so the same sentence twice is announced twice.
@@ -169,6 +185,47 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
   }, [sessions]);
 
   // ── notifications ───────────────────────────────────────────────────
+  // When to send away messages and whether they name sessions (Settings >
+  // General); read once here, kept current by the dialog.
+  useEffect(() => {
+    void loadAwayPrefs();
+  }, []);
+
+  // The project each Hermes worktree session belongs to, so an away message
+  // can say "api-repo #2" without the worktree's branch-named folder.
+  const projectNames = useRef<Map<string, string>>(new Map());
+  const sessionIdsKey = Object.keys(sessions).sort().join("\n");
+  useEffect(() => {
+    let cancelled = false;
+    listAllWorktrees()
+      .then((rows) => {
+        if (cancelled || !Array.isArray(rows)) return;
+        const next = new Map<string, string>();
+        for (const r of rows) if (r.project_name && !next.has(r.session_id)) next.set(r.session_id, r.project_name);
+        projectNames.current = next;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionIdsKey]);
+
+  // A failed away message: noted for Settings, and the first failure raises
+  // one Hermes notice (until it is dismissed or a message gets through).
+  const onAwayResult = useCallback((result: Parameters<typeof noteAwayResult>[0]) => {
+    const noted = noteAwayResult(result);
+    if (noted?.outcome === "sent") {
+      clearAwayFailureNotices();
+    } else if (noted?.outcome === "failed") {
+      console.warn("[attention] away message failed:", noted.error);
+      if (awayFailureNotices().length === 0) {
+        raiseInboxItem({ kind: "error", sessionId: null, detail: latest.current.t("attention.awayFailed", { error: noted.error }), source: AWAY_FAILURE_SOURCE });
+      }
+    }
+  }, []);
+  const onAwayResultRef = useRef(onAwayResult);
+  onAwayResultRef.current = onAwayResult;
+
   const notifierRef = useRef<Notifier | null>(null);
   if (!notifierRef.current) {
     notifierRef.current = createNotifier({
@@ -182,8 +239,12 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
       },
       awayPayload: (item) => {
         const session = item.sessionId ? latest.current.sessions[item.sessionId] : undefined;
-        return awayPayload(item, session, statusFor(item));
+        return awayPayload(item, session, statusFor(item), {
+          where: awayWhere(item.sessionId, latest.current.sessions, (id) => projectNames.current.get(id)),
+          includeNames: getAwayPrefs().includeNames,
+        });
       },
+      awayDelayMs: () => awayDelayMs(getAwayPrefs().delay),
       showOs: (text, item) => {
         let delivered = false;
         try {
@@ -199,10 +260,11 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
         sendAwayNotification(payload)
           .then((result) => {
             entry.result = result;
-            if (result.outcome === "failed") console.warn("[attention] away message failed:", result.error);
+            onAwayResultRef.current(result);
           })
           .catch((e) => {
             entry.result = { outcome: "error", error: String(e) };
+            onAwayResultRef.current(entry.result);
           });
       },
     });
@@ -211,6 +273,18 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
   useEffect(() => {
     notifierRef.current?.update(items);
   }, [items]);
+
+  // Waiting away messages go out when Hermes loses the focus or their delay
+  // has passed.
+  useEffect(() => {
+    const tick = () => notifierRef.current?.tick();
+    const off = subscribeWindowFocus(tick);
+    const timer = setInterval(tick, AWAY_TICK_MS);
+    return () => {
+      off();
+      clearInterval(timer);
+    };
+  }, []);
 
   // New Blocked on you items are announced to screen readers.
   const announced = useRef<Set<string>>(new Set());
@@ -294,7 +368,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
     setPeek(false);
     const g = groupInbox(items);
     setSelectedId(inboxRows(items)[0]?.id ?? null);
-    announce(t("attention.announceOpen", { blocked: g.blocked.length, ready: g.ready.length }));
+    announce(t("attention.announceOpen", { blocked: blockedCount(items, getMutes(), Date.now()), ready: g.ready.length }));
   }, [items, announce, t]);
 
   // Where the keyboard goes once the inbox has closed (see the effect below).
@@ -310,6 +384,9 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
   const jumpNext = useCallback(() => {
     const target = nextBlockedSession(items, getMutes(), Date.now(), latest.current.activeSessionId);
     if (!target) {
+      // Said on screen too, where "2 of 3" would be: a shortcut that does
+      // nothing visible reads as broken.
+      setPosition({ n: 0, total: 0, at: Date.now() });
       announce(t("attention.nothingWaiting"));
       return;
     }
@@ -609,9 +686,10 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
         className={`attention-badge${count > 0 ? " attention-badge-hot" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open}
-        aria-label={t("attention.badgeLabel", { count })}
-        title={t("attention.badgeLabel", { count })}
+        aria-label={badgeLabel}
+        title={badgeLabel}
         data-count={count}
+        data-notices={notices}
         onClick={() => (open ? closeInbox(true) : openInbox(false))}
         icon={
           <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
@@ -633,16 +711,19 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
       </div>
       {position && (
         <div className="attention-position" data-n={position.n} data-total={position.total} aria-hidden="true">
-          {t("attention.position", { n: position.n, total: position.total })}
+          {position.total === 0 ? t("attention.nothingWaiting") : t("attention.position", { n: position.n, total: position.total })}
         </div>
       )}
       {open && (
         <div className={`attention-inbox${morning ? " attention-inbox-morning" : ""}`} role="dialog" aria-label={t("attention.title")} data-morning={morning ? "true" : "false"}>
           <div className="attention-inbox-header">
-            {morning && groups.blocked.length > 0 ? (
+            {morning && blockedOrder.length > 0 ? (
               <>
                 <span className="attention-inbox-title attention-morning-title">
-                  {t(groups.blocked.length === 1 ? "attention.morningTitleOne" : "attention.morningTitle", { count: groups.blocked.length })}
+                  {[
+                    t(blockedOrder.length === 1 ? "attention.morningTitleOne" : "attention.morningTitle", { count: blockedOrder.length }),
+                    ...(notices > 0 ? [t(notices === 1 ? "attention.morningNoticesOne" : "attention.morningNoticesMany", { count: notices })] : []),
+                  ].join(" · ")}
                 </span>
                 <span className="attention-morning-why">{t("attention.morningWhy")}</span>
               </>
@@ -662,9 +743,17 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
             {groups.blocked.length > 0 && (
               <div role="group" aria-labelledby="attention-group-blocked" className="attention-group" data-section="blocked">
                 <div id="attention-group-blocked" role="presentation" className="attention-group-title">
-                  {t("attention.blockedSection")} ({groups.blocked.length})
+                  {t("attention.blockedSection")} ({sessionCount(groups.blocked)})
                 </div>
                 {groups.blocked.map(renderOption)}
+              </div>
+            )}
+            {groups.notices.length > 0 && (
+              <div role="group" aria-labelledby="attention-group-notices" className="attention-group" data-section="notices">
+                <div id="attention-group-notices" role="presentation" className="attention-group-title">
+                  {t(groups.notices.length === 1 ? "attention.noticesOne" : "attention.noticesMany", { count: groups.notices.length })}
+                </div>
+                {groups.notices.map(renderOption)}
               </div>
             )}
             {groups.ready.length > 0 && (

@@ -79,7 +79,12 @@ export interface UpdateState {
    *  running) — mirrors the `busySessionCount` argument. While this is
    *  greater than zero the update waits instead of relaunching (N10). */
   busySessionCount: number;
+  /** A check the person asked for (menu, version chip) is running. */
+  checking: boolean;
 }
+
+/** How a check ended: an update was found, none exists, or it could not be done. */
+export type UpdateCheckResult = "available" | "none" | "error";
 
 const INITIAL: UpdateState = {
   available: false,
@@ -96,11 +101,31 @@ const INITIAL: UpdateState = {
   stalled: false,
   installing: false,
   busySessionCount: 0,
+  checking: false,
 };
 
 const CHECK_DELAY_MS = 5_000;
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000; // 4 hours
 const STALL_TIMEOUT_MS = 15_000;
+/** A check that has not answered by then counts as failed (no endless "Checking…"). */
+export const CHECK_TIMEOUT_MS = 15_000;
+
+/** `promise`, or a rejection once `ms` have passed without an answer. */
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`no answer after ${ms} ms`)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (err: unknown) => {
+        clearTimeout(timer);
+        reject(err);
+      },
+    );
+  });
+}
 
 // e2e/CI builds (`VITE_HERMES_E2E=1`, set by e2e/app/build.mjs) never poll
 // for updates — a proof-rig run or CI job should never talk to the update
@@ -129,9 +154,12 @@ export function useAutoUpdater(busySessionCount = 0) {
     setState((s) => (s.busySessionCount === busySessionCount ? s : { ...s, busySessionCount }));
   }, [busySessionCount]);
 
-  const doCheck = useCallback(async () => {
-    // Skip periodic checks while download or install is in progress
-    if (downloadingRef.current || installingRef.current) return;
+  const checkingRef = useRef<Promise<UpdateCheckResult> | null>(null);
+
+  const doCheck = useCallback(async (): Promise<UpdateCheckResult> => {
+    // Skip checks while download or install is in progress (an update is
+    // already in hand).
+    if (downloadingRef.current || installingRef.current) return "available";
 
     try {
       // A test build may force an update; otherwise the check runs in the
@@ -139,7 +167,7 @@ export function useAutoUpdater(busySessionCount = 0) {
       const override = testUpdateOverride();
       const update = override?.forcedUpdate
         ? fakeUpdateFromOverride(override.forcedUpdate, override)
-        : await checkForUpdate();
+        : await withTimeout(checkForUpdate(), CHECK_TIMEOUT_MS);
       if (update) {
         setState((s) => {
           // Don't clobber state during an active download or install
@@ -166,6 +194,7 @@ export function useAutoUpdater(busySessionCount = 0) {
             dismissed: s.dismissed && s.dismissedVersion === update.version,
           };
         });
+        return "available";
       } else {
         // No update available — clear the ref only if not mid-download/ready
         setState((s) => {
@@ -174,9 +203,12 @@ export function useAutoUpdater(busySessionCount = 0) {
           }
           return s;
         });
+        return "none";
       }
     } catch {
-      // Fail silently — no internet, endpoint down, dev mode, etc.
+      // No internet, endpoint down, no answer in time: a periodic check
+      // stays silent; a check the person asked for says so (manualCheck).
+      return "error";
     }
   }, []);
 
@@ -315,11 +347,20 @@ export function useAutoUpdater(busySessionCount = 0) {
     }
   }, []);
 
-  const manualCheck = useCallback(async () => {
-    setState((s) => ({ ...s, dismissed: false, error: false }));
-    await doCheck();
-    // Return whether an update was found
-    return updateRef.current !== null;
+  /**
+   * A check the person asked for: `checking` while it runs (at most
+   * CHECK_TIMEOUT_MS), and how it ended, so the caller can say so. A second
+   * request while one runs joins it.
+   */
+  const manualCheck = useCallback((): Promise<UpdateCheckResult> => {
+    if (checkingRef.current) return checkingRef.current;
+    setState((s) => ({ ...s, dismissed: false, error: false, checking: true }));
+    const run = doCheck().finally(() => {
+      checkingRef.current = null;
+      setState((s) => ({ ...s, checking: false }));
+    });
+    checkingRef.current = run;
+    return run;
   }, [doCheck]);
 
   return { state, dismiss, download, cancelDownload, installAndRelaunch, manualCheck };

@@ -5,13 +5,16 @@
 //   - reads the caps from settings;
 //   - keeps the worktree index (repository and feature branch per session);
 //   - checks the spend caps whenever a session reports usage (F31);
-//   - refreshes Collision Radar when a session ends a turn (F37);
+//   - refreshes Collision Radar when a session ends a turn or the turn
+//     ledger records one (F37);
 //   - polls the agents' load while a running-agents or memory cap is set,
 //     and starts the next queued task when a slot frees (N22).
 
 import { useCallback, useEffect, useMemo, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { getSessionEventSnapshot, subscribeSessionEvents } from "../agent/contract/sessionEventStore";
+import { TURN_LEDGER_EVENT, type TurnLedgerEvent } from "../agent/turns/turnLedgerApi";
 import { lastReportedStatus } from "../agent/status/deriveStatus";
 import { raiseInboxItem } from "../agent/contract/inbox";
 import { listAllWorktrees } from "../api/git";
@@ -242,8 +245,23 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
     });
     watcher.check();
     pumpQueue();
+    // A turn the ledger recorded. Claude Code's Stop hook ends a turn as a
+    // status, never as a `turn_end` event, so the ledger's own word is the
+    // one every agent's turn end produces.
+    const live = new Set(ids);
+    let unlistenLedger: (() => void) | null = null;
+    void listen<TurnLedgerEvent>(TURN_LEDGER_EVENT, (msg) => {
+      const id = msg.payload?.sessionId;
+      if (id && live.has(id)) void refreshSessionTurnFiles(id);
+    })
+      .then((off) => {
+        if (cancelled) off();
+        else unlistenLedger = off;
+      })
+      .catch((err) => console.warn("[fleet] could not follow the turn ledger:", err));
     return () => {
       cancelled = true;
+      unlistenLedger?.();
       for (const off of offs) off();
     };
   }, [enabled, idsKey, watcher, pumpQueue]);

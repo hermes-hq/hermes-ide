@@ -84,7 +84,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
     for (const n of clone.querySelectorAll(".xterm, textarea, script, style")) n.remove();
     return clone.textContent;
   `);
-  const statusCost = (bridge) => bridge.eval(`return e2e.norm(e2e.first(".status-bar-cost")?.innerText ?? "") || null;`);
+  const statusCost = (bridge) => bridge.eval(`return e2e.norm(e2e.first(".status-bar-cost .status-bar-cost-amount")?.innerText ?? "") || null;`);
 
   // ── run 1: flag off — the estimate is there to be hidden ────────────
   log("run 1: fresh install, flag switched off: Hermes's own estimate shows in the status bar");
@@ -101,7 +101,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   const legacy = await createPlainTerminal(app.bridge, log);
   await startFakeAgent(app.bridge, legacy, "run1");
   const estimate = await app.bridge.waitFor("the analyzer's estimated cost in the status bar", `
-    return e2e.norm(e2e.first(".status-bar-cost")?.innerText ?? "") || null;
+    return e2e.norm(e2e.first(".status-bar-cost .status-bar-cost-amount")?.innerText ?? "") || null;
   `, { timeoutMs: 20_000 });
   log(`  status bar with the flag off: "${estimate}"`);
   assert(estimate === "$0.08", `without the flag Hermes shows its own estimate ("${estimate}")`);
@@ -159,7 +159,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   // Two agents, neither reports a cost: the total is unknown, not zero and
   // not the analyzer's estimate.
   const status0 = await bridge.waitFor("the status bar to say n/a", `
-    const t = e2e.norm(e2e.first(".status-bar-cost")?.innerText ?? "");
+    const t = e2e.norm(e2e.first(".status-bar-cost .status-bar-cost-amount")?.innerText ?? "");
     return t === "n/a" ? t : null;
   `, { timeoutMs: 10_000 }).catch(() => null);
   assert(status0 === "n/a", `the status bar says n/a, no amount ("${await statusCost(bridge)}")`);

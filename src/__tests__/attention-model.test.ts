@@ -26,14 +26,17 @@ import {
   blockedSessionOrder,
   groupInbox,
   inboxKindForStatus,
+  inboxRows,
   isMuted,
   nextBlockedSession,
+  noticeCount,
   sectionOf,
+  sessionCount,
 } from "../attention/model";
 import { startStatusBridge, trustedStatus } from "../attention/statusBridge";
 import { _resetUserInputForTest, noteUserInput } from "../agent/status/userInput";
 import { createNotifier, type AwayPayload, type NotifierDeps } from "../attention/notifier";
-import { awayPayload, itemState, notificationText } from "../attention/describe";
+import { awayPayload, awayWhere, itemState, notificationText } from "../attention/describe";
 import { isAwayUrlAcceptable } from "../attention/awayUrl";
 import { _resetUserLabelsForTest, rememberUserLabel } from "../attention/userLabels";
 import { deriveSessionLabelFromMessage } from "../utils/autoSessionLabel";
@@ -85,16 +88,21 @@ describe("sections, badge count and ⌘I order", () => {
     item({ id: "w", sessionId: null, kind: "error", createdAt: 1 }),
   ];
 
-  it("groups oldest first", () => {
+  it("groups oldest first; Hermes's own notices (no session) apart from the agents", () => {
     const g = groupInbox(items);
-    expect(g.blocked.map((i) => i.id)).toEqual(["w", "a", "b", "c", "a2"]);
+    expect(g.blocked.map((i) => i.id)).toEqual(["a", "b", "c", "a2"]);
+    expect(g.notices.map((i) => i.id)).toEqual(["w"]);
     expect(g.ready.map((i) => i.id)).toEqual(["r"]);
+    expect(inboxRows(items).map((i) => i.id)).toEqual(["a", "b", "c", "a2", "w", "r"]);
   });
 
-  it("counts Blocked on you items, leaving out muted sessions", () => {
-    expect(blockedCount(items, new Map(), 0)).toBe(5);
-    expect(blockedCount(items, new Map([["A", 100]]), 50)).toBe(3);
-    expect(blockedCount(items, new Map([["A", 100]]), 100)).toBe(5); // the mute ran out
+  it("counts agents blocked on you (the sessions ⌘I visits), leaving out muted sessions and notices", () => {
+    expect(blockedCount(items, new Map(), 0)).toBe(3); // A (two items), B, C
+    expect(blockedCount(items, new Map(), 0)).toBe(blockedSessionOrder(items, new Map(), 0).length);
+    expect(blockedCount(items, new Map([["A", 100]]), 50)).toBe(2);
+    expect(blockedCount(items, new Map([["A", 100]]), 100)).toBe(3); // the mute ran out
+    expect(noticeCount(items)).toBe(1);
+    expect(sessionCount(groupInbox(items).blocked)).toBe(3);
   });
 
   it("visits blocked sessions oldest first, once each, and wraps", () => {
@@ -309,9 +317,10 @@ describe("notifier", () => {
       activeSessionId: () => active,
       mutes: getMutes,
       text: (i) => ({ title: `t-${i.id}`, body: "b" }),
-      awayPayload: (i) => ({ agent: "Claude Code", task: `task-${i.sessionId}`, state: "needs_approval" }),
+      awayPayload: (i) => ({ agent: "Claude Code", task: `task-${i.sessionId}`, state: "needs_approval", where: "" }),
       showOs: (_t, i) => os.push(i.id),
       sendAway: (p) => away.push(p),
+      awayDelayMs: () => 0,
       ...over,
     };
     const n = createNotifier(deps);
@@ -411,6 +420,81 @@ describe("notifier", () => {
     expect(n.log()[0].decision).toBe("muted");
   });
 
+  describe("away messages wait while Hermes is in front of you (LEAD-08)", () => {
+    const TWO_MIN = 120_000;
+
+    it("goes at once when no Hermes window has the focus", () => {
+      const { n, away, look } = setup({ awayDelayMs: () => TWO_MIN });
+      look("B", false);
+      raiseInboxItem({ kind: "blocked", sessionId: "A", detail: "x", source: "status" });
+      n.update(listInboxItems());
+      expect(away.map((p) => p.task)).toEqual(["task-A"]);
+      expect(n.pendingAway()).toEqual([]);
+    });
+
+    it("while focused on another session: waits, then goes after the delay if still unanswered", () => {
+      const { n, os, away, look } = setup({ awayDelayMs: () => TWO_MIN });
+      look("B", true);
+      const a = raiseInboxItem({ kind: "blocked", sessionId: "A", detail: "x", source: "status" });
+      n.update(listInboxItems());
+      expect(os).toEqual([a.id]); // the OS notification is not held back
+      expect(away).toEqual([]);
+      expect(n.pendingAway().map((p) => p.sessionId)).toEqual(["A"]);
+      clock += TWO_MIN - 1;
+      n.tick();
+      expect(away).toEqual([]);
+      clock += 1;
+      n.tick();
+      expect(away.map((p) => p.task)).toEqual(["task-A"]);
+      expect(n.log().map((e) => e.decision)).toEqual(["sent", "away-later"]);
+      n.tick();
+      expect(away).toHaveLength(1);
+    });
+
+    it("goes as soon as the window loses the focus", () => {
+      const { n, away, look } = setup({ awayDelayMs: () => TWO_MIN });
+      look("B", true);
+      raiseInboxItem({ kind: "blocked", sessionId: "A", detail: "x", source: "status" });
+      n.update(listInboxItems());
+      look("B", false);
+      n.tick();
+      expect(away.map((p) => p.task)).toEqual(["task-A"]);
+    });
+
+    it("is dropped when answered, when you look at the session, or when it is muted", () => {
+      const { n, away, look } = setup({ awayDelayMs: () => TWO_MIN });
+      look("D", true);
+      const a = raiseInboxItem({ kind: "blocked", sessionId: "A", detail: "x", source: "status" });
+      raiseInboxItem({ kind: "blocked", sessionId: "B", detail: "y", source: "status" });
+      raiseInboxItem({ kind: "blocked", sessionId: "C", detail: "z", source: "status" });
+      n.update(listInboxItems());
+      expect(n.pendingAway()).toHaveLength(3);
+      resolveInboxItem(a.id);
+      n.update(listInboxItems());
+      n.seen("B");
+      muteSession("C");
+      clock += TWO_MIN;
+      n.tick();
+      expect(away).toEqual([]);
+      expect(n.pendingAway()).toEqual([]);
+    });
+
+    it("Immediately (0) sends at once even while focused; a changed delay applies to what waits", () => {
+      let delay = TWO_MIN;
+      const { n, away, look } = setup({ awayDelayMs: () => delay });
+      look("D", true);
+      raiseInboxItem({ kind: "blocked", sessionId: "A", detail: "x", source: "status" });
+      n.update(listInboxItems());
+      expect(away).toEqual([]);
+      delay = 0;
+      n.tick();
+      expect(away.map((p) => p.task)).toEqual(["task-A"]);
+      raiseInboxItem({ kind: "blocked", sessionId: "B", detail: "y", source: "status" });
+      n.update(listInboxItems());
+      expect(away.map((p) => p.task)).toEqual(["task-A", "task-B"]);
+    });
+  });
+
   it("notifies a workspace item but never sends it away", () => {
     const { n, os, away } = setup();
     const w = raiseInboxItem({ kind: "error", sessionId: null, detail: "disk low", source: "worktree" });
@@ -429,9 +513,9 @@ describe("what an away message and a notification say", () => {
     rememberUserLabel("A", "fix-login");
   });
 
-  it("the away message has exactly agent, task and state, never the detail", () => {
+  it("the away message has exactly agent, task, state and where, never the detail", () => {
     const p = awayPayload(blocked, session, "needs_approval");
-    expect(Object.keys(p).sort()).toEqual(["agent", "state", "task"]);
+    expect(Object.keys(p).sort()).toEqual(["agent", "state", "task", "where"]);
     expect(p.task).toBe("fix-login");
     expect(p.state).toBe("needs_approval");
     expect(JSON.stringify(p)).not.toContain("zebra");
@@ -471,6 +555,33 @@ describe("what an away message and a notification say", () => {
     // The user named it "Session 9", then the first message renamed it.
     rememberUserLabel("A", "Session 9");
     expect(awayPayload(blocked, { ...session, label: "ship the otter migration" }, "needs_approval").task).toBe("");
+  });
+
+  it("says where the agent works: its folder and its number there, oldest first; never a worktree's branch-named folder", () => {
+    const placed = {
+      A: { id: "A", working_directory: "/srv/demo/api-repo", created_at: "2026-01-01T10:00:00Z" },
+      B: { id: "B", working_directory: "/srv/demo/web-repo/", created_at: "2026-01-01T10:01:00Z" },
+      C: { id: "C", working_directory: "C:\\work\\web-repo", created_at: "2026-01-01T10:02:00Z" },
+      W: { id: "W", working_directory: "/data/hermes-worktrees/abc123/w1_rotate-the-heron-vault-password", created_at: "2026-01-01T10:03:00Z" },
+      X: { id: "X", working_directory: "/data/hermes-worktrees/abc123/x1_other-branch", created_at: "2026-01-01T10:04:00Z" },
+    };
+    expect(awayWhere("A", placed)).toBe("api-repo #1");
+    expect(awayWhere("B", placed)).toBe("web-repo #1");
+    expect(awayWhere("C", placed)).toBe("web-repo #2");
+    // A Hermes worktree: the project's name when known, else only the number.
+    expect(awayWhere("W", placed, (id) => (id === "W" ? "api-repo" : null))).toBe("api-repo #2");
+    expect(awayWhere("W", placed)).toBe("#1");
+    expect(awayWhere("X", placed)).toBe("#2");
+    expect(awayWhere("W", placed)).not.toMatch(/heron|rotate/);
+    expect(awayWhere(null, placed)).toBe("");
+    expect(awayWhere("gone", placed)).toBe("");
+  });
+
+  it("names the session only when the person opted in, then whatever named it", () => {
+    _resetUserLabelsForTest();
+    const auto = { ...session, label: "Rotate the walrus-prod password" };
+    expect(awayPayload(blocked, auto, "needs_approval", { where: "api-repo #1" })).toEqual({ agent: "Claude Code", task: "", state: "needs_approval", where: "api-repo #1" });
+    expect(awayPayload(blocked, auto, "needs_approval", { where: "api-repo #1", includeNames: true }).task).toBe("Rotate the walrus-prod password");
   });
 
   it("the OS notification names the agent and the state, and shows the detail locally", () => {

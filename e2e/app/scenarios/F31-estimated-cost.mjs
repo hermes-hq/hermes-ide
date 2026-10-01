@@ -9,8 +9,9 @@
 //
 //   1. before any model call the Claude row, the project header and the
 //      status bar say "n/a" (nothing known), never an amount;
-//   2. after two calls on a priced model the row, the project header, the
-//      status bar and the Context panel all say "≈$1.04 (estimated)", the
+//   2. after two calls on a priced model the project header, the status
+//      bar and the Context panel all say "≈$1.04 (estimated)" (the narrow
+//      row "≈$1.04", its tooltip says it is estimated), the
 //      store holds the transcript's token totals, tagged estimated, from
 //      source transcript:claude;
 //   3. a third call on a model Hermes has no list price for (as after a
@@ -59,6 +60,9 @@ const expectedCost = CALLS.reduce(
 const expectedIn = CALLS.reduce((n, c) => n + c.input_tokens + c.cache_creation_input_tokens + c.cache_read_input_tokens, 0);
 const expectedOut = CALLS.reduce((n, c) => n + c.output_tokens, 0);
 const EXPECTED_TEXT = `≈$${expectedCost.toFixed(2)} (estimated)`;
+// The session row is narrow: the estimate there is the amount with its ≈ (its
+// tooltip says it is estimated).
+const ROW_TEXT = `≈$${expectedCost.toFixed(2)}`;
 const PROJECT = "Costs";
 
 await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }) => {
@@ -103,7 +107,8 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   `);
   const statusCost = () => bridge.eval(`
     const c = e2e.first(".status-bar-cost");
-    return c ? { text: e2e.norm(c.innerText), kind: c.dataset.spend } : null;
+    // The amount; the bar labels it "Open sessions:" (QA-status-spend-open-sessions).
+    return c ? { text: e2e.norm(c.querySelector(".status-bar-cost-amount").innerText), kind: c.dataset.spend } : null;
   `);
 
   // ── 1. Nothing known yet ───────────────────────────────────────────
@@ -129,9 +134,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     await bridge.waitForTerminal(claude, new RegExp(`model call \\(${input} input tokens\\)`), { timeoutMs: 10_000 });
     log(`  call ${i + 1}: ${input} tokens in, ${c.output_tokens} out`);
   }
-  const row = await bridge.waitFor(`the row to say ${EXPECTED_TEXT}`, `
+  const row = await bridge.waitFor(`the row to say ${ROW_TEXT}`, `
     const s = document.querySelector('.session-item[data-session-item-id="${claude}"] .session-spend');
-    return s && e2e.norm(s.innerText) === ${JSON.stringify(EXPECTED_TEXT)} ? { text: e2e.norm(s.innerText), kind: s.dataset.spend, title: s.title } : null;
+    return s && e2e.norm(s.innerText) === ${JSON.stringify(ROW_TEXT)} ? { text: e2e.norm(s.innerText), kind: s.dataset.spend, title: s.title } : null;
   `, { timeoutMs: 15_000 });
   assert(row.kind === "estimated", `the row marks it estimated (${row.kind})`);
   // The webview's locale decides the digit grouping ("265,003", "265003", "265 003").

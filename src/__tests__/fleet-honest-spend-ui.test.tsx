@@ -120,11 +120,12 @@ describe("an estimated cost", () => {
   const header = (ids: string[]) =>
     renderToString(<I18nProvider><ProjectSpend sessions={ids.map((id) => ({ id, label: `label-${id}`, agent: true }))} /></I18nProvider>);
 
-  it("the row says ≈$1.23 (estimated), marked as such", () => {
+  it("the row says ≈$1.23 (the narrow row keeps the ≈; its tooltip says it is estimated)", () => {
     estimate("s1", 1.2345);
     const html = chip("s1", "claude");
     expect(html).toContain('data-spend="estimated"');
-    expect(text(html)).toContain("≈$1.23 (estimated)");
+    expect(text(html).trim()).toBe("≈$1.23");
+    expect(html).toMatch(/title="≈\$1\.23 \(estimated\)\nEstimated by Hermes/);
   });
 
   it("the status bar adds it up and says it is an estimate", () => {
