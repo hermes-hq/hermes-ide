@@ -95,9 +95,13 @@ export function addAgentAccount(agentId: string, label: string): Promise<AddedAc
 	return invoke<AddedAccount>("add_agent_account", { agentId, label });
 }
 
-/** Forgets an account Hermes added. The profile folder and its sign-in stay on disk. */
-export function removeAgentAccount(agentId: string, accountId: string): Promise<void> {
-	return invoke("remove_agent_account", { agentId, accountId });
+/**
+ * Forgets an account Hermes added (and the models it refused). The profile
+ * folder stays on disk; `signOut` first runs the agent's own sign-out in it
+ * (the account stays when that fails).
+ */
+export function removeAgentAccount(agentId: string, accountId: string, signOut = false): Promise<void> {
+	return invoke("remove_agent_account", { agentId, accountId, signOut });
 }
 
 /**

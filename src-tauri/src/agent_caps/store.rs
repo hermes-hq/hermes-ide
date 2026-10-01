@@ -63,13 +63,43 @@ pub fn insert_account(conn: &Connection, a: &StoredAccount, now_ms: i64) -> Resu
     .map_err(db_err)
 }
 
+/// Forget an account Hermes added, with what Hermes learned about it (the
+/// models it refused, its remembered launch choice): an account added
+/// again later under the same name starts clean.
 pub fn remove_account(conn: &Connection, agent_id: &str, id: &str) -> Result<bool, String> {
-    conn.execute(
-        "DELETE FROM agent_accounts WHERE agent_id = ?1 AND id = ?2",
+    let tx = conn.unchecked_transaction().map_err(db_err)?;
+    let removed = tx
+        .execute(
+            "DELETE FROM agent_accounts WHERE agent_id = ?1 AND id = ?2",
+            params![agent_id, id],
+        )
+        .map_err(db_err)?;
+    tx.execute(
+        "DELETE FROM agent_model_rejections WHERE agent_id = ?1 AND account_id = ?2",
         params![agent_id, id],
     )
-    .map(|n| n > 0)
-    .map_err(db_err)
+    .map_err(db_err)?;
+    tx.execute(
+        "DELETE FROM launch_memory WHERE agent_id = ?1 AND account_id = ?2",
+        params![agent_id, id],
+    )
+    .map_err(db_err)?;
+    tx.commit().map_err(db_err)?;
+    Ok(removed > 0)
+}
+
+/// The label of an account `label` would duplicate (case and surrounding
+/// spaces ignored): an account Hermes added, or the CLI's own profile
+/// ("default", "Default profile"). None when the name is free.
+pub fn taken_label(accounts: &[StoredAccount], label: &str) -> Option<String> {
+    let want = label.trim().to_lowercase();
+    if want == "default" || want == "default profile" {
+        return Some("Default profile".to_string());
+    }
+    accounts
+        .iter()
+        .find(|a| a.label.trim().to_lowercase() == want)
+        .map(|a| a.label.clone())
 }
 
 // ─── Launch history ──────────────────────────────────────────────────
@@ -349,35 +379,51 @@ pub fn record_rejection(
     .map_err(db_err)
 }
 
-/// (model id, epoch ms) the account refused.
+/// (model id, epoch ms, the CLI's words) the account refused.
 pub fn rejections(
     conn: &Connection,
     agent_id: &str,
     account_id: &str,
-) -> Result<Vec<(String, i64)>, String> {
+) -> Result<Vec<(String, i64, String)>, String> {
     let mut stmt = conn
-        .prepare("SELECT model_id, at FROM agent_model_rejections WHERE agent_id = ?1 AND account_id = ?2")
+        .prepare("SELECT model_id, at, message FROM agent_model_rejections WHERE agent_id = ?1 AND account_id = ?2")
         .map_err(db_err)?;
     let rows = stmt
         .query_map(params![agent_id, account_id], |r| {
-            Ok((r.get(0)?, r.get(1)?))
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get::<_, Option<String>>(2)?.unwrap_or_default(),
+            ))
         })
         .map_err(db_err)?;
     rows.collect::<Result<Vec<_>, _>>().map_err(db_err)
 }
 
-/// A model worked after all (a launch with it started): forget the refusal.
+/// A model worked after all (a launch with it took a turn): forget the
+/// refusal. Whether there was one to forget.
 pub fn clear_rejection(
     conn: &Connection,
     agent_id: &str,
     account_id: &str,
     model_id: &str,
-) -> Result<(), String> {
+) -> Result<bool, String> {
     conn.execute(
         "DELETE FROM agent_model_rejections WHERE agent_id = ?1 AND account_id = ?2 AND model_id = ?3",
         params![agent_id, account_id, model_id],
     )
-    .map(|_| ())
+    .map(|n| n > 0)
+    .map_err(db_err)
+}
+
+/// "Check again": forget every refusal of an agent's accounts (each model
+/// is offered again; a launch it still refuses is stopped and remembered
+/// again). How many were forgotten.
+pub fn clear_rejections(conn: &Connection, agent_id: &str) -> Result<usize, String> {
+    conn.execute(
+        "DELETE FROM agent_model_rejections WHERE agent_id = ?1",
+        params![agent_id],
+    )
     .map_err(db_err)
 }
 
@@ -520,9 +566,75 @@ mod tests {
         record_rejection(&conn, "codex", "default", "gpt-5.5", "404", 7).unwrap();
         assert_eq!(
             rejections(&conn, "codex", "default").unwrap(),
-            vec![("gpt-5.5".to_string(), 7)]
+            vec![("gpt-5.5".to_string(), 7, "404".to_string())]
         );
-        clear_rejection(&conn, "codex", "default", "gpt-5.5").unwrap();
+        assert!(clear_rejection(&conn, "codex", "default", "gpt-5.5").unwrap());
         assert!(rejections(&conn, "codex", "default").unwrap().is_empty());
+        assert!(
+            !clear_rejection(&conn, "codex", "default", "gpt-5.5").unwrap(),
+            "nothing left to forget"
+        );
+    }
+
+    #[test]
+    fn check_again_forgets_one_agents_refusals_only() {
+        let conn = db();
+        record_rejection(&conn, "codex", "default", "a", "x", 1).unwrap();
+        record_rejection(&conn, "codex", "work", "b", "x", 1).unwrap();
+        record_rejection(&conn, "claude", "default", "opus", "x", 1).unwrap();
+        assert_eq!(clear_rejections(&conn, "codex").unwrap(), 2);
+        assert!(rejections(&conn, "codex", "work").unwrap().is_empty());
+        assert_eq!(rejections(&conn, "claude", "default").unwrap().len(), 1);
+    }
+
+    #[test]
+    fn removing_an_account_forgets_its_refusals_and_remembered_choice() {
+        let conn = db();
+        let acc = StoredAccount {
+            agent_id: "codex".into(),
+            id: "personal".into(),
+            label: "Personal".into(),
+            profile_dir: "/p/.codex-personal".into(),
+        };
+        insert_account(&conn, &acc, 1).unwrap();
+        record_rejection(&conn, "codex", "personal", "gpt-x", "404", 2).unwrap();
+        record_rejection(&conn, "codex", "default", "gpt-x", "404", 2).unwrap();
+        let mut c = choice();
+        c.agent_id = "codex".into();
+        c.account_id = "personal".into();
+        remember(&conn, &c, 3).unwrap();
+        assert!(remove_account(&conn, "codex", "personal").unwrap());
+        assert!(rejections(&conn, "codex", "personal").unwrap().is_empty());
+        assert!(remembered(&conn, "codex", Some("personal"))
+            .unwrap()
+            .is_none());
+        assert_eq!(
+            rejections(&conn, "codex", "default").unwrap().len(),
+            1,
+            "the default profile keeps what it learned"
+        );
+        assert!(!remove_account(&conn, "codex", "personal").unwrap());
+    }
+
+    #[test]
+    fn an_account_name_is_taken_whatever_its_case() {
+        let stored = vec![StoredAccount {
+            agent_id: "claude".into(),
+            id: "work".into(),
+            label: "Work".into(),
+            profile_dir: "/p/.claude-work".into(),
+        }];
+        assert_eq!(taken_label(&stored, "work").as_deref(), Some("Work"));
+        assert_eq!(taken_label(&stored, "  WORK ").as_deref(), Some("Work"));
+        assert_eq!(
+            taken_label(&stored, "Default").as_deref(),
+            Some("Default profile")
+        );
+        assert_eq!(
+            taken_label(&stored, "default profile").as_deref(),
+            Some("Default profile")
+        );
+        assert_eq!(taken_label(&stored, "Personal"), None);
+        assert_eq!(taken_label(&stored, "Work 2"), None);
     }
 }

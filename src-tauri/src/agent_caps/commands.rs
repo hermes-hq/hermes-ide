@@ -77,11 +77,21 @@ pub fn capabilities(
         }
     }
     let stored = with_db(app, |c| store::list_accounts(c, agent_id))?;
-    let mut refused: HashMap<String, Vec<(String, i64)>> = HashMap::new();
+    let mut refused: HashMap<String, Vec<discover::Refusal>> = HashMap::new();
     for acc in
         std::iter::once(DEFAULT_ACCOUNT.to_string()).chain(stored.iter().map(|a| a.id.clone()))
     {
         let r = with_db(app, |c| store::rejections(c, agent_id, &acc))?;
+        let r = r
+            .into_iter()
+            .map(|(model, at, message)| discover::Refusal {
+                resolved: (model == DEFAULT_MODEL)
+                    .then(|| refused_model_name(&message))
+                    .flatten(),
+                model,
+                at,
+            })
+            .collect();
         refused.insert(acc, r);
     }
     let caps = discover::discover(
@@ -103,6 +113,36 @@ async fn blocking<T: Send + 'static>(
         .map_err(|e| e.to_string())?
 }
 
+/// The model a refusal names (Codex: "The model `X` does not exist…", "The
+/// 'X' model is not supported…"): what the CLI's default resolved to when
+/// the launch passed no model.
+pub fn refused_model_name(message: &str) -> Option<String> {
+    lazy_static::lazy_static! {
+        static ref NAMED: [regex::Regex; 2] = [
+            regex::Regex::new(r"[Tt]he model `([^`\s]+)`").unwrap(),
+            regex::Regex::new(r#"[Tt]he ['"`]([^'"`\s]+)['"`] model\b"#).unwrap(),
+        ];
+    }
+    NAMED
+        .iter()
+        .find_map(|re| re.captures(message))
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str().to_string())
+}
+
+/// "Check again" (`refresh`) forgets the refusals Hermes remembered for
+/// the agent: the person asks to look again, so every model is offered
+/// again (a launch the account still refuses is stopped and remembered).
+fn forget_refusals(app: &AppHandle, agent_id: &str) {
+    match with_db(app, |c| store::clear_rejections(c, agent_id)) {
+        Ok(n) if n > 0 => {
+            log::info!("[CAPS] Check again: forgot {n} refused model(s) of {agent_id}")
+        }
+        Ok(_) => {}
+        Err(e) => log::warn!("[CAPS] could not forget the refusals of {agent_id}: {e}"),
+    }
+}
+
 #[tauri::command]
 pub async fn get_agent_capabilities(
     app: AppHandle,
@@ -111,6 +151,9 @@ pub async fn get_agent_capabilities(
     refresh: Option<bool>,
 ) -> Result<AgentCapabilities, String> {
     blocking(move || {
+        if refresh == Some(true) {
+            forget_refusals(&app, &agent_id);
+        }
         capabilities(
             &app,
             &agent_id,
@@ -138,7 +181,12 @@ pub async fn list_agent_capabilities(
             .into_iter()
             .map(|id| {
                 let app = app.clone();
-                std::thread::spawn(move || capabilities(&app, id, None, refresh))
+                std::thread::spawn(move || {
+                    if refresh {
+                        forget_refusals(&app, id);
+                    }
+                    capabilities(&app, id, None, refresh)
+                })
             })
             .collect();
         let mut out = Vec::new();
@@ -518,6 +566,14 @@ pub async fn add_agent_account(
         };
         let root = profile_root().ok_or("No home folder to put the profile in")?;
         let stored = with_db(&app, |c| store::list_accounts(c, &agent_id))?;
+        // Two accounts with one name read the same everywhere (the
+        // launcher, the agent chip, "Use the Work account instead").
+        if let Some(taken) = store::taken_label(&stored, &label) {
+            return Err(format!(
+                "You already have a {} account named {taken}",
+                agent.name
+            ));
+        }
         let taken: Vec<String> = stored.iter().map(|a| a.id.clone()).collect();
         let (id, dir) = plan_account(template, &label, &root, &taken);
         let reused = dir.is_dir();
@@ -558,18 +614,88 @@ pub async fn add_agent_account(
     .await
 }
 
+/// How long the CLI's own sign-out may take.
+const SIGN_OUT_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Run the agent's own sign-out in an account's profile (`codex logout`
+/// with CODEX_HOME, `claude auth logout` with CLAUDE_CONFIG_DIR). Nothing
+/// else in the folder is touched.
+fn sign_out(agent: &crate::agent_catalog::Agent, env: &ProfileEnv) -> Result<(), String> {
+    let cmd = agent
+        .capabilities
+        .as_ref()
+        .and_then(|c| c.accounts.logout.as_ref())
+        .ok_or_else(|| format!("{} has no sign-out command", agent.name))?;
+    let (bin, args) = cmd
+        .split_first()
+        .ok_or_else(|| format!("{} has no sign-out command", agent.name))?;
+    let host = host();
+    let path = host
+        .find(bin)
+        .ok_or_else(|| format!("{} is not installed", agent.name))?;
+    match host.run(
+        &path,
+        args,
+        &[(env.name.clone(), env.value.clone())],
+        16 * 1024,
+        SIGN_OUT_TIMEOUT,
+    ) {
+        crate::agent_doctor::Probe::Exited { code: 0, .. } => Ok(()),
+        crate::agent_doctor::Probe::Exited { code, .. } => {
+            Err(format!("{} could not sign out (exit {code})", agent.name))
+        }
+        crate::agent_doctor::Probe::TimedOut => {
+            Err(format!("{} did not finish signing out", agent.name))
+        }
+        crate::agent_doctor::Probe::Failed => Err(format!("{} could not be started", agent.name)),
+    }
+}
+
+/// Remove an account Hermes added. Its profile folder stays where it is;
+/// `signOut` first runs the agent's own sign-out in it (the account is not
+/// removed when that fails, so nothing is left half done).
 #[tauri::command]
-pub fn remove_agent_account(
+pub async fn remove_agent_account(
     app: AppHandle,
     agent_id: String,
     account_id: String,
+    sign_out: Option<bool>,
 ) -> Result<(), String> {
     if account_id == DEFAULT_ACCOUNT {
         return Err("The default profile cannot be removed".to_string());
     }
-    with_db(&app, |c| store::remove_account(c, &agent_id, &account_id))?;
-    discover::invalidate(&agent_id);
-    Ok(())
+    blocking(move || {
+        if sign_out == Some(true) {
+            let agent = agent(&agent_id)?;
+            let env = profile_env_of(&app, &agent_id, &account_id)?
+                .ok_or("The default profile cannot be removed")?;
+            self::sign_out(agent, &env)?;
+            log::info!(
+                "[CAPS] signed out a {} account before removing it",
+                agent.name
+            );
+        }
+        with_db(&app, |c| store::remove_account(c, &agent_id, &account_id))?;
+        discover::invalidate(&agent_id);
+        Ok(())
+    })
+    .await
+}
+
+/// A launch the CLI took (its first finished turn or tool call): a refusal
+/// remembered for that model and account is forgotten, so the launcher
+/// offers the model again. `launch.model_id` None is the agent's default.
+pub fn launch_taken(app: &AppHandle, agent_id: &str, launch: &SessionLaunch) {
+    let model = launch.model_id.as_deref().unwrap_or(DEFAULT_MODEL);
+    let account = launch.account_id.as_deref().unwrap_or(DEFAULT_ACCOUNT);
+    match with_db(app, |c| store::clear_rejection(c, agent_id, account, model)) {
+        Ok(true) => {
+            log::info!("[CAPS] {agent_id} took a launch with {model}: its refusal is forgotten");
+            discover::invalidate(agent_id);
+        }
+        Ok(false) => {}
+        Err(e) => log::warn!("[CAPS] could not forget a refusal of {agent_id}: {e}"),
+    }
 }
 
 // ─── Launching with a choice ─────────────────────────────────────────
@@ -667,24 +793,19 @@ pub fn on_rejected(app: &AppHandle, session_id: &str, found: super::watch::Found
         r.reason
     );
     if r.reason == RejectReason::Model {
-        if let Some(model) = found.launch.model_id.as_deref() {
-            let account = found
-                .launch
-                .account_id
-                .as_deref()
-                .unwrap_or(DEFAULT_ACCOUNT);
-            let _ = with_db(app, |c| {
-                store::record_rejection(
-                    c,
-                    &found.agent,
-                    account,
-                    model,
-                    &r.vendor_message,
-                    now_ms(),
-                )
-            });
-            discover::invalidate(&found.agent);
-        }
+        // A launch without a model ran the CLI's own default (Codex: the
+        // `model` in its config.toml), which the account refused: that is
+        // remembered too, as "default" (the CLI's words name the model).
+        let model = found.launch.model_id.as_deref().unwrap_or(DEFAULT_MODEL);
+        let account = found
+            .launch
+            .account_id
+            .as_deref()
+            .unwrap_or(DEFAULT_ACCOUNT);
+        let _ = with_db(app, |c| {
+            store::record_rejection(c, &found.agent, account, model, &r.vendor_message, now_ms())
+        });
+        discover::invalidate(&found.agent);
     }
     if r.reason == RejectReason::SignedOut {
         discover::invalidate(&found.agent);
@@ -852,6 +973,20 @@ mod tests {
             plan_account(".codex-{slug}", "default", root, &[]).0,
             "default-2"
         );
+    }
+
+    #[test]
+    fn a_refusal_names_the_model_the_default_resolved_to() {
+        assert_eq!(
+            refused_model_name(r#"{"type":"error","status":400,"error":{"type":"invalid_request_error","message":"The model `gpt-5.2-codex` does not exist or you do not have access to it."}}"#).as_deref(),
+            Some("gpt-5.2-codex")
+        );
+        assert_eq!(
+            refused_model_name("ERROR: {\"type\":\"error\",\"message\":\"The 'gpt-5.2-codex' model is not supported when using Codex with a ChatGPT account.\"}").as_deref(),
+            Some("gpt-5.2-codex")
+        );
+        assert_eq!(refused_model_name("Not logged in"), None);
+        assert_eq!(refused_model_name(""), None);
     }
 
     #[test]

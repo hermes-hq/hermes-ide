@@ -2270,7 +2270,9 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 if record.nonce == nonce && ran_a_tool(&record.event) {
                     // The model answered with a tool call: the CLI took the
                     // launch, and what the tool prints is not its error.
-                    crate::agent_caps::watch::end(&session_id);
+                    if let Some(launch) = crate::agent_caps::watch::taken(&session_id) {
+                        crate::agent_caps::commands::launch_taken(&app, &agent, &launch);
+                    }
                 }
                 let limit_events = limits.observe(&record, &nonce);
                 let is_limit = record.nonce == nonce
@@ -2280,8 +2282,11 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     for event in map_signal_record(&record, &nonce, confidence, &source) {
                         let event = identity.merge(event, &mut named_model);
                         if ends_launch_watch(&event) {
-                            // A finished turn: the CLI took the launch.
-                            crate::agent_caps::watch::end(&session_id);
+                            // A finished turn: the CLI took the launch (a
+                            // model it refused before works now).
+                            if let Some(launch) = crate::agent_caps::watch::taken(&session_id) {
+                                crate::agent_caps::commands::launch_taken(&app, &agent, &launch);
+                            }
                         }
                         crate::contract::emit_session_event(&app, &session_id, event);
                     }

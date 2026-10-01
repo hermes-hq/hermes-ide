@@ -124,6 +124,9 @@
 //   codex  `debug models --bundled` a small model catalog (JSON)
 //   agy    `models`               "slug<TAB>Name" lines, or "Authentication required"
 //   `auth login` / `login`        signs the profile in (see below) and exits 0
+//   `auth logout` / `logout`      signs the profile out ("out" in .fake-auth)
+// Codex started without -m runs the `model = "…"` of its config.toml
+// (CODEX_HOME, else ~/.codex), as the real CLI does.
 // Sign-in per profile: with the agent's profile variable set
 // (CLAUDE_CONFIG_DIR, CODEX_HOME, …) the state is the file `.fake-auth` in
 // that folder ("in"; missing = signed out, like an empty profile); without
@@ -327,6 +330,20 @@ function answerDoctorProbe(argv) {
 		process.stdout.write("Fetching available models...\ngemini-fake-flash-low\tGemini Fake Flash (Low)\ngemini-fake-pro-high\tGemini Fake Pro (High)\nclaude-fake-sonnet\tClaude Fake Sonnet (Thinking)\n");
 		return 0;
 	}
+	if (is("auth", "logout") || is("logout")) {
+		// Signs the profile out (`claude auth logout`, `codex logout`).
+		const dir = profileDir();
+		if (dir && fs.existsSync(dir)) fs.writeFileSync(path.join(dir, ".fake-auth"), "out\n");
+		process.stdout.write(`Signed out of fake ${FAKE_AGENT}.\n`);
+		if (RECORD_DIR) {
+			fs.mkdirSync(RECORD_DIR, { recursive: true });
+			fs.writeFileSync(
+				path.join(RECORD_DIR, `logout-${Date.now()}-${process.pid}.json`),
+				JSON.stringify({ kind: "fake-cli-logout", agent: FAKE_AGENT, argv, profileEnv: PROFILE_ENV, profileDir: dir }, null, 2) + "\n",
+			);
+		}
+		return 0;
+	}
 	if (is("auth", "login") || is("login")) {
 		// A sign-in in the profile Hermes created: remember it there.
 		const dir = profileDir();
@@ -367,6 +384,17 @@ if (probeExit !== null) {
 }
 
 const args = parseArgs(process.argv.slice(2));
+// Codex without -m runs the `model` its config.toml names (CODEX_HOME, else
+// ~/.codex), like the real CLI: a refusal of that model names it.
+if (FAKE_AGENT === "codex" && !args.model) {
+	const home = process.env.CODEX_HOME || path.join(process.env.HOME || process.env.USERPROFILE || "", ".codex");
+	try {
+		const configured = /^\s*model\s*=\s*"([^"]+)"/m.exec(fs.readFileSync(path.join(home, "config.toml"), "utf8"));
+		if (configured) args.model = configured[1];
+	} catch {
+		/* no config: the CLI's own default */
+	}
+}
 const TRANSCRIPT_DIR = RECORD_DIR ? path.join(RECORD_DIR, "transcripts") : null;
 const mode = readMode();
 const modeWords = new Set(mode.split(/\s+/).filter(Boolean));

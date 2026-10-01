@@ -330,6 +330,14 @@ pub fn end(session_id: &str) {
     }
 }
 
+/// The CLI took the launch (its first finished turn or tool call): the
+/// watch ends. Returns what the launch asked for when it was still being
+/// watched, i.e. no refusal was seen (a refusal ends the watch first), so
+/// the caller can forget an earlier refusal of that model.
+pub fn taken(session_id: &str) -> Option<SessionLaunch> {
+    watches().lock().ok()?.remove(session_id).map(|w| w.launch)
+}
+
 /// The agent exited: read its last words for a moment longer, then stop.
 pub fn end_soon(session_id: &str) {
     if let Ok(mut w) = watches().lock() {
@@ -555,6 +563,28 @@ mod tests {
         );
         assert!(!is_watching("cap-w1"), "one refusal per launch");
         assert!(observe("cap-w1", b"Not logged in\r\n").is_none());
+        // The refused launch's turn ending later is not "taken".
+        assert!(taken("cap-w1").is_none());
+    }
+
+    #[test]
+    fn a_launch_taken_without_a_refusal_hands_back_what_it_asked_for_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch = SessionLaunch {
+            model_id: Some("opus".into()),
+            account_id: Some("work".into()),
+            ..Default::default()
+        };
+        start(
+            "cap-taken",
+            "claude",
+            how(dir.path().join("st"), "n", Duration::from_secs(30), launch),
+        );
+        let got = taken("cap-taken").expect("the launch was still watched");
+        assert_eq!(got.model_id.as_deref(), Some("opus"));
+        assert_eq!(got.account_id.as_deref(), Some("work"));
+        assert!(!is_watching("cap-taken"));
+        assert!(taken("cap-taken").is_none(), "once per launch");
     }
 
     #[test]

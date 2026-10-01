@@ -32,6 +32,17 @@ const PROBE_TIMEOUT: Duration = Duration::from_secs(12);
 /// A model list can be long (`codex debug models` carries instructions).
 pub const LIST_OUTPUT_CAP: usize = 4 * 1024 * 1024;
 
+/// A model an account refused at an earlier launch (`store::rejections`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Refusal {
+    pub model: String,
+    /// When (epoch ms).
+    pub at: i64,
+    /// The default model only: the model the CLI resolved "default" to, when
+    /// its refusal named it (Codex's `model` in its config.toml).
+    pub resolved: Option<String>,
+}
+
 /// Order of the approval modes, whatever order the catalog lists them in.
 const MODE_ORDER: &[&str] = &[
     "default",
@@ -175,12 +186,12 @@ fn probe_auth(
 }
 
 /// Build one agent's capabilities for `account_id` (None: the active one).
-/// `rejections`: (model, epoch ms) the account refused at an earlier launch.
+/// `rejections`: the models the account refused at an earlier launch.
 pub fn discover(
     agent: &Agent,
     stored: &[StoredAccount],
     account_id: Option<&str>,
-    rejections: &dyn Fn(&str) -> Vec<(String, i64)>,
+    rejections: &dyn Fn(&str) -> Vec<Refusal>,
     host: &dyn Host,
 ) -> AgentCapabilities {
     let spec = agent.capabilities.as_ref();
@@ -244,12 +255,17 @@ pub fn discover(
         .as_ref()
         .and_then(|d| d.command.split_first())
         .and_then(|(bin, args)| host.find(bin).map(|p| (p, args.to_vec())));
+    // A CLI that cannot start (see `agent_doctor::broken_reason`) cannot say
+    // whether an account is signed in: its accounts are "unknown" with the
+    // reason, never "signed out" (a sign-in would fail the same way).
+    let mut broken: Option<String> = None;
     if let Some((path, args)) = &bin {
         caps.installed = true;
-        if let Probe::Exited { output, .. } = host.run(path, args, &[], 16 * 1024, VERSION_TIMEOUT)
-        {
-            caps.cli_version = crate::agent_doctor::parse_version(&output);
+        let run = host.run(path, args, &[], 16 * 1024, VERSION_TIMEOUT);
+        if let Probe::Exited { output, .. } = &run {
+            caps.cli_version = crate::agent_doctor::parse_version(output);
         }
+        broken = crate::agent_doctor::broken_reason(&run, caps.cli_version.as_deref());
     }
 
     // Accounts.
@@ -258,10 +274,16 @@ pub fn discover(
     for (id, label, profile_env) in &list {
         let mut info = AuthInfo {
             signed_in: None,
-            detail: String::new(),
+            detail: broken
+                .as_ref()
+                .map(|why| format!("fails to start: {why}"))
+                .unwrap_or_default(),
         };
-        if let (true, Some(probe)) = (caps.installed, spec.and_then(|s| s.accounts.probe.as_ref()))
-        {
+        if let (true, None, Some(probe)) = (
+            caps.installed,
+            broken.as_ref(),
+            spec.and_then(|s| s.accounts.probe.as_ref()),
+        ) {
             if let Some((pbin, pargs)) = probe.command.split_first() {
                 if let Some(ppath) = host.find(pbin) {
                     let mut listed = None;
@@ -432,19 +454,32 @@ pub fn discover(
         }
         .to_string();
     }
-    for (model, _at) in rejections(&active) {
-        if let Some(m) = caps
-            .models
-            .iter_mut()
-            .find(|m| m.id == model && m.id != DEFAULT_MODEL)
-        {
-            m.available = false;
-            m.unavailable_reason = Some(format!(
-                "{} was refused by this account at its last launch",
-                m.id
-            ));
+    for r in rejections(&active) {
+        let Some(m) = caps.models.iter_mut().find(|m| m.id == r.model) else {
+            continue;
+        };
+        if m.id == DEFAULT_MODEL {
+            // The default stays launchable (the CLI's own setting may have
+            // changed since), but it no longer reads as a sure thing.
+            m.unavailable_reason = Some(match &r.resolved {
+                Some(name) => format!(
+                    "{}'s default model, {name}, was refused by this account at its last launch",
+                    agent.name
+                ),
+                None => format!(
+                    "{}'s default model was refused by this account at its last launch",
+                    agent.name
+                ),
+            });
             m.unavailable_code = Some("refused".to_string());
+            continue;
         }
+        m.available = false;
+        m.unavailable_reason = Some(format!(
+            "{} was refused by this account at its last launch",
+            m.id
+        ));
+        m.unavailable_code = Some("refused".to_string());
     }
     caps
 }
@@ -674,7 +709,7 @@ pub(crate) mod tests {
         crate::agent_catalog::agent(id).unwrap()
     }
 
-    fn none(_: &str) -> Vec<(String, i64)> {
+    fn none(_: &str) -> Vec<Refusal> {
         Vec::new()
     }
 
@@ -772,7 +807,11 @@ pub(crate) mod tests {
             .out("codex debug models --bundled", 0, models);
         let refused = |acc: &str| {
             if acc == "default" {
-                vec![("gpt-5.5".to_string(), 5)]
+                vec![Refusal {
+                    model: "gpt-5.5".to_string(),
+                    at: 5,
+                    resolved: None,
+                }]
             } else {
                 vec![]
             }
@@ -798,6 +837,25 @@ pub(crate) mod tests {
         );
         assert_eq!(caps.accounts[0].detail, "ChatGPT account");
         assert!(!caps.accepts_typed_model);
+        assert!(caps.models[0].available && caps.models[0].unavailable_reason.is_none());
+
+        // The default model refused (Codex's own config named a model the
+        // account cannot use): still launchable, but it says so.
+        let refused_default = |_: &str| {
+            vec![Refusal {
+                model: "default".to_string(),
+                at: 9,
+                resolved: Some("gpt-5.2-codex".to_string()),
+            }]
+        };
+        let caps = discover(agent("codex"), &[], None, &refused_default, &host);
+        let d = &caps.models[0];
+        assert!(d.available, "the default is never taken away");
+        assert_eq!(d.unavailable_code.as_deref(), Some("refused"));
+        assert_eq!(
+            d.unavailable_reason.as_deref(),
+            Some("Codex's default model, gpt-5.2-codex, was refused by this account at its last launch")
+        );
     }
 
     #[test]
@@ -887,6 +945,29 @@ pub(crate) mod tests {
             ("unknown", "free-text")
         );
         assert!(!caps.verified_on_real_install);
+    }
+
+    #[test]
+    fn a_cli_that_cannot_start_is_not_called_signed_out() {
+        let host = FakeHost::new(&["codex"]).out(
+            "codex --version",
+            127,
+            "env: node: No such file or directory\n",
+        );
+        let caps = discover(agent("codex"), &[], None, &none, &host);
+        assert!(caps.installed);
+        let a = &caps.accounts[0];
+        assert_eq!(a.sign_in_state, "unknown");
+        assert!(a.signed_in, "unknown never blocks on a guess");
+        assert_eq!(
+            a.detail,
+            "fails to start: env: node: No such file or directory"
+        );
+        assert!(
+            !host.ran.borrow().iter().any(|c| c.contains("login status")),
+            "no sign-in probe after a failed start: {:?}",
+            host.ran.borrow()
+        );
     }
 
     #[test]
