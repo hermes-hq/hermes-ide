@@ -55,13 +55,15 @@
       "id": "app.focus-next-pane",
       "group": "Panes",
       "label": "Focus Next Pane",
-      "accelerators": ["CmdOrCtrl+Alt+Right", "CmdOrCtrl+Alt+Down"]
+      "accelerators": ["CmdOrCtrl+Alt+Right", "CmdOrCtrl+Alt+Down"],
+      "pcAccelerators": ["Alt+Right", "Alt+Down", "Ctrl+Alt+Right", "Ctrl+Alt+Down"]
     },
     {
       "id": "app.focus-previous-pane",
       "group": "Panes",
       "label": "Focus Previous Pane",
-      "accelerators": ["CmdOrCtrl+Alt+Left", "CmdOrCtrl+Alt+Up"]
+      "accelerators": ["CmdOrCtrl+Alt+Left", "CmdOrCtrl+Alt+Up"],
+      "pcAccelerators": ["Alt+Left", "Alt+Up", "Ctrl+Alt+Left", "Ctrl+Alt+Up"]
     }
   ]
 }

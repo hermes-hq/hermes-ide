@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSession, useComposer } from "../state/SessionContext";
 import type { AgentAttachment } from "../utils/submitToAgent";
 import { isActionMod, isMac } from "../utils/platform";
+import { shortcutLabel } from "../utils/keymap";
 import { readImageForAttachment } from "../api/agent";
 import { getActiveSlashCommand, replaceSlashCommand } from "../utils/slashCommands";
 import {
@@ -685,7 +686,7 @@ export function SessionComposer() {
                   const bytes = await readImageForAttachment(p);
                   const ext = p.split(".").pop()?.toLowerCase() ?? "png";
                   const base64 = bytesToBase64(bytes);
-                  const filename = p.split("/").pop() ?? p;
+                  const filename = p.split(/[\\/]/).pop() || p;
                   setPendingImages((prev) => [...prev, {
                     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
                     label: filename,
@@ -937,7 +938,7 @@ export function SessionComposer() {
               type="button"
               className="session-composer-builder-btn"
               onClick={openPromptBuilder}
-              title={t("composer.openPromptBuilderTitle", { shortcut: isMac ? "⌘J" : "Ctrl+J" })}
+              title={t("composer.openPromptBuilderTitle", { shortcut: shortcutLabel("view.prompt-composer") })}
               aria-label={t("composer.openPromptBuilder")}
             >
               ✨ {t("composer.builder")}

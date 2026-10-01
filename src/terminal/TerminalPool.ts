@@ -25,6 +25,7 @@ import {
 } from "./intelligence/shellEnvironment";
 
 import { THEMES, FONT_FAMILIES } from "./themes";
+import { parseFontSize } from "./terminalKeys";
 import {
   pool,
   setCurrentSettings,
@@ -53,6 +54,7 @@ import {
   estimateInitialDimensions,
   getFocusedSessionId,
   refreshShellForeground,
+  pasteIntoTerminal,
   type PoolEntry,
 } from "./pool";
 
@@ -75,7 +77,7 @@ export function updateSettings(settings: Record<string, string>): void {
   // Apply to all existing terminals
   const themeName = settings.theme || "frosted-dark";
   const theme = THEMES[themeName] || THEMES["frosted-dark"];
-  const fontSize = parseInt(settings.font_size || "14", 10);
+  const fontSize = parseFontSize(settings.font_size);
   const fontFamily = FONT_FAMILIES[settings.font_family || "default"] || FONT_FAMILIES.default;
   const scrollback = parseInt(settings.scrollback || "10000", 10);
 
@@ -89,7 +91,7 @@ export function updateSettings(settings: Record<string, string>): void {
     if (entry.attached && entry.opened) {
       try {
         const proposed = entry.fitAddon.proposeDimensions();
-        if (proposed && proposed.cols >= 10 && proposed.rows >= 2) {
+        if (proposed && Number.isFinite(proposed.cols) && Number.isFinite(proposed.rows) && proposed.cols >= 10 && proposed.rows >= 2) {
           entry.fitAddon.fit();
           entry.terminal.refresh(0, entry.terminal.rows - 1);
         }
@@ -714,6 +716,14 @@ export function terminalGetSelection(sessionId: string): string {
   const raw = entry.terminal.getSelection();
   if (!raw) return "";
   return cleanSelection(entry.terminal, raw);
+}
+
+/** Paste the clipboard into a session's terminal (the right-click Paste). */
+export function pasteIntoSession(sessionId: string): void {
+  const entry = pool.get(sessionId);
+  if (!entry) return;
+  pasteIntoTerminal(entry.terminal);
+  entry.terminal.focus();
 }
 
 /** Write arbitrary text into the terminal as if pasted (e.g. a file path from a drop event).

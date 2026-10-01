@@ -96,8 +96,9 @@ describe("generated shortcut table", () => {
     expect(find("{mod}{shift}F")?.label).toBe("Search Panel");
   });
 
-  it("{mod}{shift}Z is Flow Mode", () => {
-    expect(find("{mod}{shift}Z")?.label).toBe("Flow Mode");
+  it("{mod}{alt}Z is Flow Mode, so ⇧⌘Z / Ctrl+Shift+Z stay Redo in text fields", () => {
+    expect(find("{mod}{alt}Z")?.label).toBe("Flow Mode");
+    expect(find("{mod}{shift}Z")).toBeUndefined();
   });
 
   it("lists the left-panel tabs ({mod}P, {mod}G, {mod}F)", () => {

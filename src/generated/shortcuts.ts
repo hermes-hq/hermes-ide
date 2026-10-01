@@ -63,7 +63,7 @@ export const GENERATED_SHORTCUT_GROUPS: GeneratedShortcutGroup[] = [
       { id: "view.shortcuts", label: "Keyboard Shortcuts", labelKey: "shortcuts.item.view.shortcuts", keys: "{mod}/", pcKeys: "{ctrl}/" },
       { id: "view.split-horizontal", label: "Split Right", labelKey: "shortcuts.item.view.splitHorizontal", keys: "{mod}D", pcKeys: "{ctrl}{shift}D" },
       { id: "view.split-vertical", label: "Split Down", labelKey: "shortcuts.item.view.splitVertical", keys: "{mod}{shift}D", pcKeys: "{ctrl}{shift}S" },
-      { id: "view.flow-mode", label: "Flow Mode", labelKey: "shortcuts.item.view.flowMode", keys: "{mod}{shift}Z", pcKeys: "{ctrl}{shift}Z" },
+      { id: "view.flow-mode", label: "Flow Mode", labelKey: "shortcuts.item.view.flowMode", keys: "{mod}{alt}Z", pcKeys: "{ctrl}{shift}Y" },
       { id: "view.search-panel", label: "Search Panel", labelKey: "shortcuts.item.view.searchPanel", keys: "{mod}{shift}F", pcKeys: "{ctrl}{shift}F" },
       { id: "view.fullscreen", label: "Toggle Fullscreen", labelKey: "shortcuts.item.view.fullscreen", keys: "F11", platform: "not-macos" },
       { id: "app.command-palette-alt", label: "Command Palette (alternate)", labelKey: "shortcuts.item.app.commandPaletteAlt", keys: "{mod}{shift}P" },
@@ -74,7 +74,7 @@ export const GENERATED_SHORTCUT_GROUPS: GeneratedShortcutGroup[] = [
     group: "Session",
     groupKey: "shortcuts.group.session",
     shortcuts: [
-      { id: "session.copy-context", label: "Copy Context", labelKey: "shortcuts.item.session.copyContext", keys: "{mod}{shift}C", pcKeys: "{ctrl}{shift}C" },
+      { id: "session.copy-context", label: "Copy Context", labelKey: "shortcuts.item.session.copyContext", keys: "{mod}{shift}C", pcKeys: "{ctrl}{shift}X" },
       { id: "app.focus-composer", label: "Focus Composer", labelKey: "shortcuts.item.app.focusComposer", keys: "{mod}{shift}J" },
       { id: "app.switch-session", label: "Switch to Session 1–9", labelKey: "shortcuts.item.app.switchSession", keys: "{mod}1-9" },
       { id: "app.attention-next", label: "Jump to Next Waiting Agent", labelKey: "shortcuts.item.app.attentionNext", keys: "{mod}I", pcKeys: "{ctrl}{shift}I" },
@@ -85,8 +85,8 @@ export const GENERATED_SHORTCUT_GROUPS: GeneratedShortcutGroup[] = [
     group: "Panes",
     groupKey: "shortcuts.group.panes",
     shortcuts: [
-      { id: "app.focus-next-pane", label: "Focus Next Pane", labelKey: "shortcuts.item.app.focusNextPane", keys: "{mod}{alt}→" },
-      { id: "app.focus-previous-pane", label: "Focus Previous Pane", labelKey: "shortcuts.item.app.focusPreviousPane", keys: "{mod}{alt}←" },
+      { id: "app.focus-next-pane", label: "Focus Next Pane", labelKey: "shortcuts.item.app.focusNextPane", keys: "{mod}{alt}→", pcKeys: "{alt}→" },
+      { id: "app.focus-previous-pane", label: "Focus Previous Pane", labelKey: "shortcuts.item.app.focusPreviousPane", keys: "{mod}{alt}←", pcKeys: "{alt}←" },
     ],
   },
 ];

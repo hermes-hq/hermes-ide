@@ -16,9 +16,9 @@
     { "action": "view.search-panel", "mac": "{mod}{shift}F", "pc": "{ctrl}{shift}F" },
     { "action": "view.split-horizontal", "mac": "{mod}D", "pc": "{ctrl}{shift}D", "pcOutsideTerminal": "{ctrl}D" },
     { "action": "view.split-vertical", "mac": "{mod}{shift}D", "pc": "{ctrl}{shift}S" },
-    { "action": "view.flow-mode", "mac": "{mod}{shift}Z", "pc": "{ctrl}{shift}Z" },
+    { "action": "view.flow-mode", "mac": "{mod}{alt}Z", "pc": "{ctrl}{shift}Y" },
     { "action": "view.cost-dashboard", "mac": "{mod}$", "pc": "{ctrl}$" },
     { "action": "view.shortcuts", "mac": "{mod}/", "pc": "{ctrl}/" },
-    { "action": "session.copy-context", "mac": "{mod}{shift}C", "pc": "{ctrl}{shift}C" }
+    { "action": "session.copy-context", "mac": "{mod}{shift}C", "pc": "{ctrl}{shift}X" }
   ]
 }
