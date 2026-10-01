@@ -114,14 +114,17 @@ try {
   const [sessionId] = await newTerminals(bridge, t0, 1, "the agent's terminal");
   await waitLauncherClosed(bridge);
   const rec = (await fx.waitForRecords(n0 + 1)).at(-1);
+  // Windows hands a prompt to the agent on one line (its line breaks become
+  // spaces); the words are what matters.
   const prompt = String(rec.prompt ?? "");
+  const flat = prompt.replace(/\s+/g, " ");
   log(`  first prompt (${prompt.length} chars): ${JSON.stringify(prompt.slice(0, 400))}…`);
   assert(prompt.startsWith("Hermes Feature Track (Full)"), "the first prompt is the feature track's, not the bare task");
-  assert(prompt.includes(`\n${TASK}\n`) && /Phases: questions → research → design → structure → plan → implement\./.test(prompt), "it carries the task and the phases");
-  assert(/Current phase: questions \(1 of 6\)/.test(prompt) && prompt.includes("# Phase: questions"), "and the questions phase's own instructions");
-  const qPath = prompt.match(/Write (\.hermes\/features\/[a-z0-9-]+\/questions\.md) \(at most 40 lines\)/)?.[1];
+  assert(flat.includes(`: ${TASK} Phases:`) && /Phases: questions → research → design → structure → plan → implement\./.test(flat), "it carries the task and the phases");
+  assert(/Current phase: questions \(1 of 6\)/.test(flat) && flat.includes("# Phase: questions"), "and the questions phase's own instructions");
+  const qPath = flat.match(/Write (\.hermes\/features\/[a-z0-9-]+\/questions\.md) \(at most 40 lines\)/)?.[1];
   assert(!!qPath, `where to write the questions (${qPath})`);
-  assert(/run `hi phase done`, then STOP: end your turn and wait\./.test(prompt), "and the gate: hand over with hi phase done, then stop and wait");
+  assert(/run `hi phase done`, then STOP: end your turn and wait\./.test(flat), "and the gate: hand over with hi phase done, then stop and wait");
   const wt = rec.cwd;
   const slug = qPath.split("/")[2];
   const featureMd = join(wt, ".hermes", "features", slug, "feature.md");

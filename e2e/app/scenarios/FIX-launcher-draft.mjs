@@ -74,6 +74,8 @@ const BRANCH = "hermes/failure-notice-by-hand";
 
 /** Everything the draft is: the task, every chip, the options and their fields. */
 const fullState = async (bridge) => {
+  // "Hermes will run" is worked out after the sheet opens: wait for it.
+  await bridge.waitFor("the launcher's command line", `return e2e.norm(e2e.first(".task-launcher-command")?.textContent ?? "") !== "";`, { timeoutMs: 20_000 });
   const st = await launcherState(bridge);
   const opts = await bridge.eval(`
     const o = e2e.first(".task-launcher-options");
@@ -181,6 +183,8 @@ try {
   const [signInId] = await newTerminals(bridge, before, 1, "the sign-in terminal");
   await waitLauncherClosed(bridge);
   assert(true, `the launcher gave way to the sign-in terminal ${signInId.slice(0, 8)}`);
+  // The person closes it once it is up (the agent's CLI is running in it).
+  await bridge.waitForTerminal(signInId, /fake-cli|logged in|log in/i, { timeoutMs: 60_000 });
   fx.setFake("auth-claude", "in");
   await invoke(bridge, "close_session", { sessionId: signInId });
   await waitLauncherReady(bridge);

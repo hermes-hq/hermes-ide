@@ -463,8 +463,9 @@ try {
   log(`  records: ${JSON.stringify(recs.map((r) => ({ argv: r.argv, cwd: r.cwd })))}`);
   // Tracked as a feature: the first prompt is the track's (the task, then the
   // questions phase and its gate), so the agents plan before any code.
-  const trackPrompt = (r) => String(r.argv.find((a) => String(a).startsWith("Hermes Feature Track (Full)")) ?? "");
-  assert(recs.every((r) => trackPrompt(r).includes("\nExisting task\n") && /Current phase: questions \(1 of 6\)/.test(trackPrompt(r))), "both agents got the feature track's first prompt, with the task");
+  // (Windows hands it over on one line: its line breaks become spaces.)
+  const trackPrompt = (r) => String(r.argv.find((a) => String(a).startsWith("Hermes Feature Track (Full)")) ?? "").replace(/\s+/g, " ");
+  assert(recs.every((r) => trackPrompt(r).includes(": Existing task Phases:") && /Current phase: questions \(1 of 6\)/.test(trackPrompt(r))), "both agents got the feature track's first prompt, with the task");
   const wtPair = [];
   for (const id of pair) wtPair.push(await invoke(bridge, "git_session_worktree_info", { sessionId: id, projectId: pid }));
   const branches = wtPair.map((w) => w.branchName).sort();
