@@ -1100,15 +1100,54 @@ features:
         text: "A project header or status bar total that leaves out sessions whose cost is unknown says so: the known sum and how many sessions are n/a, on screen whole at the default sidebar width, named in its tooltip; n/a when no cost is known"
         scenarios: [F31-partial-spend.mjs]
   F37:
-    # Behind the fleetControls flag. Turns come from a fake ledger (the e2e
-    # hook setFakeTurnLedger) until F20 fills the real one; turn ends travel
-    # the Rust side of the event channel. HERMES_E2E_F37_FLAG=off must fail.
+    # Behind the fleetControls flag. F37-collision-radar.mjs drives turns
+    # from a fake ledger (the e2e hook setFakeTurnLedger) with turn ends on
+    # the Rust side of the event channel; HERMES_E2E_F37_FLAG=off must fail.
+    # QA-status-radar-real-ledger.mjs drives the real one: two fake Claude
+    # Code agents end real turns through the Stop hook (no turn_end event),
+    # and the radar follows the turn ledger's own event.
     name: "Collision Radar v0"
     status: partial
     criteria:
       F37-1:
         text: "Two sessions editing the same file show an overlap badge on both rows"
-        scenarios: [F37-collision-radar.mjs]
+        scenarios: [F37-collision-radar.mjs, QA-status-radar-real-ledger.mjs]
+  QA-STATUS:
+    # Fixes from the 2.0 QA pass on the attention inbox, away messages, spend
+    # totals, the status bar and the session rows. Fake agents (tools/
+    # fake-agents) block through their own hooks; a local server stands in
+    # for the away address and the update manifest; the window's keyboard
+    # focus is stated through the test hooks.
+    name: "Attention, away messages, status bar and session rows (QA pass)"
+    status: partial
+    criteria:
+      QA-STATUS-1:
+        text: "The badge, the dock and ⌘I count the same agents; a Hermes notice is listed apart as Hermes · n notice(s) and never counted as an agent"
+        scenarios: [QA-status-attention-counts.mjs]
+      QA-STATUS-2:
+        text: "An away message goes out only when Hermes is not in front of you (or after the chosen delay unanswered); Immediately sends at once"
+        scenarios: [QA-status-away-at-desk.mjs]
+      QA-STATUS-3:
+        text: "Away messages say where each agent works (folder and session number) without prompt text; session names only when opted in"
+        scenarios: [QA-status-away-tells-agents-apart.mjs]
+      QA-STATUS-4:
+        text: "A failed away message raises one Hermes notice and shows under the address; Send test message tries the address"
+        scenarios: [QA-status-away-failure.mjs]
+      QA-STATUS-5:
+        text: "The status bar's spend says it covers the open sessions"
+        scenarios: [QA-status-spend-open-sessions.mjs]
+      QA-STATUS-6:
+        text: "⌘I with nothing waiting says so on screen for about 3 s"
+        scenarios: [QA-status-cmd-i-nothing-waiting.mjs]
+      QA-STATUS-7:
+        text: "Check for updates shows Checking…, then up to date or could not check (within 15 s)"
+        scenarios: [QA-status-update-check.mjs]
+      QA-STATUS-8:
+        text: "Eight agents at the default sidebar width: every row's meta line stays inside the row with the spend shown whole (it moves to a second line; an ellipsis and a full tooltip only past that), the selected row is not shifted, and each close button names its session"
+        scenarios: [QA-status-session-rows.mjs]
+      QA-STATUS-9:
+        text: "At 600 × 400 (English and German) every status-bar control is inside the window; Check for updates, Report a Bug and Keyboard Shortcuts fold into a ⋯ menu"
+        scenarios: [QA-status-min-window.mjs]
   N22:
     # Behind the fleetControls flag; fake agents started as Custom agents.
     # HERMES_E2E_N22_CAP=off (no cap) must fail.

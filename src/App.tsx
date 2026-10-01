@@ -1146,6 +1146,18 @@ function AppContent() {
     }
   }, [activeSession, toastStore, ui.trackPanelOpen, dispatch, t]);
 
+  // Help > Check for Updates… and the version chip: always say how it went
+  // (an update found opens its dialog).
+  const { manualCheck } = updater;
+  const checkForUpdatesNow = useCallback(async () => {
+    const result = await manualCheck();
+    if (result === "none") {
+      toastStoreRef.current.addToast({ message: t("statusbar.update.upToDate", { version: __APP_VERSION__ }), type: "success", duration: 5000 });
+    } else if (result === "error") {
+      toastStoreRef.current.addToast({ message: t("statusbar.update.checkFailed"), type: "error", duration: 8000 });
+    }
+  }, [manualCheck, t]);
+
   // ── Native menu bar event bridge ──
   useNativeMenuEvents({
     dispatch,
@@ -1161,7 +1173,7 @@ function AppContent() {
     setSessionCreatorOpen,
     copyContextToClipboard: () => copyContextToClipboard(activeSession),
     pendingSplit,
-    onCheckForUpdates: () => updater.manualCheck(),
+    onCheckForUpdates: () => void checkForUpdatesNow(),
     commandPaletteShortcut: cmdPaletteShortcut,
     toggleReviewDesk: reviewDeskEnabled ? toggleReviewDesk : undefined,
   });
@@ -1605,8 +1617,9 @@ function AppContent() {
         updateVersion={updater.state.version}
         updateDownloading={updater.state.downloading}
         updateProgress={updater.state.progress}
+        updateChecking={updater.state.checking}
         onShowUpdate={() => updater.manualCheck()}
-        onCheckForUpdates={() => updater.manualCheck()}
+        onCheckForUpdates={() => void checkForUpdatesNow()}
       />
 
       {ui.commandPaletteOpen && (

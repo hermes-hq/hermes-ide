@@ -1,7 +1,7 @@
 // Session-row badges for the fleet controls (flag `fleetControls`):
 //
 //   - spend: what the agent reported it spent ("$0.42"), Hermes's estimate
-//     from its transcript ("≈$0.42 (estimated)"), or "n/a" when it
+//     from its transcript ("≈$0.42", its tooltip says it is estimated), or "n/a" when it
 //     does not report a cost; "cap reached" once a spend cap stopped it (F31)
 //   - overlap: this session's latest turns touched a file another session's
 //     latest turns touched too (F37)
@@ -23,7 +23,9 @@ export function SessionSpendChip({ session }: { session: Pick<SessionData, "id" 
   const trip = useSessionCapTrip(session.id);
   if (!session.ai_provider && !session.detected_agent && !usage) return null;
   const spend = spendOf(usage);
-  const text = spendText(spend, t);
+  // The row is narrow: an estimate is "≈$0.42" there; its tooltip says
+  // in full that it is an estimate and why.
+  const text = spend.kind === "estimated" && spend.costUsd !== null ? t("fleet.spendEstimatedShort", { cost: formatUsd(spend.costUsd) }) : spendText(spend, t);
   const tokens = usage && (usage.inputTokens !== null || usage.outputTokens !== null)
     ? t("fleet.spendTokens", {
         input: usage.inputTokens === null ? t("fleet.spendNa") : usage.inputTokens.toLocaleString(),
@@ -31,7 +33,7 @@ export function SessionSpendChip({ session }: { session: Pick<SessionData, "id" 
       })
     : "";
   const why = spend.kind === "na" ? t("fleet.spendNotReported") : spend.kind === "estimated" ? t("fleet.spendEstimatedTitle") : t("fleet.spendReported");
-  const title = [why, tokens].filter(Boolean).join("\n");
+  const title = [spendText(spend, t), why, tokens].filter(Boolean).join("\n");
   return (
     <>
       <span

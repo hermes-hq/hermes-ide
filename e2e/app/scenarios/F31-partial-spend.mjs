@@ -110,7 +110,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   `);
   const statusCost = () => bridge.eval(`
     const c = e2e.first(".status-bar-cost");
-    return c ? { text: e2e.norm(c.innerText), kind: c.dataset.spend, unknown: c.dataset.unknown, title: c.title } : null;
+    return c ? { text: e2e.norm(c.querySelector(".status-bar-cost-amount").innerText), kind: c.dataset.spend, unknown: c.dataset.unknown, title: c.title } : null;
   `);
   const waitForBoth = async (what, text, headerText = text) => {
     const read = async () => ({ header: await headerCost(), status: await statusCost() });
@@ -190,7 +190,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     const s = document.querySelector('.session-item[data-session-item-id="${a}"] .session-spend');
     return s && s.dataset.spend === "estimated" ? e2e.norm(s.innerText) : null;
   `, { timeoutMs: 15_000 });
-  assert(rowA === "≈$0.37 (estimated)", `the row of ${LABEL_A} says "${rowA}"`);
+  assert(rowA === "≈$0.37", `the row of ${LABEL_A} says "${rowA}"`);
   const partial = await waitForBoth("A priced, B unknown", PARTIAL, HEADER_PARTIAL);
   assert(partial.header?.text === HEADER_PARTIAL, `the "${PROJECT}" header says "${partial.header?.text}", not the known part as the total`);
   assert(partial.header.title.split("\n")[0] === PARTIAL, `the header's tooltip says it in full: "${partial.header.title.split("\n")[0]}"`);

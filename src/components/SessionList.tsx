@@ -51,6 +51,26 @@ export function sessionCloseTitle(
   return mode === "agent" ? t("close.agent.confirm") : t("close.terminal.confirm");
 }
 
+/** The row's × names the session it closes ("Close session api: fix login"), so a
+ *  screen reader tells the rows' buttons apart. */
+export function sessionCloseLabel(
+  mode: "agent" | "terminal" | undefined,
+  label: string,
+  t: (key: string, values?: Record<string, string | number>) => string,
+): string {
+  const name = label.trim();
+  if (!name) return sessionCloseTitle(mode, t);
+  return mode === "agent" ? t("close.agent.named", { label: name }) : t("close.terminal.named", { label: name });
+}
+
+/** A line cut short at the right carries all of its text as its tooltip (read when the pointer arrives). */
+export function fillCutLineTitle(e: { currentTarget: HTMLElement }): void {
+  const el = e.currentTarget;
+  const cut = el.scrollWidth > el.clientWidth + 1 || [...el.children].some((c) => c.scrollWidth > c.clientWidth + 1);
+  if (cut) el.title = (el.innerText || el.textContent || "").replace(/\s+/g, " ").trim();
+  else el.removeAttribute("title");
+}
+
 /** "Delete Session Data" confirm + call, pulled out of the context-menu
  *  handler so the confirm-gating logic is unit-testable without rendering
  *  the whole session list. Deletes only on an explicit yes. */
@@ -1028,12 +1048,14 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           <div className="session-item-info">
             <InlineNameEditor sessionId={session.id} label={session.label} triggerEdit={shouldTriggerRename} onTriggered={() => setRenameSessionId(null)} />
             <InlineDescriptionEditor sessionId={session.id} description={session.description} isActive={isActive} />
-            <div className="session-item-meta">
+            {/* One line: status, memory and age first, the spend last, so a
+                narrow sidebar cuts the spend (with an ellipsis) before the
+                rest; the line's tooltip then has all of it. */}
+            <div className="session-item-meta" onMouseEnter={fillCutLineTitle}>
               {session.ssh_info && (
                 <Badge tone="info" className="session-ssh-tag">SSH{session.ssh_info.tmux_session ? ` · ${session.ssh_info.tmux_session}` : ""}</Badge>
               )}
               <SessionAgentTag session={session} />
-              {fleetOn && session.phase !== "destroyed" && <SessionSpendChip session={session} />}
               {fleetOn && session.phase !== "destroyed" && <SessionOverlapBadge sessionId={session.id} labelOf={labelOf} />}
               {agentStatus && session.phase !== "disconnected" ? (
                 <AgentStatusTag sessionId={session.id} />
@@ -1061,6 +1083,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
               <SessionContextGauge sessionId={session.id} />
               <SessionMemoryTag sessionId={session.id} />
               <span className="session-age">{timeAgo(session.last_activity_at)}</span>
+              {fleetOn && session.phase !== "destroyed" && <SessionSpendChip session={session} />}
             </div>
             <SessionIdentityChips session={session} />
             {session.phase === "disconnected" && session.ssh_info && onReconnect && (
@@ -1102,7 +1125,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           </div>
           <CloseButton
             className="session-item-close"
-            label={sessionCloseTitle(session.mode, t)}
+            label={sessionCloseLabel(session.mode, session.label, t)}
             onClick={(e) => { e.stopPropagation(); onClose(session.id); }}
           />
         </div>

@@ -1,10 +1,11 @@
 //! Away notifications (N16): one outgoing message when an agent is blocked
 //! on you, to an address you configure. Outbound only, no remote approval.
 //!
-//! The message carries the agent, the task name and the state, nothing
-//! else: the payload type refuses any other field, and no prompt, detail or
-//! file content ever reaches this module. With no address set nothing is
-//! sent and no connection is opened.
+//! The message carries the agent, the task name, the state and where the
+//! agent works (its repository folder and session number, "api-repo #2"),
+//! nothing else: the payload type refuses any other field, and no prompt,
+//! detail or file content ever reaches this module. With no address set
+//! nothing is sent and no connection is opened.
 //!
 //! The address decides the format:
 //!   - `https://api.telegram.org/bot<token>/sendMessage?chat_id=<id>`:
@@ -12,7 +13,7 @@
 //!     query into the body; the token stays in the path).
 //!   - a host with "ntfy" in its name (`https://ntfy.sh/<topic>` or a
 //!     self-hosted ntfy): a plain-text body and a `Title` header.
-//!   - anything else: a JSON webhook `{"agent","task","state"}`.
+//!   - anything else: a JSON webhook `{"agent","task","state","where"}`.
 
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
@@ -22,6 +23,7 @@ pub const AWAY_NOTIFY_URL_KEY: &str = "away_notify_url";
 
 const MAX_AGENT_CHARS: usize = 40;
 const MAX_TASK_CHARS: usize = 80;
+const MAX_WHERE_CHARS: usize = 80;
 const MAX_STATE_CHARS: usize = 32;
 const SEND_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -32,6 +34,10 @@ pub struct AwayPayload {
     pub agent: String,
     pub task: String,
     pub state: String,
+    /// Where the agent works ("api-repo #2"); "" when unknown. Optional on
+    /// the wire, so an older frontend's three fields are still accepted.
+    #[serde(rename = "where", default)]
+    pub place: String,
 }
 
 impl AwayPayload {
@@ -49,17 +55,25 @@ impl AwayPayload {
             agent: one_line(&self.agent, MAX_AGENT_CHARS),
             task: one_line(&self.task, MAX_TASK_CHARS),
             state: state.to_string(),
+            place: one_line(&self.place, MAX_WHERE_CHARS),
         })
     }
 
-    /// The human sentence for ntfy and Telegram: "Claude Code · fix-login · needs approval".
+    /// The human sentence for ntfy and Telegram:
+    /// "Claude Code · fix-login · api-repo #2 · needs approval" (empty parts left out).
     pub fn text(&self) -> String {
         let state = self.state.replace('_', " ");
-        if self.task.is_empty() {
-            format!("{} · {}", self.agent, state)
-        } else {
-            format!("{} · {} · {}", self.agent, self.task, state)
-        }
+        [
+            self.agent.as_str(),
+            self.task.as_str(),
+            self.place.as_str(),
+            &state,
+        ]
+        .iter()
+        .filter(|part| !part.is_empty())
+        .copied()
+        .collect::<Vec<_>>()
+        .join(" · ")
     }
 }
 
@@ -242,6 +256,7 @@ mod tests {
             agent: "Claude Code".into(),
             task: "fix-login".into(),
             state: "needs_approval".into(),
+            place: String::new(),
         }
     }
 
@@ -276,10 +291,11 @@ mod tests {
         let obj = body.as_object().unwrap();
         let mut keys: Vec<_> = obj.keys().cloned().collect();
         keys.sort();
-        assert_eq!(keys, vec!["agent", "state", "task"]);
+        assert_eq!(keys, vec!["agent", "state", "task", "where"]);
         assert_eq!(body["agent"], "Claude Code");
         assert_eq!(body["task"], "fix-login");
         assert_eq!(body["state"], "needs_approval");
+        assert_eq!(body["where"], "");
     }
 
     #[test]
@@ -332,16 +348,56 @@ mod tests {
     }
 
     #[test]
+    fn where_tells_agents_apart_in_every_format() {
+        let p = AwayPayload {
+            task: String::new(),
+            place: "api-repo #2".into(),
+            ..payload()
+        };
+        let hook = build_request("https://hooks.example.com/h", &p)
+            .unwrap()
+            .unwrap();
+        let body: Value = serde_json::from_str(&hook.body).unwrap();
+        assert_eq!(body["where"], "api-repo #2");
+        let ntfy = build_request("https://ntfy.sh/t", &p).unwrap().unwrap();
+        assert_eq!(ntfy.body, "Claude Code · api-repo #2 · needs approval");
+        let named = AwayPayload {
+            place: "api-repo #2".into(),
+            ..payload()
+        };
+        assert_eq!(
+            named.text(),
+            "Claude Code · fix-login · api-repo #2 · needs approval"
+        );
+    }
+
+    #[test]
+    fn a_payload_without_where_is_still_accepted() {
+        let raw = serde_json::json!({ "agent": "a", "task": "t", "state": "needs_approval" });
+        let p: AwayPayload = serde_json::from_value(raw).unwrap();
+        assert_eq!(p.place, "");
+        let raw =
+            serde_json::json!({ "agent": "a", "task": "t", "state": "test", "where": "web #1" });
+        assert_eq!(
+            serde_json::from_value::<AwayPayload>(raw).unwrap().place,
+            "web #1"
+        );
+    }
+
+    #[test]
     fn long_or_multi_line_values_are_cut_to_one_short_line() {
         let p = AwayPayload {
             agent: "A\nB".into(),
             task: "x".repeat(500),
             state: "needs_answer".into(),
+            place: "y\n".repeat(500),
         };
         let s = p.sanitized().unwrap();
         assert_eq!(s.agent, "A B");
         assert_eq!(s.task.chars().count(), MAX_TASK_CHARS);
         assert!(s.task.ends_with('…'));
+        assert_eq!(s.place.chars().count(), MAX_WHERE_CHARS);
+        assert!(!s.place.contains('\n'));
     }
 
     #[test]
@@ -417,7 +473,7 @@ mod tests {
         let body = request.split("\r\n\r\n").nth(1).unwrap();
         assert_eq!(
             body,
-            r#"{"agent":"Claude Code","task":"fix-login","state":"needs_approval"}"#
+            r#"{"agent":"Claude Code","task":"fix-login","state":"needs_approval","where":""}"#
         );
     }
 }

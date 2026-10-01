@@ -21,8 +21,15 @@
   display: flex;
   align-items: center;
   gap: var(--space-2);
+  /* Both sides may give way, so the bar never pushes a control out of the
+   * window: the left side clips, the right side shortens the spend. */
+  min-width: 0;
+  flex: 0 1 auto;
 }
+.status-bar-left { overflow: hidden; }
 .status-bar-right { max-width: 60%; }
+.status-bar-right > * { flex-shrink: 0; }
+.status-bar-right > .status-bar-cost { flex-shrink: 1; min-width: 0; }
 /* The bar is the bottom edge of the window, which clips: rings are drawn
  * inside the controls instead of 2 px outside them. */
 .status-bar :focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }
@@ -164,12 +171,22 @@
 }
 
 .status-bar-cost {
+  /* One line of text (its tooltip has it all), cut with an ellipsis when
+   * the window is narrow. */
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--text-2);
   font-family: var(--font-numeric);
   font-variant-numeric: tabular-nums slashed-zero;
   font-weight: var(--weight-medium);
   font-size: var(--text-xs);
   transition: color 1.5s ease-out;
+}
+.status-bar-cost-scope {
+  font-family: var(--font-ui, inherit);
+  font-weight: var(--weight-regular, 400);
+  color: var(--text-3);
 }
 .status-bar-cost[data-just-changed="true"] {
   color: var(--brass, var(--voice-user));
@@ -207,6 +224,11 @@
     border-color var(--dur-quick) var(--ease-out-soft);
 }
 .status-version-chip:hover { color: var(--text-1); }
+
+.status-version-chip[data-state="checking"] {
+  color: var(--text-1);
+  cursor: progress;
+}
 
 .status-version-chip[data-state="available"] {
   background: var(--brass-dim, var(--warning-dim));

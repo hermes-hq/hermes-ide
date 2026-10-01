@@ -19,7 +19,8 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn(async () => () => {}) }));
-vi.mock("../api/settings", () => ({ getSetting: vi.fn(async () => ""), setSetting: vi.fn(async () => {}) }));
+vi.mock("../api/settings", () => ({ getSetting: vi.fn(async () => ""), getSettings: vi.fn(async () => ({})), setSetting: vi.fn(async () => {}) }));
+vi.mock("../api/git", () => ({ listAllWorktrees: vi.fn(async () => []) }));
 vi.mock("../api/attention", () => ({
   AWAY_NOTIFY_URL_KEY: "away_notify_url",
   setAttentionBadge: h.setAttentionBadge,
@@ -30,7 +31,9 @@ vi.mock("../utils/notifications", () => ({ notifyAttention: h.notifyAttention })
 
 import { AttentionCenter } from "../components/AttentionCenter";
 import { I18nProvider } from "../i18n/I18nProvider";
-import { _resetInboxForTest, listInboxItems } from "../agent/contract/inbox";
+import { _resetInboxForTest, listInboxItems, raiseInboxItem } from "../agent/contract/inbox";
+import { _resetAwayPrefsForTest, applyAwayPref } from "../attention/awayPrefs";
+import { _resetAwayLastForTest, getAwayLast } from "../attention/awayStatus";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent } from "../agent/contract/sessionEventStore";
 import type { AgentStatusKind } from "../agent/contract/status";
 import { _resetMutesForTest } from "../attention/mutes";
@@ -101,6 +104,8 @@ beforeEach(() => {
   _resetSessionEventStoreForTest();
   _resetMutesForTest(() => clock);
   _resetUserLabelsForTest();
+  _resetAwayPrefsForTest();
+  _resetAwayLastForTest();
   setWindowFocusOverride(null);
   attentionDebug.os.length = 0;
   attentionDebug.away.length = 0;
@@ -226,9 +231,13 @@ describe("F12 attention center", () => {
       ["A", "suppressed-focused"],
       ["B", "sent"],
     ]);
+    // Hermes is in front of the person: B's away message waits (2 min by
+    // default) and goes once the window loses the focus.
+    expect(h.sendAwayNotification).not.toHaveBeenCalled();
+    act(() => setWindowFocusOverride(false));
     expect(h.sendAwayNotification).toHaveBeenCalledTimes(1);
     const payload = h.sendAwayNotification.mock.calls[0][0] as Record<string, string>;
-    expect(Object.keys(payload).sort()).toEqual(["agent", "state", "task"]);
+    expect(Object.keys(payload).sort()).toEqual(["agent", "state", "task", "where"]);
     expect(payload.task).toBe("bravo-task");
     expect(payload.state).toBe("needs_approval");
     expect(JSON.stringify(payload)).not.toMatch(/zebra|otter|walrus|export const/);
@@ -407,6 +416,7 @@ describe("F12 attention center", () => {
         <AttentionCenter canOpenOnStart={notAtStart} sessions={named} activeSessionId={null} onJump={() => {}} />
       </I18nProvider>,
     );
+    setWindowFocusOverride(false);
     status("E", "needs_approval");
     expect(h.sendAwayNotification).toHaveBeenCalledTimes(1);
     const payload = h.sendAwayNotification.mock.calls[0][0] as Record<string, string>;
@@ -539,5 +549,124 @@ describe("morning view and ⌘I position", () => {
     pressNext();
     expect(onJump).toHaveBeenLastCalledWith("C");
     expect(document.querySelector(".attention-position")?.textContent).toBe("2 of 3 waiting");
+  });
+
+  it("calls agents agents and Hermes notices notices in the morning title", () => {
+    mount();
+    act(() => {
+      raiseInboxItem({ kind: "error", sessionId: null, detail: "Only 2 GB left", source: "worktree" });
+    });
+    status("B", "needs_approval");
+    clock += 1_000;
+    status("C", "needs_answer");
+    act(() => {
+      raiseInboxItem({ kind: "gate", sessionId: "B", detail: "Plan ready", source: "track" });
+    });
+    const dialog = screen.getByRole("dialog", { name: "Attention inbox" });
+    expect(dialog.querySelector(".attention-morning-title")?.textContent).toBe("2 agents are waiting on you · 1 Hermes notice");
+  });
+});
+
+describe("what the counts count (LEAD-07) and ⌘I with nothing waiting (LEAD-12)", () => {
+  it("the badge and the dock count agents, the same ones ⌘I visits; a Hermes notice is named apart", () => {
+    const { badge } = setup("D");
+    status("A", "needs_approval");
+    clock += 1_000;
+    status("B", "needs_approval");
+    act(() => {
+      raiseInboxItem({ kind: "gate", sessionId: "A", detail: "Plan ready", source: "track" });
+      raiseInboxItem({ kind: "error", sessionId: null, detail: "Only 2 GB left", source: "worktree" });
+    });
+    expect(badge()).toHaveAttribute("data-count", "2");
+    expect(badge()).toHaveAttribute("data-notices", "1");
+    expect(badge()).toHaveAccessibleName("Attention inbox: 2 agents blocked on you · Hermes · 1 notice");
+    expect(h.setAttentionBadge).toHaveBeenLastCalledWith(2);
+    pressNext();
+    expect(document.querySelector(".attention-position")?.getAttribute("data-total")).toBe("2");
+
+    pressInbox();
+    const list = screen.getByRole("listbox", { name: "Attention inbox" });
+    const groups = within(list).getAllByRole("group");
+    expect(groups.map((g) => g.getAttribute("data-section"))).toEqual(["blocked", "notices"]);
+    expect(groups[0].querySelector(".attention-group-title")?.textContent).toBe("Blocked on you (2)");
+    expect(groups[1].querySelector(".attention-group-title")?.textContent).toBe("Hermes · 1 notice");
+    expect(within(groups[1]).getAllByRole("option").map((o) => o.getAttribute("data-session-id"))).toEqual([""]);
+  });
+
+  it("one agent reads in the singular", () => {
+    const { badge } = setup("D");
+    status("A", "needs_approval");
+    expect(badge()).toHaveAccessibleName("Attention inbox: 1 agent blocked on you");
+  });
+
+  it("⌘I with nothing waiting says so on screen, then the note goes", () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      const { onJump } = setup("D");
+      pressNext();
+      expect(onJump).not.toHaveBeenCalled();
+      const note = document.querySelector(".attention-position");
+      expect(note?.textContent).toBe("Nothing is waiting on you");
+      expect(note).toHaveAttribute("data-total", "0");
+      act(() => {
+        vi.advanceTimersByTime(3_100);
+      });
+      expect(document.querySelector(".attention-position")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+});
+
+describe("away messages that fail, and where an agent works (LEAD-09, LEAD-10)", () => {
+  const PLACED: Record<string, SessionData> = {
+    A: { ...session("A", "alpha-task"), working_directory: "/srv/demo/api-repo", created_at: "2026-01-01T10:00:00Z" } as SessionData,
+    B: { ...session("B", "bravo-task"), working_directory: "/srv/demo/web-repo", created_at: "2026-01-01T10:01:00Z" } as SessionData,
+    C: { ...session("C", "charlie-task"), working_directory: "/srv/demo/web-repo", created_at: "2026-01-01T10:02:00Z" } as SessionData,
+  };
+  const flush = () => act(async () => {
+    await Promise.resolve();
+    await Promise.resolve();
+  });
+
+  it("each message says where its agent works, never its name unless asked", async () => {
+    render(
+      <I18nProvider>
+        <AttentionCenter canOpenOnStart={notAtStart} sessions={PLACED} activeSessionId={null} onJump={() => {}} />
+      </I18nProvider>,
+    );
+    setWindowFocusOverride(false);
+    status("B", "needs_approval");
+    status("C", "needs_approval");
+    const sent = h.sendAwayNotification.mock.calls.map((c) => c[0] as Record<string, string>);
+    expect(sent.map((p) => p.where)).toEqual(["web-repo #1", "web-repo #2"]);
+    expect(sent.map((p) => p.task)).toEqual(["", ""]);
+    applyAwayPref("away_notify_names", "on");
+    status("A", "needs_approval");
+    const named = h.sendAwayNotification.mock.calls[2][0] as Record<string, string>;
+    expect(named).toEqual({ agent: "Claude Code", task: "alpha-task", state: "needs_approval", where: "api-repo #1" });
+    await flush();
+  });
+
+  it("the first failure raises one Hermes notice; a message that gets through takes it away", async () => {
+    h.sendAwayNotification.mockImplementation(async () => ({ outcome: "failed", error: "the address answered 500 Internal Server Error", target: "webhook" }));
+    render(
+      <I18nProvider>
+        <AttentionCenter canOpenOnStart={notAtStart} sessions={PLACED} activeSessionId={null} onJump={() => {}} />
+      </I18nProvider>,
+    );
+    setWindowFocusOverride(false);
+    status("A", "needs_approval");
+    await flush();
+    status("B", "needs_approval");
+    await flush();
+    const notices = () => listInboxItems().filter((i) => i.sessionId === null).map((i) => i.detail);
+    expect(notices()).toEqual(["Away message could not be sent (the address answered 500 Internal Server Error) — check Settings > General"]);
+    expect(getAwayLast()).toMatchObject({ outcome: "failed", error: "the address answered 500 Internal Server Error" });
+    h.sendAwayNotification.mockImplementation(async () => ({ outcome: "sent", status: 200, target: "webhook" }));
+    status("C", "needs_approval");
+    await flush();
+    expect(notices()).toEqual([]);
+    expect(getAwayLast()).toMatchObject({ outcome: "sent" });
   });
 });
