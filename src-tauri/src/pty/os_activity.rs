@@ -631,13 +631,14 @@ pub fn note_agent_status(session_id: &str, asking: Option<&str>) {
 /// is the answer: the ask is taken back (see the module docs). Returns
 /// whether it was.
 pub fn note_person_input(session_id: &str) -> bool {
-    let answered = registry().lock().ok().and_then(|mut reg| {
-        let w = reg.get_mut(session_id)?;
-        let source = w.asked.take()?;
-        let working = w.judge.working.then(|| w.judge.reason.clone());
-        Some((w.app.clone(), source, working))
-    });
-    let Some((app, source, working)) = answered else {
+    let Some((source, working)) = take_answered_ask(session_id) else {
+        return false;
+    };
+    let Some(app) = registry()
+        .lock()
+        .ok()
+        .and_then(|reg| Some(reg.get(session_id)?.app.clone()))
+    else {
         return false;
     };
     let at = crate::turn_ledger::now_ms();
@@ -645,6 +646,19 @@ pub fn note_person_input(session_id: &str) -> bool {
         crate::contract::emit_session_event(&app, session_id, event);
     }
     true
+}
+
+/// The part of [`note_person_input`] that touches no app handle: takes back
+/// the session's exact ask, giving its source and, when this layer sees the
+/// agent working, why. None when the session is not watched or asks nothing.
+/// Unit tests call this one: a test that reaches the window stack (emitting
+/// an event does) cannot even load on Windows, where the test binary has no
+/// app manifest.
+fn take_answered_ask(session_id: &str) -> Option<(String, Option<String>)> {
+    let mut reg = registry().lock().ok()?;
+    let w = reg.get_mut(session_id)?;
+    let source = w.asked.take()?;
+    Some((source, w.judge.working.then(|| w.judge.reason.clone())))
 }
 
 fn run() {
@@ -1084,9 +1098,9 @@ mod tests {
     #[test]
     fn a_key_answers_only_an_exact_ask_once() {
         // Nothing watched: nothing to answer.
-        assert!(!note_person_input("no-such-session"));
+        assert!(take_answered_ask("no-such-session").is_none());
         note_agent_status("no-such-session", Some("hook:claude"));
-        assert!(!note_person_input("no-such-session"));
+        assert!(take_answered_ask("no-such-session").is_none());
     }
 
     /// The real process table: a helper started as `hi run <id>` (a shell
