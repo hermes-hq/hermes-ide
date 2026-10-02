@@ -306,6 +306,81 @@ impl Repo {
             .collect())
     }
 
+    /// Paths that differ between two trees (added, changed or removed).
+    pub fn paths_between(&self, from: &str, to: &str) -> Result<Vec<String>, String> {
+        self.changed_paths(from, to, "ACDMRT")
+    }
+
+    /// `base_tree` with `paths` taken from `from_tree` (a path `from_tree`
+    /// does not have is removed), through a scratch index: nothing the user
+    /// sees changes.
+    pub fn graft(
+        &self,
+        base_tree: &str,
+        from_tree: &str,
+        paths: &[String],
+    ) -> Result<String, String> {
+        let index = self.git_dir.join("hermes-turn-index-graft");
+        let run = |args: &[&str], input: Option<Vec<u8>>| -> Result<String, String> {
+            let mut cmd = base_command(&self.root);
+            cmd.env("GIT_INDEX_FILE", &index).args(args);
+            if input.is_some() {
+                cmd.stdin(Stdio::piped());
+            }
+            let mut child = cmd
+                .spawn()
+                .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
+            if let Some(bytes) = input {
+                let mut stdin = child.stdin.take().ok_or("git stdin")?;
+                std::io::Write::write_all(&mut stdin, &bytes)
+                    .map_err(|e| format!("git stdin: {e}"))?;
+            }
+            let out = child
+                .wait_with_output()
+                .map_err(|e| format!("git {}: {e}", args.join(" ")))?;
+            if !out.status.success() {
+                return Err(format!(
+                    "git {} failed: {}",
+                    args.join(" "),
+                    String::from_utf8_lossy(&out.stderr).trim()
+                ));
+            }
+            Ok(String::from_utf8_lossy(&out.stdout).trim_end().to_string())
+        };
+        let result = (|| {
+            run(&["read-tree", base_tree], None)?;
+            let mut ls = vec!["ls-tree", "-r", "-z", from_tree, "--"];
+            ls.extend(paths.iter().map(String::as_str));
+            let listing = run(&ls, None)?;
+            let mut present = std::collections::HashSet::new();
+            let mut info = Vec::new();
+            for entry in listing.split('\0').filter(|e| !e.is_empty()) {
+                // "<mode> <type> <oid>\t<path>"
+                let Some((meta, path)) = entry.split_once('\t') else {
+                    continue;
+                };
+                let mut parts = meta.split(' ');
+                let (Some(mode), Some(_kind), Some(oid)) =
+                    (parts.next(), parts.next(), parts.next())
+                else {
+                    continue;
+                };
+                present.insert(path.to_string());
+                info.extend_from_slice(format!("{mode} {oid}\t{path}").as_bytes());
+                info.push(0);
+            }
+            if !info.is_empty() {
+                run(&["update-index", "-z", "--index-info"], Some(info))?;
+            }
+            for path in paths.iter().filter(|p| !present.contains(*p)) {
+                run(&["update-index", "--force-remove", "--", path], None)?;
+            }
+            run(&["write-tree"], None)
+        })();
+        let _ = std::fs::remove_file(&index);
+        result
+    }
+
     /// Make the worktree equal `target_tree`, given that it currently equals
     /// `current_tree` (a fresh `write_tree`). Files the target does not have
     /// are removed, the rest written from the target; the user's index,

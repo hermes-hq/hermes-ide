@@ -268,11 +268,23 @@
 
 .git-file-path {
   flex: 1;
+  min-width: 0;
+  display: flex;
   overflow: hidden;
-  text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--text-1);
   font-size: var(--text-xs);
+}
+/* Middle truncation: the folder shrinks (with an ellipsis), the name stays. */
+.git-file-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-3);
+}
+.git-file-base {
+  flex: 0 0 auto;
 }
 
 .git-file-actions {

@@ -241,3 +241,42 @@
   color: var(--danger-fg);
   font-size: var(--text-xs);
 }
+
+/* A phase a person skipped: never drawn like an approved one. */
+.track-phase-skipped {
+  color: var(--text-3);
+}
+.track-phase-skipped .track-phase-name {
+  font-style: italic;
+}
+
+.track-promote-label {
+  font-size: var(--text-xs);
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+/* Skip and "Make it a feature" ask first, inline. */
+.track-confirm {
+  margin: var(--space-2) var(--space-2) 0;
+  padding: var(--space-2);
+  border: var(--control-border-width) solid var(--brass-dim);
+  border-radius: var(--radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.track-confirm p {
+  margin: 0;
+}
+.track-confirm-files {
+  margin: 0;
+  padding-left: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+.track-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+}

@@ -356,6 +356,9 @@ async function pickMode(bridge, mode) {
 async function closeSheet(bridge) {
   await bridge.click(".land-sheet-close, .land-sheet-cancel");
   await bridge.waitFor("the Land sheet to close", `return !e2e.first(".land-sheet");`);
+  // The Review Desk the sheet was opened from is still there when nothing
+  // landed (Cancel brings the person back to it): close it too.
+  if (await bridge.exists(".review-desk")) await bridge.click(".review-desk .review-close");
 }
 
 async function injectTurns(bridge, sessionId, turns) {

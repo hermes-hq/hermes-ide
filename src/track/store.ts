@@ -41,6 +41,8 @@ export interface TrackFeatureState {
   readonly body: string;
   readonly featureText: string;
   readonly featureModifiedAt: number;
+  /** feature.md is too large to read (its size in bytes), else null. */
+  readonly tooLarge: number | null;
   readonly questions: readonly Question[];
   readonly files: readonly TrackFileInfo[];
   /** Phase file texts as the agent handed them over, by file name. */
@@ -141,6 +143,7 @@ export function parseFeatureSnapshot(snap: TrackFeatureSnapshot, prev: TrackFeat
     body: parsed.ok ? parsed.body : "",
     featureText: snap.featureText,
     featureModifiedAt: snap.featureModifiedAt,
+    tooLarge: snap.featureTruncated ? (snap.featureSize ?? snap.featureText.length) : null,
     questions: Object.freeze(snap.questionsText === null ? [] : parseQuestions(snap.questionsText)),
     files: snap.files,
     baseline: prev?.baseline ?? Object.freeze({}),

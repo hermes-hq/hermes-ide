@@ -73,6 +73,46 @@ export function skipsAllApprovals(permissionMode: string | null | undefined): bo
   return permissionMode === "bypassPermissions";
 }
 
+// ─── Skipped phases ───────────────────────────────────────────────────
+
+export interface SkippedPhase {
+  readonly phase: FeaturePhase;
+  /** When, as hermes-track wrote it ("2026-10-01 14:05 UTC"), or null. */
+  readonly when: string | null;
+}
+
+/**
+ * The phases a person skipped, from feature.md's `skipped:` front matter
+ * key (written by hermes-track: `skipped: [research (2026-10-01 14:05 UTC)]`,
+ * or a `- item` block), so a skipped phase is never drawn as an approved one.
+ */
+export function skippedPhases(featureText: string): SkippedPhase[] {
+  const lines = featureText.split(/\r?\n/);
+  if (lines[0]?.trim() !== "---") return [];
+  const close = lines.findIndex((l, i) => i > 0 && l.trim() === "---");
+  if (close < 0) return [];
+  const items: string[] = [];
+  for (let i = 1; i < close; i++) {
+    const m = /^skipped:\s*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const rest = m[1].replace(/\s+#.*$/, "").trim();
+    if (rest.startsWith("[") && rest.endsWith("]")) {
+      items.push(...rest.slice(1, -1).split(","));
+    } else if (rest === "") {
+      for (let j = i + 1; j < close && /^\s*-\s/.test(lines[j]); j++) items.push(lines[j].replace(/^\s*-\s/, ""));
+    }
+    break;
+  }
+  const out: SkippedPhase[] = [];
+  for (const raw of items) {
+    const item = raw.trim().replace(/^["']|["']$/g, "");
+    const m = /^([a-z]+)(?:\s+\((.+)\))?$/.exec(item);
+    if (!m || !(FEATURE_PHASES as readonly string[]).includes(m[1])) continue;
+    out.push({ phase: m[1] as FeaturePhase, when: m[2] ?? null });
+  }
+  return out;
+}
+
 // ─── questions.md ─────────────────────────────────────────────────────
 
 export interface Question {
@@ -109,6 +149,19 @@ export interface AttachedSession {
   readonly working_directory: string;
   readonly created_at: string;
   readonly ssh_info?: unknown;
+  /** The agent it was launched with (null: a plain shell). */
+  readonly ai_provider?: string | null;
+  /** The agent seen running in its terminal. */
+  readonly detected_agent?: { readonly name: string } | null;
+}
+
+/**
+ * Whether a session runs an agent: it has a turn history, was launched with
+ * one, or one was seen in its terminal. A plain shell is none of these, and
+ * Hermes never types a track line into it (the shell would run it).
+ */
+export function isAgentSession(s: AttachedSession, hasTurnHistory: HasTurnHistory = NO_HISTORY): boolean {
+  return hasTurnHistory(s.id) || !!s.ai_provider || !!s.detected_agent;
 }
 
 /** Same folder whatever the trailing slash or the letter case on Windows. */
@@ -127,13 +180,14 @@ const NO_HISTORY: HasTurnHistory = () => false;
  * The sessions attached to a worktree: the first one is the writer (the
  * agent that drives the feature; `r` types into its terminal), the rest are
  * readers. A session with a turn history is an agent for sure, so it comes
- * before one without, whatever their ages: a plain shell opened in the
- * worktree before the agent never becomes the writer by seniority. Among
- * equals the oldest wins.
+ * first; then a session that runs an agent (launched with one, or one seen
+ * in its terminal); a plain shell comes last, whatever the ages: a shell
+ * opened in the worktree before the agent never becomes the writer by
+ * seniority. Among equals the oldest wins.
  */
 export function attachedSessions<S extends AttachedSession>(sessions: readonly S[], worktreePath: string, hasTurnHistory: HasTurnHistory = NO_HISTORY): S[] {
   const target = normalizePath(worktreePath);
-  const rank = (s: S) => (hasTurnHistory(s.id) ? 0 : 1);
+  const rank = (s: S) => (hasTurnHistory(s.id) ? 0 : isAgentSession(s) ? 1 : 2);
   return sessions
     .filter((s) => !s.ssh_info && normalizePath(s.working_directory) === target)
     .sort((a, b) => rank(a) - rank(b) || (a.created_at < b.created_at ? -1 : a.created_at > b.created_at ? 1 : a.id < b.id ? -1 : 1));

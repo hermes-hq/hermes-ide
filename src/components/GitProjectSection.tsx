@@ -22,6 +22,7 @@ import { translate } from "../i18n/registry";
 import { useOptionalSessions } from "../state/sessionContextObject";
 import { agentDisplayName, getAgent } from "../catalog/agentCatalog";
 import { Button } from "./ui";
+import { translatePlural } from "../i18n/plural";
 
 interface GitProjectSectionProps {
   sessionId: string;
@@ -110,11 +111,17 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
   const { showMenu: showEmptyMenu } = useContextMenu(handleEmptyAreaAction);
 
   const staged = useMemo(() => project.files.filter((f) => f.area === "staged"), [project.files]);
-  const unstaged = useMemo(() => project.files.filter((f) => f.area === "unstaged"), [project.files]);
-  const untracked = useMemo(() => project.files.filter((f) => f.area === "untracked"), [project.files]);
+  // In the Review Desk a Feature Track's planning files (.hermes/features/)
+  // are a collapsed group of their own, which "+ all" leaves out: they are
+  // archived by Land, not committed with the code.
+  const isTrackFile = useCallback((path: string) => changesOnly && path.replace(/\\/g, "/").startsWith(".hermes/features/"), [changesOnly]);
+  const trackFiles = useMemo(() => project.files.filter((f) => f.area !== "staged" && isTrackFile(f.path)), [project.files, isTrackFile]);
+  const [trackFilesOpen, setTrackFilesOpen] = useState(false);
+  const unstaged = useMemo(() => project.files.filter((f) => f.area === "unstaged" && !isTrackFile(f.path)), [project.files, isTrackFile]);
+  const untracked = useMemo(() => project.files.filter((f) => f.area === "untracked" && !isTrackFile(f.path)), [project.files, isTrackFile]);
 
   const totalChanges = project.files.length;
-  const hasChanges = staged.length > 0 || unstaged.length > 0 || untracked.length > 0;
+  const hasChanges = staged.length > 0 || unstaged.length > 0 || untracked.length > 0 || trackFiles.length > 0;
 
   // Load auto-stage setting
   useEffect(() => {
@@ -176,10 +183,13 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
   const handleStageAll = useCallback(async () => {
     setError(null);
     try {
-      await gitStage(sessionId, projectId, ["."]);
+      // The Review Desk stages what its lists show, never the track's files.
+      const paths = changesOnly ? [...unstaged, ...untracked].map((f) => f.path) : ["."];
+      if (paths.length === 0) return;
+      await gitStage(sessionId, projectId, paths);
       onRefresh();
     } catch (e) { setError(String(e)); }
-  }, [sessionId, projectId, onRefresh]);
+  }, [sessionId, projectId, onRefresh, changesOnly, unstaged, untracked]);
 
   const handleUnstageAll = useCallback(async () => {
     setError(null);
@@ -489,6 +499,28 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                       key={`untracked-${f.path}`}
                       file={f}
                       onStage={handleStage}
+                      onOpen={handleOpen}
+                      onClick={handleFileClick}
+                      kit={changesOnly}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* A Feature Track's planning files: collapsed, left out of "+ all". */}
+              {trackFiles.length > 0 && (
+                <div className="git-file-group git-track-files" data-count={trackFiles.length} data-open={trackFilesOpen ? "1" : "0"}>
+                  <div className="git-file-group-header">
+                    <Button size="sm" variant="quiet" className="git-track-toggle" aria-expanded={trackFilesOpen} onClick={() => setTrackFilesOpen((o) => !o)}>
+                      <span aria-hidden="true">{trackFilesOpen ? "\u25BE" : "\u25B8"}</span> {translatePlural("review.trackFiles", trackFiles.length)}
+                    </Button>
+                  </div>
+                  {trackFilesOpen && trackFiles.map((f) => (
+                    <GitFileRow
+                      key={`track-${f.area}-${f.path}`}
+                      file={f}
+                      onStage={handleStage}
+                      onDiscard={handleDiscard}
                       onOpen={handleOpen}
                       onClick={handleFileClick}
                       kit={changesOnly}

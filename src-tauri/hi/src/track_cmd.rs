@@ -3,7 +3,7 @@
 //!
 //! ```text
 //! hi feature new <slug> [--track Quick|Light|Full] [--title T] [--no-branch]
-//! hi phase [name|done|skip] [--feature <slug>]
+//! hi phase [name|done|skip] [--feature <slug>]   skip: people only
 //! hi approve [--feature <slug>]          people only (refuses under HERMES_AGENT)
 //! hi feature check [--feature <slug>]  (`hi check` runs the Done-When checks, F27)
 //! hi land [--body-file <path>] [--feature <slug>]   people only
@@ -199,6 +199,11 @@ pub fn cmd_feature(cwd: &Path, args: &[String]) -> i32 {
 }
 
 pub fn cmd_phase(cwd: &Path, args: &[String]) -> i32 {
+    cmd_phase_as(cwd, args, !agent_env_set())
+}
+
+/// `hi phase …` run by a person (`by_person`) or by an agent.
+pub fn cmd_phase_as(cwd: &Path, args: &[String], by_person: bool) -> i32 {
     let args = match parse_args(args) {
         Ok(a) => a,
         Err(e) => return usage_error(&e),
@@ -220,7 +225,9 @@ pub fn cmd_phase(cwd: &Path, args: &[String]) -> i32 {
             }
             Err(e) => fail(&e),
         },
-        Some("skip") => match feature::skip_phase(&root, &slug, !agent_env_set()) {
+        // Skipping a phase is the person's decision, like an approval.
+        Some("skip") if !by_person => people_only("hi phase skip"),
+        Some("skip") => match feature::skip_phase(&root, &slug, true) {
             Ok((from, to)) => {
                 println!(
                     "{slug}: skipped {}; now at {}. Next: hi phase",
@@ -238,7 +245,7 @@ pub fn cmd_phase(cwd: &Path, args: &[String]) -> i32 {
                     Some(p) => Some(p),
                     None => {
                         return usage_error(&format!(
-                            "unknown phase {name:?}; phases are questions, research, design, structure, plan, implement — or done, skip"
+                            "unknown phase {name:?}; phases are questions, research, design, structure, plan, implement — or done"
                         ))
                     }
                 },
@@ -346,4 +353,38 @@ pub fn cmd_status(cwd: &Path, args: &[String]) -> i32 {
     let root = find_root(cwd);
     print!("{}", status::render(&root, args.all));
     0
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn args(list: &[&str]) -> Vec<String> {
+        list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[test]
+    fn an_agents_phase_skip_exits_people_only_and_changes_nothing() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        feature::create(root, "demo", Track::Full, "", "").unwrap();
+        let file = root.join(".hermes/features/demo/feature.md");
+        let before = std::fs::read_to_string(&file).unwrap();
+        for _ in 0..3 {
+            assert_eq!(
+                cmd_phase_as(root, &args(&["skip", "--feature", "demo"]), false),
+                EXIT_PEOPLE_ONLY
+            );
+        }
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), before);
+        // A person may.
+        assert_eq!(
+            cmd_phase_as(root, &args(&["skip", "--feature", "demo"]), true),
+            0
+        );
+        let after = std::fs::read_to_string(&file).unwrap();
+        assert!(after.contains("phase: research"), "{after}");
+        assert!(after.contains("skipped: [questions ("), "{after}");
+    }
 }

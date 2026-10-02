@@ -37,9 +37,10 @@ import { SessionList } from "./components/SessionList";
 import { hideOpeningOverlay, showOpeningOverlay } from "./utils/sessionCreatorOverlay";
 import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon, TrackIcon } from "./components/ActivityBar";
 import { useTrackWatching } from "./track/useTrackWatching";
-import { attachedSessions, editorCommandFor, gateMovedLine, submitLineBytes } from "./track/rules";
+import { attachedSessions, editorCommandFor, gateMovedLine, isAgentSession, submitLineBytes } from "./track/rules";
 import { getTrackState, hasTurnHistory, noteOwnApproval } from "./track/store";
-import { trackApprove, trackPromote } from "./track/api";
+import { trackApprove } from "./track/api";
+import { promoteWithUndo } from "./track/promote";
 import { slugFromBranch } from "./track/rules";
 import { writeToSession } from "./api/sessions";
 import { utf8ToBase64 } from "./utils/encoding";
@@ -1304,7 +1305,7 @@ function AppContent() {
       const move = await trackApprove(activeSession.working_directory, feature.slug);
       // The agent stopped at the gate: tell it (as the Track panel does).
       const writer = attachedSessions(sessions, activeSession.working_directory, hasTurnHistory)[0];
-      if (writer && (hasTurnHistory(writer.id) || writer.ai_provider)) await sendLineToSession(writer.id, gateMovedLine(feature.slug, move, "approved")).catch(() => {});
+      if (writer && isAgentSession(writer, hasTurnHistory)) await sendLineToSession(writer.id, gateMovedLine(feature.slug, move, "approved")).catch(() => {});
       toastStore.addToast({ message: t("track.approvedToast", { slug: feature.slug, from: move.from, to: move.to }), type: "success", duration: 4000 });
     } catch (e) {
       toastStore.addToast({ message: String(e), type: "error", duration: 5000 });
@@ -1315,9 +1316,8 @@ function AppContent() {
     if (!activeSession) return;
     const track = getTrackState(activeSession.working_directory);
     try {
-      const out = await trackPromote(activeSession.working_directory, slugFromBranch(track.branch, activeSession.working_directory), "Light", null);
-      const made = t("track.featureCreated", { slug: out.slug, track: "Light" });
-      toastStore.addToast({ message: out.branch ? `${made} — ${out.branch}` : made, type: "success", duration: 4000 });
+      // An explicit palette command; its toast offers Undo like the Track panel.
+      await promoteWithUndo(activeSession.working_directory, slugFromBranch(track.branch, activeSession.working_directory), "Light", toastStore, t);
       if (!ui.trackPanelOpen) dispatch({ type: "TOGGLE_TRACK" });
     } catch (e) {
       toastStore.addToast({ message: String(e), type: "error", duration: 5000 });

@@ -594,6 +594,74 @@ features:
       FIX-identity-tags-1:
         text: "Identity reports from several sources merge field by field: a later one without the model never erases the model the agent named"
         scenarios: [UI-chrome.mjs]
+  QA-review:
+    # Bug fixes from the 2.0 QA pass on the Review Desk, the turn ledger,
+    # Feature Tracks, Done-When and the hi helper; not new 2.0 work, so not
+    # behind a feature flag. Every scenario's header names its negative
+    # control: a build of main before the fix ends in RESULT: FAIL.
+    name: "Review Desk, turns and Feature Tracks: what the QA pass found"
+    status: shipped
+    criteria:
+      QA-review-1:
+        text: "An agent can never skip a Feature Track phase (`hi phase skip` exits 3, people only); a refusal never suggests skipping"
+        scenarios: [QA-review-agent-skip.mjs]
+      QA-review-2:
+        text: "The Track writer is the agent, never a plain shell opened earlier: Send my edits reaches the agent and is never typed into the shell; the badge names the agent"
+        scenarios: [QA-review-writer-not-shell.mjs]
+      QA-review-3:
+        text: "The Track panel's toasts (skip, approve) are shown"
+        scenarios: [QA-review-track-toasts.mjs]
+      QA-review-4:
+        text: "The Done-When Stop hook does not send the agent back while a track plans or waits at a gate, and does in the implement phase"
+        scenarios: [QA-review-donewhen-planning.mjs]
+      QA-review-5:
+        text: "`hi check` and the Stop hook run a task's own checks (<git dir>/hermes/done-when.json); the Done-When chip shows them"
+        scenarios: [QA-review-task-checks.mjs]
+      QA-review-6:
+        text: "The turn ledger never charges the person's between-turn edits (or Hermes's review files) to an agent turn; they show as a 'Between turns · you' row without Revert"
+        scenarios: [QA-review-turn-blame.mjs]
+      QA-review-7:
+        text: "Send my edits at a waiting gate never asks the agent to apply edits already saved or to continue, and says not to run `hi phase done` again"
+        scenarios: [QA-review-review-file-wording.mjs]
+      QA-review-8:
+        text: "Skip is ⇧S with a confirmation; a skipped phase is drawn '– phase · skipped' with who and when, and recorded in feature.md"
+        scenarios: [QA-review-skip-confirm.mjs]
+      QA-review-9:
+        text: "Restore to Tn names the person's edits it sets aside, counts its own changes, and offers Undo that brings everything back"
+        scenarios: [QA-review-restore-undo.mjs]
+      QA-review-10:
+        text: "The Review Desk names the agent ('Claude Code'), never the task text, and counts read right (1 comment, 1 file)"
+        scenarios: [QA-review-desk-agent-labels.mjs]
+      QA-review-11:
+        text: "A review comment stays on its line after the next turn moves it, and is marked outdated when the line is gone"
+        scenarios: [QA-review-comment-anchor.mjs]
+      QA-review-12:
+        text: "A track's planning files are a collapsed 'Track files · N' group with readable names, left out of '+ all'"
+        scenarios: [QA-review-track-files.mjs]
+      QA-review-13:
+        text: "Edits to done_when and to an agent's own config (.claude/, .mcp.json, CLAUDE.md) carry a risk flag"
+        scenarios: [QA-review-risk-flags.mjs]
+      QA-review-14:
+        text: "Cancelling (or Esc in) the Land sheet brings the person back to the Review Desk they opened it from"
+        scenarios: [QA-review-land-cancel.mjs]
+      QA-review-15:
+        text: "A turn already reverted says so ('already reverted — nothing to undo') instead of offering a conflicting revert"
+        scenarios: [QA-review-revert-twice.mjs]
+      QA-review-16:
+        text: "The Review Desk diff ends at the file's last real line"
+        scenarios: [QA-review-phantom-line.mjs]
+      QA-review-17:
+        text: "The Review Desk and TURNS diffs render without font ligatures"
+        scenarios: [QA-review-diff-ligatures.mjs]
+      QA-review-18:
+        text: "On a branch Hermes did not make (main) the commit box starts empty"
+        scenarios: [QA-review-commit-draft.mjs]
+      QA-review-19:
+        text: "Make it a feature asks first, says what it writes, and its Undo removes exactly those files"
+        scenarios: [QA-review-make-feature-undo.mjs]
+      QA-review-20:
+        text: "The track watcher reads a file only when its size or time moved, and at most 256 KB of it; a huge feature.md says so"
+        scenarios: [QA-review-track-big-files.mjs]
   FIX-spawn-no-freeze:
     # A bug fix, not new 2.0 work. Found as N20-session-host's "the webview
     # did not answer" on the macOS CI runner: a restored terminal never

@@ -81,6 +81,22 @@
   font-weight: 600;
   animation: turn-bar-notice-fade 4s ease-out forwards;
 }
+/* A restore's notice carries Undo: it stays long enough to use it. */
+.turn-bar-notice-undo {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  animation-duration: 15s;
+}
+/* The person's own edits a restore sets aside (Undo brings them back). */
+.turn-sheet-set-aside {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  border-bottom: var(--control-border-width) solid var(--border);
+  background: var(--bg-2);
+}
 @keyframes turn-bar-notice-fade {
   0%, 75% { opacity: 1; }
   100% { opacity: 0; }
@@ -151,6 +167,11 @@
 .turn-sheet-error { color: var(--red); }
 
 .turn-diff-text {
+  /* A diff shows the exact characters: != vs !==, => vs >=. */
+  font-variant-ligatures: none;
+  font-feature-settings:
+    "liga" 0,
+    "calt" 0;
   margin: 0;
   padding: var(--space-2) 0;
   font-family: var(--font-mono);

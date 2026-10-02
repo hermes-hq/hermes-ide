@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from "react";
+import { useSyncExternalStore } from "react";
 
 export type ToastType = "info" | "success" | "warning" | "error";
 
@@ -27,45 +27,70 @@ export interface ToastStore {
 const MAX_TOASTS = 5;
 let nextId = 0;
 
+// One list for the whole window: every component that calls useToastStore()
+// adds to the list App renders (a private list per component would show
+// nothing — the Track panel's toasts were lost that way).
+let toasts: Toast[] = [];
+const timers = new Map<string, ReturnType<typeof setTimeout>>();
+const listeners = new Set<() => void>();
+
+function publish(next: Toast[]): void {
+	toasts = next;
+	for (const l of listeners) l();
+}
+
+function subscribe(listener: () => void): () => void {
+	listeners.add(listener);
+	return () => {
+		listeners.delete(listener);
+	};
+}
+
+const snapshot = (): Toast[] => toasts;
+
+function dismissToast(id: string): void {
+	const timer = timers.get(id);
+	if (timer) {
+		clearTimeout(timer);
+		timers.delete(id);
+	}
+	if (toasts.some((t) => t.id === id)) publish(toasts.filter((t) => t.id !== id));
+}
+
+function addToast(toast: Omit<Toast, "id">): string {
+	const id = `toast-${++nextId}`;
+	const full: Toast = { ...toast, id, dismissible: toast.dismissible ?? true };
+	const next = [...toasts, full];
+	// Keep only the most recent toasts.
+	const kept = next.length > MAX_TOASTS ? next.slice(-MAX_TOASTS) : next;
+	for (const gone of next.slice(0, next.length - kept.length)) {
+		const timer = timers.get(gone.id);
+		if (timer) clearTimeout(timer);
+		timers.delete(gone.id);
+	}
+	publish(kept);
+	if (toast.duration !== null) {
+		timers.set(
+			id,
+			setTimeout(() => {
+				timers.delete(id);
+				dismissToast(id);
+			}, toast.duration || 3000),
+		);
+	}
+	return id;
+}
+
+function clearAll(): void {
+	for (const timer of timers.values()) clearTimeout(timer);
+	timers.clear();
+	publish([]);
+}
+
+/** Add a toast from outside React (it shows in the window's one list). */
+export const toastApi = { addToast, dismissToast, clearAll } as const;
+
 export function useToastStore(): ToastStore {
-	const [toasts, setToasts] = useState<Toast[]>([]);
-	const timersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
-
-	const dismissToast = useCallback((id: string) => {
-		const timer = timersRef.current.get(id);
-		if (timer) {
-			clearTimeout(timer);
-			timersRef.current.delete(id);
-		}
-		setToasts((prev) => prev.filter((t) => t.id !== id));
-	}, []);
-
-	const addToast = useCallback((toast: Omit<Toast, "id">): string => {
-		const id = `toast-${++nextId}`;
-		const full: Toast = { ...toast, id, dismissible: toast.dismissible ?? true };
-
-		setToasts((prev) => {
-			const next = [...prev, full];
-			// Keep only the most recent toasts
-			return next.length > MAX_TOASTS ? next.slice(-MAX_TOASTS) : next;
-		});
-
-		if (toast.duration !== null) {
-			const timer = setTimeout(() => {
-				timersRef.current.delete(id);
-				setToasts((prev) => prev.filter((t) => t.id !== id));
-			}, toast.duration || 3000);
-			timersRef.current.set(id, timer);
-		}
-
-		return id;
-	}, []);
-
-	const clearAll = useCallback(() => {
-		for (const timer of timersRef.current.values()) clearTimeout(timer);
-		timersRef.current.clear();
-		setToasts([]);
-	}, []);
-
-	return { toasts, addToast, dismissToast, clearAll };
+	const list = useSyncExternalStore(subscribe, snapshot, snapshot);
+	return { toasts: list, addToast, dismissToast, clearAll };
 }

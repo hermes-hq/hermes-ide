@@ -2,6 +2,7 @@ import "../styles/components/TurnBar.css";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { translate } from "../i18n/registry";
+import { translatePlural } from "../i18n/plural";
 import { Button, CloseButton } from "./ui/Button";
 import { getTurnDiff, listTurns, type Turn, type TurnChecks } from "../agent/contract/turns";
 import { getSessionEventSnapshot } from "../agent/contract/sessionEventStore";
@@ -10,6 +11,7 @@ import { useDoneWhen } from "../doneWhen/store";
 import {
   previewRestoreTurn,
   restoreTurn,
+  undoRestoreTurn,
   TURN_LEDGER_EVENT,
   type RestorePreview,
   type TurnLedgerEvent,
@@ -20,7 +22,9 @@ import {
  *
  * One chip per recorded turn (T1, T2, ...) with its diffstat. A chip opens
  * the turn's diff; from there "Restore to Tn" previews what restoring would
- * change and only restores after a confirmation. Turns arrive from the
+ * change and only restores after a confirmation; what was there before (the
+ * person's own edits included) is set aside, and the notice that follows
+ * offers Undo, which brings it back. Turns arrive from the
  * backend ledger (`hermes:turn-ledger`); the bar renders nothing while a
  * session has no turn. A turn whose Done-When checks ran (F27) carries
  * their result (`Turn.checks`): a mark on the chip and a line in its title.
@@ -35,6 +39,14 @@ type Sheet =
   | { kind: "restore"; turn: Turn; preview: RestorePreview | null; error: string | null; busy: boolean };
 
 const NOTICE_MS = 4000;
+/** A restore's notice carries Undo; it stays long enough to use it. */
+const UNDO_NOTICE_MS = 15_000;
+
+interface Notice {
+  readonly text: string;
+  /** The set-aside state Undo goes back to (a restore's notice). */
+  readonly undo?: number;
+}
 
 /** The Done-When result of a turn, for its chip's title. */
 function checksText(checks: TurnChecks): string {
@@ -74,13 +86,15 @@ export function TurnBar({ sessionId }: TurnBarProps) {
     [ledgerTurns, doneWhen, sessionId],
   );
   const [sheet, setSheet] = useState<Sheet | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState<Notice | null>(null);
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** The restore this bar asked for: its own notice (with Undo) stands. */
+  const ownRestore = useRef<number | null>(null);
 
-  const showNotice = useCallback((text: string) => {
-    setNotice(text);
+  const showNotice = useCallback((text: string, undo?: number) => {
+    setNotice({ text, undo });
     if (noticeTimer.current) clearTimeout(noticeTimer.current);
-    noticeTimer.current = setTimeout(() => setNotice(null), NOTICE_MS);
+    noticeTimer.current = setTimeout(() => setNotice(null), undo === undefined ? NOTICE_MS : UNDO_NOTICE_MS);
   }, []);
 
   const reload = useCallback(() => {
@@ -96,7 +110,7 @@ export function TurnBar({ sessionId }: TurnBarProps) {
     listen<TurnLedgerEvent>(TURN_LEDGER_EVENT, (event) => {
       if (cancelled || event.payload.sessionId !== sessionId) return;
       reload();
-      if (typeof event.payload.restoredTo === "number") {
+      if (typeof event.payload.restoredTo === "number" && event.payload.restoredTo !== ownRestore.current) {
         showNotice(translate("turnBar.restored", { n: event.payload.restoredTo }));
       }
     })
@@ -153,15 +167,30 @@ export function TurnBar({ sessionId }: TurnBarProps) {
   const confirmRestore = useCallback(
     (turn: Turn) => {
       setSheet((cur) => (cur?.kind === "restore" ? { ...cur, busy: true, error: null } : cur));
+      ownRestore.current = turn.n;
       restoreTurn(sessionId, turn.n)
-        .then(() => {
+        .then((result) => {
           setSheet(null);
-          showNotice(translate("turnBar.restored", { n: turn.n }));
+          showNotice(translate("turnBar.restored", { n: turn.n }), result?.setAside ?? undefined);
           reload();
         })
         .catch((e) => {
           setSheet((cur) => (cur?.kind === "restore" ? { ...cur, busy: false, error: String(e) } : cur));
         });
+    },
+    [sessionId, reload, showNotice],
+  );
+
+  const undoRestore = useCallback(
+    (k: number) => {
+      setNotice(null);
+      undoRestoreTurn(sessionId, k)
+        .then(() => {
+          ownRestore.current = null;
+          showNotice(translate("turnBar.undoneRestore"));
+          reload();
+        })
+        .catch((e) => showNotice(translate("turnBar.failed", { error: String(e) })));
     },
     [sessionId, reload, showNotice],
   );
@@ -188,7 +217,7 @@ export function TurnBar({ sessionId }: TurnBarProps) {
             const { files, insertions, deletions } = turn.diffstat;
             const base = turn.degraded
               ? translate("turnBar.summaryOnly", { n: turn.n })
-              : translate("turnBar.turnTitle", { n: turn.n, files, insertions, deletions });
+              : translatePlural("turnBar.turnChanged", files, { n: turn.n, insertions, deletions });
             const title = turn.checks ? `${base} · ${checksText(turn.checks)}` : base;
             return (
               <button
@@ -218,8 +247,13 @@ export function TurnBar({ sessionId }: TurnBarProps) {
           })}
         </div>
         {notice && (
-          <span className="turn-bar-notice" role="status">
-            {notice}
+          <span className={`turn-bar-notice${notice.undo !== undefined ? " turn-bar-notice-undo" : ""}`} role="status">
+            {notice.text}
+            {notice.undo !== undefined && (
+              <Button size="sm" variant="quiet" className="turn-bar-undo" onClick={() => undoRestore(notice.undo as number)}>
+                {translate("turnBar.undo")}
+              </Button>
+            )}
           </span>
         )}
       </div>
@@ -245,10 +279,16 @@ export function TurnBar({ sessionId }: TurnBarProps) {
                   ? translate("turnBar.diffOf", { n: sheet.turn.n })
                   : translate("turnBar.restoreTo", { n: sheet.turn.n })}
               </span>
-              <span className="turn-sheet-stat">
-                <span className="turn-bar-add">+{sheet.turn.diffstat.insertions}</span>
-                <span className="turn-bar-del">−{sheet.turn.diffstat.deletions}</span>
-              </span>
+              {/* A restore sheet counts what the restore changes, not what the turn did. */}
+              {(() => {
+                const stat = sheet.kind === "restore" ? sheet.preview?.diffstat ?? null : sheet.turn.diffstat;
+                return stat ? (
+                  <span className="turn-sheet-stat">
+                    <span className="turn-bar-add">+{stat.insertions}</span>
+                    <span className="turn-bar-del">−{stat.deletions}</span>
+                  </span>
+                ) : null;
+              })()}
               <CloseButton className="turn-sheet-close" onClick={close} label={translate("turnBar.close")} />
             </div>
 
@@ -278,8 +318,13 @@ export function TurnBar({ sessionId }: TurnBarProps) {
                       <p className="turn-sheet-hint" data-preview-files={sheet.preview.diffstat.files}>
                         {sheet.preview.diffstat.files === 0
                           ? translate("turnBar.restoreNothing", { n: sheet.turn.n })
-                          : translate("turnBar.restorePreview", { n: sheet.turn.n, files: sheet.preview.diffstat.files })}
+                          : translatePlural("turnBar.restoreChanges", sheet.preview.diffstat.files, { n: sheet.turn.n })}
                       </p>
+                      {(sheet.preview.setAside?.length ?? 0) > 0 && (
+                        <p className="turn-sheet-set-aside" data-set-aside={sheet.preview.setAside?.join(" ")}>
+                          {translatePlural("turnBar.setAside", sheet.preview.setAside?.length ?? 0, { files: (sheet.preview.setAside ?? []).join(", ") })}
+                        </p>
+                      )}
                       <Patch patch={sheet.preview.patch} />
                     </>
                   )}

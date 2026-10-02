@@ -48,7 +48,7 @@ async function commentForA(text: string) {
   fireEvent.click(document.querySelector('.review-turn-row[data-turn="1"]')!);
   await waitFor(() => expect(document.querySelector('.review-line.review-line-add[data-path="src/app.js"]')).toBeInTheDocument());
   fireEvent.click(document.querySelector('.review-line.review-line-add[data-path="src/app.js"]')!);
-  fireEvent.change(await screen.findByPlaceholderText(/Comment for Agent A/), { target: { value: text } });
+  fireEvent.change(await screen.findByPlaceholderText(/Comment for Claude Code \(Agent A\)/), { target: { value: text } });
   fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
 }
 const SESSIONS = [session("sess-a", "Agent A"), session("sess-b", "Agent B"), session("sess-c", "Elsewhere", { working_directory: "/fixture/other" })];
@@ -115,8 +115,9 @@ describe("ReviewDesk", () => {
     expect(flagsOf("src/app.js")).toBe("");
     expect(screen.getByText(/hermes\/task → main/)).toBeInTheDocument();
     fireEvent.click(screen.getByRole("radio", { name: "By turn" }));
-    const turns = [...document.querySelectorAll<HTMLElement>(".review-turn-row")].map((r) => `${r.dataset.session}:${r.dataset.turn}:${r.querySelector(".review-turn-agent")?.textContent}`);
-    expect(turns).toEqual(["sess-a:1:Agent A", "sess-b:2:Agent B"]);
+    const turns = [...document.querySelectorAll<HTMLElement>(".review-turn-row")].map((r) => `${r.dataset.session}:${r.dataset.turn}:${r.querySelector(".review-turn-agent")?.textContent?.split(" · ")[0]}`);
+    // Named by the agent (two Claude Code sessions: each with its own label), never by the task text alone.
+    expect(turns).toEqual(["sess-a:1:Claude Code (Agent A)", "sess-b:2:Claude Code (Agent B)"]);
     // The session in another folder contributed nothing.
     expect(h.invoke).not.toHaveBeenCalledWith("list_turns", { sessionId: "sess-c" });
   });
@@ -129,7 +130,7 @@ describe("ReviewDesk", () => {
     fireEvent.click(document.querySelector('.review-turn-row[data-turn="1"]')!);
     await waitFor(() => expect(document.querySelector('.review-line.review-line-add[data-path="src/app.js"]')).toBeInTheDocument());
     fireEvent.click(document.querySelector('.review-line.review-line-add[data-path="src/app.js"]')!);
-    await screen.findByPlaceholderText(/Comment for Agent A/);
+    await screen.findByPlaceholderText(/Comment for Claude Code \(Agent A\)/);
     const diffs = () => h.invoke.mock.calls.filter((c) => c[0] === "review_diff").length;
     const before = diffs();
     // The same sessions in new objects, as every status update delivers them.
@@ -137,7 +138,7 @@ describe("ReviewDesk", () => {
     await act(async () => {});
     expect(diffs()).toBe(before);
     expect(document.querySelector(".review-desk")?.getAttribute("data-loading")).toBe("0");
-    expect(screen.getByPlaceholderText(/Comment for Agent A/)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/Comment for Claude Code \(Agent A\)/)).toBeInTheDocument();
   });
 
   it("keeps a viewed mark across reopening and lets Escape close", async () => {
@@ -158,21 +159,21 @@ describe("ReviewDesk", () => {
     fireEvent.click(document.querySelector('.review-turn-row[data-turn="2"]')!);
     await waitFor(() => expect(document.querySelector('.review-line.review-line-add[data-path="package-lock.json"]')).toBeInTheDocument());
     fireEvent.click(document.querySelector('.review-line.review-line-add[data-path="package-lock.json"]')!);
-    const ta = await screen.findByPlaceholderText(/Comment for Agent B/);
+    const ta = await screen.findByPlaceholderText(/Comment for Claude Code \(Agent B\)/);
     fireEvent.change(ta, { target: { value: "Why does the lockfile change?" } });
     fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
     const comment = await waitFor(() => document.querySelector<HTMLElement>(".review-comment")!);
     expect(comment.dataset.session).toBe("sess-b");
     expect(comment.dataset.turn).toBe("2");
-    expect(comment.textContent).toContain("to Agent B");
+    expect(comment.textContent).toContain("to Claude Code (Agent B)");
 
     // Nothing is pasted until the person presses Send.
     expect(h.invoke).not.toHaveBeenCalledWith("write_to_session", expect.anything());
-    fireEvent.click(screen.getByRole("button", { name: "Send to Agent B" }));
+    fireEvent.click(screen.getByRole("button", { name: "Send to Claude Code (Agent B)" }));
     await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("review_write_file", expect.objectContaining({ sessionId: "sess-b", n: 1 })));
     await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("write_to_session", expect.objectContaining({ sessionId: "sess-b" })));
     const written = h.invoke.mock.calls.find((c) => c[0] === "review_write_file")![1] as { content: string };
-    expect(written.content).toContain("# Review 1 for Agent B");
+    expect(written.content).toContain("# Review 1 for Claude Code (Agent B)");
     expect(written.content).toContain("Why does the lockfile change?");
     const pasted = atob((h.invoke.mock.calls.find((c) => c[0] === "write_to_session")![1] as { data: string }).data);
     expect(pasted.startsWith("\x1b[200~[hermes-review #1] ")).toBe(true);
@@ -202,9 +203,9 @@ describe("ReviewDesk", () => {
       fireEvent.click(document.querySelector('.review-turn-row[data-turn="1"]')!);
       await waitFor(() => expect(document.querySelector('.review-line.review-line-add[data-path="src/app.js"]')).toBeInTheDocument());
       fireEvent.click(document.querySelector('.review-line.review-line-add[data-path="src/app.js"]')!);
-      fireEvent.change(await screen.findByPlaceholderText(/Comment for Agent A/), { target: { value: "Why 3?" } });
+      fireEvent.change(await screen.findByPlaceholderText(/Comment for Claude Code \(Agent A\)/), { target: { value: "Why 3?" } });
       fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
-      fireEvent.click(await screen.findByRole("button", { name: "Send to Agent A" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Send to Claude Code (Agent A)" }));
       await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("write_to_session", expect.objectContaining({ sessionId: "sess-a" })));
       await act(async () => {
         await vi.advanceTimersByTimeAsync(5100);
@@ -230,7 +231,7 @@ describe("ReviewDesk", () => {
       dispatchSessionEvent("sess-a", { type: "status", at: 1, source: "pty", status: { kind: "idle", confidence: "guessed", detail: "" } });
     });
     await commentForA("Why 3?");
-    fireEvent.click(await screen.findByRole("button", { name: "Send to Agent A" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Send to Claude Code (Agent A)" }));
     await waitFor(() => expect(document.querySelector(".review-delivery")?.getAttribute("data-state")).toBe("waiting"));
     expect(h.invoke).toHaveBeenCalledWith("review_write_file", expect.objectContaining({ sessionId: "sess-a", n: 1 }));
     expect(pastes()).toHaveLength(0);
@@ -269,7 +270,7 @@ describe("ReviewDesk", () => {
       render(<ReviewDesk sessionId="sess-a" sessions={sessions} onClose={() => {}} />);
       await waitFor(() => expect(document.querySelector(".review-desk")?.getAttribute("data-loading")).toBe("0"));
       await commentForA("Why 3?");
-      fireEvent.click(await screen.findByRole("button", { name: "Send to Agent A" }));
+      fireEvent.click(await screen.findByRole("button", { name: "Send to Claude Code (Agent A)" }));
       await waitFor(() => expect(pastes()).toHaveLength(1));
       await waitFor(() => expect(document.querySelector(".review-delivery")?.getAttribute("data-state")).toBe("pasted"));
       expect(document.querySelector(".review-delivery")?.textContent).toContain("cannot confirm");
@@ -317,9 +318,9 @@ describe("ReviewDesk", () => {
     fireEvent.click(document.querySelector('.review-turn-row[data-turn="1"]')!);
     await waitFor(() => expect(document.querySelector('.review-line.review-line-add[data-path="src/app.js"]')).toBeInTheDocument());
     fireEvent.click(document.querySelector('.review-line.review-line-add[data-path="src/app.js"]')!);
-    fireEvent.change(await screen.findByPlaceholderText(/Comment for Agent A/), { target: { value: "hm" } });
+    fireEvent.change(await screen.findByPlaceholderText(/Comment for Claude Code \(Agent A\)/), { target: { value: "hm" } });
     fireEvent.click(screen.getByRole("button", { name: "Add comment" }));
-    fireEvent.click(await screen.findByRole("button", { name: "Send to Agent A" }));
+    fireEvent.click(await screen.findByRole("button", { name: "Send to Claude Code (Agent A)" }));
     await waitFor(() => expect(h.dispatch).toHaveBeenCalledWith(expect.objectContaining({ type: "SET_COMPOSER_DRAFT", sessionId: "sess-a" })));
     expect(String((h.dispatch.mock.calls[0][0] as { draft: string }).draft).startsWith("[hermes-review #1] ")).toBe(true);
     expect(h.invoke).not.toHaveBeenCalledWith("write_to_session", expect.anything());
@@ -344,9 +345,12 @@ describe("ReviewDesk", () => {
   });
 
   it("pure helpers: the last turn touching a path owns comments made in the by-file view", () => {
-    const a: TurnEntry = { sessionId: "sess-a", agentLabel: "A", turn: turn("sess-a", 1, 1), patch: PATCH_A, files: parsePatch(PATCH_A) };
-    const b: TurnEntry = { sessionId: "sess-b", agentLabel: "B", turn: turn("sess-b", 2, 2), patch: PATCH_A, files: parsePatch(PATCH_A) };
+    const a: TurnEntry = { sessionId: "sess-a", agentLabel: "A", turn: turn("sess-a", 1, 1), patch: PATCH_A, files: parsePatch(PATCH_A), kind: "agent" };
+    const b: TurnEntry = { sessionId: "sess-b", agentLabel: "B", turn: turn("sess-b", 2, 2), patch: PATCH_A, files: parsePatch(PATCH_A), kind: "agent" };
     expect(turnForPath([a, b], "src/app.js")).toBe(b);
+    // The person's own edits between turns never own a file.
+    const mine: TurnEntry = { ...b, sessionId: "sess-a", kind: "between" };
+    expect(turnForPath([a, mine], "src/app.js")).toBe(a);
     expect(turnForPath([a], "nope")).toBeNull();
     expect(normalizePath("C:\\Repo\\")).toBe("c:/repo");
   });
@@ -356,7 +360,7 @@ describe("ReviewDesk: what the git panel it replaces offered", () => {
   const WORKTREE = { project_id: "p1", project_name: "repo", project_path: "/data/hermes-worktrees/abc/s_task", is_git_repo: true, branch: "hermes/task", files: [] };
   const FOLDER = { ...WORKTREE, project_id: "p2", project_name: "folder", project_path: "/fixture/repo" };
 
-  it("offers Land for a project the session works on in a worktree of its own, closing the desk first", async () => {
+  it("offers Land for a project the session works on in a worktree of its own, over the desk, which closes only once it landed", async () => {
     backend({ git_status: () => ({ projects: [WORKTREE, FOLDER], timestamp: 0 }) });
     const opened: unknown[] = [];
     const onOpen = (e: Event) => opened.push((e as CustomEvent).detail);
@@ -366,8 +370,17 @@ describe("ReviewDesk: what the git panel it replaces offered", () => {
       const land = await screen.findByRole("button", { name: "Land…" });
       expect(document.querySelectorAll(".review-land-btn")).toHaveLength(1); // not the shared project folder
       fireEvent.click(land);
-      expect(onClose).toHaveBeenCalled();
+      expect(onClose).not.toHaveBeenCalled();
       expect(opened).toEqual([{ sessionId: "sess-a", projectId: "p1" }]);
+      // Cancel in the sheet: the desk stays; a land that went through closes it.
+      act(() => {
+        window.dispatchEvent(new CustomEvent("hermes:land-sheet-closed", { detail: { sessionId: "sess-a", landed: false } }));
+      });
+      expect(onClose).not.toHaveBeenCalled();
+      act(() => {
+        window.dispatchEvent(new CustomEvent("hermes:land-sheet-closed", { detail: { sessionId: "sess-a", landed: true } }));
+      });
+      expect(onClose).toHaveBeenCalled();
     } finally {
       window.removeEventListener("hermes:open-land-sheet", onOpen);
     }

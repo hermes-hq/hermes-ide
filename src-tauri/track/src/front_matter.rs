@@ -348,6 +348,66 @@ pub fn set_keys(text: &str, keys: &[(&str, &str)]) -> Result<String, FrontMatter
     Ok(out)
 }
 
+/// The items of a list key (`key: [a, b]` or a `- item` block) in the
+/// front matter; empty when the key is missing, a scalar, or the file can't
+/// be read.
+pub fn list_value(text: &str, key: &str) -> Vec<String> {
+    let lines: Vec<&str> = text
+        .split('\n')
+        .map(|l| l.strip_suffix('\r').unwrap_or(l))
+        .collect();
+    if lines.is_empty() || lines[0].trim() != "---" {
+        return Vec::new();
+    }
+    let Some(close) = (1..lines.len()).find(|&i| lines[i].trim() == "---") else {
+        return Vec::new();
+    };
+    match parse_block(&lines[1..close], 2) {
+        Ok(fields) => match fields.get(key) {
+            Some(Entry {
+                value: Value::List(items),
+                ..
+            }) => items.clone(),
+            _ => Vec::new(),
+        },
+        Err(_) => Vec::new(),
+    }
+}
+
+/// Set a list key to `items`, written inline (`key: [a, b]`), in place: a
+/// block list's `- item` lines go with the key they belonged to; every other
+/// line stays as it is. Items must not contain a comma.
+pub fn set_list(text: &str, key: &str, items: &[String]) -> Result<String, FrontMatterError> {
+    let parsed = parse(text)?;
+    let newline = if text.contains("\r\n") { "\r\n" } else { "\n" };
+    let mut lines: Vec<String> = text
+        .split('\n')
+        .map(|l| l.strip_suffix('\r').unwrap_or(l).to_string())
+        .collect();
+    let close = parsed.close_fence;
+    let value = format!("{key}: [{}]", items.join(", "));
+    let at = (1..close).find(|&i| {
+        let code = strip_comment(&lines[i]);
+        !code.starts_with(char::is_whitespace)
+            && code.split_once(':').map(|(k, _)| k.trim()) == Some(key)
+    });
+    match at {
+        Some(i) => {
+            lines[i] = value;
+            // The block items that followed the key.
+            let mut end = i + 1;
+            while end < close && list_item(strip_comment(&lines[end])).is_some() {
+                end += 1;
+            }
+            lines.drain(i + 1..end);
+        }
+        None => lines.insert(close, value),
+    }
+    let out = lines.join(newline);
+    parse(&out)?;
+    Ok(out)
+}
+
 /// A fresh feature.md.
 pub fn render_new(slug: &str, track: Track, phase: Phase, title: &str, body: &str) -> String {
     let heading = if title.trim().is_empty() {

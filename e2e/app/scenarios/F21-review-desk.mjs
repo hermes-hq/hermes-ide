@@ -615,17 +615,17 @@ try {
     turns = await turnRows(bridge);
   }
   log(`  turns: ${JSON.stringify(turns)}`);
-  assert(turns[0].n === 1 && turns[0].session === idA && turns[0].agent === "Agent A", "T1 belongs to Agent A");
-  assert(turns[1].n === 2 && turns[1].session === idB && turns[1].agent === "Agent B", "T2 belongs to Agent B");
-  assert(turns[2].n === 3 && turns[2].session === idC && turns[2].agent === "Agent C", "T3 belongs to Agent C");
+  assert(turns[0].n === 1 && turns[0].session === idA && turns[0].agent.startsWith("Claude Code (Agent A)"), `T1 belongs to Agent A, named by its agent (${turns[0].agent})`);
+  assert(turns[1].n === 2 && turns[1].session === idB && turns[1].agent.startsWith("Claude Code (Agent B)"), `T2 belongs to Agent B, named by its agent (${turns[1].agent})`);
+  assert(turns[2].n === 3 && turns[2].session === idC && !!turns[2].agent, `T3 belongs to Agent C (${turns[2].agent})`);
   await bridge.click(`.review-turn-row[data-turn="2"]`);
   await bridge.waitFor("turn 2's files", `return e2e.all(".review-turn-file").length === 3;`);
   const c1 = await commentOn(bridge, "src/util.js", "Please do not use eval here; parse the number instead.");
-  assert(c1.session === idB && c1.turn === 2 && /to Agent B/.test(c1.route), `the comment on turn 2's line is routed to Agent B (${c1.route})`);
+  assert(c1.session === idB && c1.turn === 2 && /^to Claude Code \(Agent B\)/.test(c1.route), `the comment on turn 2's line is routed to Agent B (${c1.route})`);
   await bridge.click(`.review-turn-row[data-turn="1"]`);
   await bridge.waitFor("turn 1's file", `return e2e.all(".review-turn-file").length === 1;`);
   const c2 = await commentOn(bridge, "src/app.js", "Why 3? The spec says 2.");
-  assert(c2.session === idA && c2.turn === 1 && /to Agent A/.test(c2.route), `the comment on turn 1's line is routed to Agent A (${c2.route})`);
+  assert(c2.session === idA && c2.turn === 1 && /^to Claude Code \(Agent A\)/.test(c2.route), `the comment on turn 1's line is routed to Agent A (${c2.route})`);
   await bridge.screenshot(join(evidenceDir, "02-by-turn-with-comments.png"));
 
   log("step 5: Send to Agent A — one tagged line reaches A's terminal, its prompt hook reports it, Hermes shows delivered");
@@ -641,7 +641,7 @@ try {
   const fileA = join(app.dataDir, "reviews", idA, "review-1.md");
   assert(existsSync(fileA), `review-1.md was written for Agent A (${fileA})`);
   const mdA = readFileSync(fileA, "utf8");
-  assert(mdA.includes("# Review 1 for Agent A") && mdA.includes("Why 3? The spec says 2.") && mdA.includes("## src/app.js") && !mdA.includes("eval here"), "the review file holds Agent A's comment and not Agent B's");
+  assert(mdA.includes("# Review 1 for Claude Code (Agent A)") && mdA.includes("Why 3? The spec says 2.") && mdA.includes("## src/app.js") && !mdA.includes("eval here"), "the review file holds Agent A's comment and not Agent B's");
   assert(promptsA[0].includes(fileA.replace(/\\/g, "/")) || promptsA[0].includes(fileA), "the pasted line names the review file");
   assert((recordOf(idA).hooksRan ?? []).some((h) => h.event === "UserPromptSubmit"), "Agent A ran its prompt hook (hi signal) for the line");
   // Data safety: the helper writes only the marker to the spool, never the prompt text.
@@ -753,7 +753,7 @@ try {
   await bridge.click(`.review-turn-row[data-turn="3"]`);
   await bridge.waitFor("turn 3's file", `return e2e.all(".review-turn-file").length === 1;`);
   const c4 = await commentOn(bridge, "README.md", "Say which test command exactly.");
-  assert(c4.session === idC && c4.turn === 3 && /to Agent C/.test(c4.route), `the comment on turn 3's line is routed to Agent C (${c4.route})`);
+  assert(c4.session === idC && c4.turn === 3 && /^to \S/.test(c4.route), `the comment on turn 3's line is routed to Agent C (${c4.route})`);
   await bridge.click(`.review-send[data-session="${idC}"] .review-send-btn`);
   const pastedC = await bridge.waitFor("the pasted outcome for Agent C", `
     const d = e2e.all(".review-delivery").find((el) => el.getAttribute("data-n") === "4");

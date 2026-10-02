@@ -64,9 +64,11 @@ beforeEach(() => {
       case "get_turn_diff":
         return Promise.resolve({ turn: turn(args.n as number), patch: `diff --git a/x b/x\n@@ -1 +1 @@\n-hello\n+hello world\n` });
       case "preview_restore_turn":
-        return Promise.resolve({ turn: turn(args.n as number), patch: "-after\n+before\n", diffstat: { files: 2, insertions: 1, deletions: 1 } });
+        return Promise.resolve({ turn: turn(args.n as number), patch: "-after\n+before\n", diffstat: { files: 2, insertions: 1, deletions: 1 }, setAside: ["README.md"] });
       case "restore_turn":
-        return Promise.resolve({ n: args.n, files: 2 });
+        return Promise.resolve({ n: args.n, files: 2, setAside: 4 });
+      case "undo_restore_turn":
+        return Promise.resolve({ n: 0, files: 2 });
       default:
         return Promise.reject(new Error(`unexpected command ${cmd}`));
     }
@@ -92,7 +94,7 @@ describe("TurnBar", () => {
     expect(t1.textContent).toContain("T1");
     expect(t1.textContent).toContain("+2");
     expect(t1.textContent).toContain("−0");
-    expect(t1.getAttribute("title")).toBe("Turn 1: 1 files changed, +2 −0");
+    expect(t1.getAttribute("title")).toBe("Turn 1: 1 file changed, +2 −0");
     expect((t3 as HTMLButtonElement).disabled).toBe(true);
     expect((t1 as HTMLButtonElement).disabled).toBe(false);
     expect(t3.getAttribute("title")).toMatch(/summary only/);
@@ -125,11 +127,18 @@ describe("TurnBar", () => {
     await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("preview_restore_turn", { sessionId: "s1", n: 1 }));
     await waitFor(() => expect(sheet.querySelector(".turn-sheet-hint")?.getAttribute("data-preview-files")).toBe("2"));
     expect(sheet.querySelector(".turn-sheet-hint")?.textContent).toMatch(/Restoring to T1 changes 2 files/);
+    // The person's own edit is named, with the way back.
+    expect(sheet.querySelector(".turn-sheet-set-aside")?.textContent).toBe("README.md has edits no turn made — they will be set aside (Undo brings them back)");
+    // The header counts what the restore changes.
+    expect(sheet.querySelector(".turn-sheet-stat")?.textContent).toBe("+1−1");
     expect(h.invoke).not.toHaveBeenCalledWith("restore_turn", expect.anything());
     fireEvent.click(screen.getByRole("button", { name: "Restore" }));
     await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("restore_turn", { sessionId: "s1", n: 1 }));
     await waitFor(() => expect(screen.queryByRole("dialog")).toBeNull());
-    expect(screen.getByRole("status").textContent).toBe("Restored to T1");
+    expect(screen.getByRole("status").textContent).toBe("Restored to T1Undo");
+    fireEvent.click(screen.getByRole("button", { name: "Undo" }));
+    await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("undo_restore_turn", { sessionId: "s1", k: 4 }));
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe("Restore undone: the working tree is back as it was"));
   });
 
   it("cancel in the preview restores nothing", async () => {

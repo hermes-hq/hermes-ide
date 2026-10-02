@@ -22,12 +22,14 @@ export interface ReviewState {
   readonly sent: Readonly<Record<string, number>>;
   /** Delivery per review number. */
   readonly deliveries: Readonly<Record<number, Delivery>>;
+  /** Turns reverted from the desk, as "<session>:<n>". */
+  readonly reverted: readonly string[];
   readonly version: number;
 }
 
 export type Delivery = DeliveryState & { readonly sessionId: string; readonly filePath: string | null };
 
-const EMPTY: ReviewState = Object.freeze({ viewed: [], comments: [], lastN: 0, sent: {}, deliveries: {}, version: 0 });
+const EMPTY: ReviewState = Object.freeze({ viewed: [], comments: [], lastN: 0, sent: {}, deliveries: {}, reverted: [], version: 0 });
 
 const states = new Map<string, ReviewState>();
 const listeners = new Map<string, Set<() => void>>();
@@ -45,6 +47,7 @@ function load(repoPath: string): ReviewState {
       lastN: typeof parsed.lastN === "number" && Number.isInteger(parsed.lastN) && parsed.lastN >= 0 ? parsed.lastN : 0,
       sent: sentMarks(parsed.sent),
       deliveries: deliveries(parsed.deliveries),
+      reverted: Array.isArray(parsed.reverted) ? parsed.reverted.filter((v): v is string => typeof v === "string") : [],
       version: 0,
     });
   } catch {
@@ -87,7 +90,7 @@ function persist(repoPath: string, state: ReviewState): void {
   try {
     globalThis.localStorage?.setItem(
       storageKey(repoPath),
-      JSON.stringify({ viewed: state.viewed, comments: state.comments, lastN: state.lastN, sent: state.sent, deliveries: state.deliveries }),
+      JSON.stringify({ viewed: state.viewed, comments: state.comments, lastN: state.lastN, sent: state.sent, deliveries: state.deliveries, reverted: state.reverted }),
     );
   } catch {
     // Storage may be unavailable; the desk still works for this run.
@@ -175,6 +178,14 @@ export function markSent(repoPath: string, commentIds: readonly string[], n: num
   for (const id of commentIds) sent[id] = n;
   update(repoPath, { ...s, sent });
 }
+/** A turn was reverted from the desk (or found reverted): its row says so. */
+export function setReverted(repoPath: string, sessionId: string, n: number, reverted: boolean): void {
+  const s = getReviewState(repoPath);
+  const key = `${sessionId}:${n}`;
+  if (s.reverted.includes(key) === reverted) return;
+  update(repoPath, { ...s, reverted: reverted ? [...s.reverted, key] : s.reverted.filter((k) => k !== key) });
+}
+
 export function sentReviewOf(repoPath: string, commentId: string): number | null {
   return getReviewState(repoPath).sent[commentId] ?? null;
 }
