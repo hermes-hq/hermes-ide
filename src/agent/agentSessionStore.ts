@@ -47,6 +47,7 @@ import { emptyState, freezePendingThinking, reduceEvent } from "./messageStore";
 import type { AgentSessionState } from "./messageStore";
 import { isPermRequest, type PermRequest } from "../utils/permissionRequest";
 import type { AgentErrorKind } from "../api/agent";
+import { peekAgentInitCache } from "./useAgentInit";
 
 export interface AgentExitInfo {
   code: number | null;
@@ -141,8 +142,13 @@ export class AgentSessionStore {
   private lastInitAt = 0;
 
   constructor(public readonly sessionId: string, listen: ListenFn) {
+    // The agent's init fires once, right after it starts, and Tauri does
+    // not replay it. A store created after that (the view mounted late on
+    // a slow machine) would never be initialized: no model in the header
+    // and no Stop while a turn runs. The session's own listener caught it.
+    const init = peekAgentInitCache(sessionId);
     this.snapshot = {
-      state: emptyState(),
+      state: init ? reduceEvent(emptyState(), init) : emptyState(),
       stderr: "",
       exit: null,
       pendingPermRequest: null,

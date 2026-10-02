@@ -26,6 +26,8 @@ import {
   _resetAgentSessionStoresForTest,
 } from "../agent/agentSessionStore";
 import type { AgentEvent } from "../agent/types";
+import type { InitEvent } from "../agent/types";
+import { cacheAgentInit, clearAgentInitCache } from "../agent/useAgentInit";
 
 type StubListenerHandle = {
   attached: boolean;
@@ -109,6 +111,30 @@ describe("AgentSessionStore", () => {
     expect(snap.state.messages).toHaveLength(0);
     expect(snap.stderr).toBe("");
     expect(snap.exit).toBeNull();
+  });
+
+  it("a store created after the agent's init starts initialized from the cached init", async () => {
+    // The init fires once at spawn; a view that mounts later (slow machine)
+    // creates its store after it, and Tauri does not replay it.
+    const bus = makeStubBus();
+    cacheAgentInit("late", makeInitEvent("uuid-late") as InitEvent);
+    try {
+      const store = new AgentSessionStore("late", bus.listen);
+      await Promise.resolve();
+      const { state } = store.getSnapshot();
+      expect(state.initialized).toBe(true);
+      expect(state.initEvent?.model).toBe("claude-sonnet-4-6");
+      expect(state.messages).toHaveLength(0);
+    } finally {
+      clearAgentInitCache("late");
+    }
+  });
+
+  it("a store with no init seen yet starts uninitialized", async () => {
+    const bus = makeStubBus();
+    const store = new AgentSessionStore("never", bus.listen);
+    await Promise.resolve();
+    expect(store.getSnapshot().state.initialized).toBe(false);
   });
 
   it("subscribes to all three Tauri channels for the session", async () => {
