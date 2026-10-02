@@ -749,7 +749,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
       `);
       await bridge.click(".land-sheet-cancel");
       await bridge.waitFor("the Land sheet to close", `return !e2e.first(".land-sheet");`);
-    } else if (await bridge.exists(".review-desk")) {
+    }
+    // Cancel brings the person back to the desk (PLN-24): close it here.
+    if (await bridge.exists(".review-desk")) {
       await bridge.click(".review-desk .review-close");
     }
     await bridge.waitFor("the desk to be closed", `return !e2e.first(".review-desk");`);

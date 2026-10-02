@@ -125,7 +125,8 @@ try {
 
   // 4. The person sends edits back: one tagged line arrives on stdin.
   const review = await waitFor("a review line on stdin", () => stdinLines.find((l) => l.startsWith("hermes review:")) ?? null);
-  const file = review.value.match(/read (\S+) and/)?.[1] ?? "";
+  // "hermes review: I edited plan.md (diff in .hermes/features/<slug>/review-1.md). …"
+  const file = review.value.match(/\(diff in (\S+?)\)/)?.[1] ?? review.value.match(/read (\S+) and/)?.[1] ?? "";
   const reviewText = fs.existsSync(path.join(process.cwd(), file)) ? fs.readFileSync(path.join(process.cwd(), file), "utf8") : "";
   log({ review: file, bytes: reviewText.length, hasDiff: reviewText.includes("```diff") });
   say(`got review ${file} (${reviewText.includes("```diff") ? "diff" : "whole file"})`);

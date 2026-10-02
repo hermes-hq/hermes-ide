@@ -10,7 +10,7 @@
 import { describe, it, expect, afterEach } from "vitest";
 import { render, screen, cleanup, act } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
-import { useToastStore } from "../hooks/useToastStore";
+import { toastApi, useToastStore } from "../hooks/useToastStore";
 import { useWorktreeErrorToasts } from "../hooks/useWorktreeErrorToasts";
 import { ToastContainer } from "../components/ToastContainer";
 import { I18nProvider } from "../i18n/I18nProvider";
@@ -32,7 +32,11 @@ function dispatchWorktreeErrors(detail: { errors: string[]; sessionLabel?: strin
 }
 
 describe("#286 — hermes:worktree-errors is surfaced to the user", () => {
-	afterEach(() => cleanup());
+	afterEach(() => {
+		cleanup();
+		// The toast list is shared by the whole window; start each test empty.
+		act(() => toastApi.clearAll());
+	});
 
 	it("shows an error toast when every worktree failed (fatal)", () => {
 		const { container } = render(<Harness />);

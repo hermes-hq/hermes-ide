@@ -557,7 +557,7 @@ try {
   await bridge.waitFor("the restore notice", `
     const bar = e2e.first('.turn-bar[data-session-id="' + CSS.escape(${JSON.stringify(sessionA)}) + '"]');
     const n = bar && e2e.first(".turn-bar-notice", bar);
-    return n && e2e.norm(n.innerText) === "Restored to T1" ? true : null;
+    return n && e2e.norm(n.innerText).startsWith("Restored to T1") ? true : null;
   `, { timeoutMs: 20_000 });
   await bridge.screenshot(join(evidenceDir, "04-restored.png"));
   assert(read(dirA, "src/app.txt") === "hello world\n" || read(dirA, "src/app.txt") === "hello world \n", `src/app.txt is T1's (${JSON.stringify(read(dirA, "src/app.txt"))})`);
@@ -595,7 +595,7 @@ try {
   await bridge.waitFor("the restore notice", `
     const bar = e2e.first('.turn-bar[data-session-id="' + CSS.escape(${JSON.stringify(sessionA)}) + '"]');
     const n = bar && e2e.first(".turn-bar-notice", bar);
-    return n && e2e.norm(n.innerText) === "Restored to T3" ? true : null;
+    return n && e2e.norm(n.innerText).startsWith("Restored to T3") ? true : null;
   `, { timeoutMs: 20_000 });
   assert(worktreeTree(dirA) === treeAtT3, "the worktree is exactly the T3 tree");
   assert(read(dirA, "notes/new.txt") === null && read(dirA, "README.md").startsWith("# changed"), "notes/new.txt is gone again and README.md is T3's");

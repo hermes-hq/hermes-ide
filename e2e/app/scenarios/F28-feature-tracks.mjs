@@ -357,7 +357,9 @@ try {
   await openTrackPanel(bridge);
   assert(await bridge.exists('[data-testid="track-empty"]'), "the Track panel says there is no feature yet and offers Make it a feature");
   let attrs = await panelAttrs(bridge);
-  assert(attrs.role === "reader", `before any turn, the older plain shell writes by seniority (this session: ${attrs.role})`);
+  // Two plain shells and no turn yet: neither is an agent, so neither is
+  // the writer (a track line typed into a shell would run as a command).
+  assert(attrs.role === "none", `before any turn, no plain shell is the writer (this session: ${attrs.role})`);
   // Hermes observed the agent's first turn (contract C0): that, not seniority, makes it the writer.
   const earlier = Date.now() - 60_000;
   assert(await injectEvent(bridge, writerId, { type: "turn_start", at: earlier, n: 1, source: "e2e" }), "the agent's session ran a turn (contract injector)");
@@ -430,7 +432,7 @@ try {
   const reviewText = readFileSync(join(wt, ".hermes", "features", SLUG, "review-1.md"), "utf8");
   assert(reviewText.includes("+- [ ] add tests for empty queries"), "review-1.md holds the person's edit as a diff line");
   const stdinRecord = readFileSync(agentLog, "utf8").split("\n").filter(Boolean).map((l) => JSON.parse(l)).find((r) => r.stdin);
-  assert(stdinRecord?.stdin === `hermes review: read .hermes/features/${SLUG}/review-1.md and apply my edits to plan.md, then continue`, `the agent's stdin got exactly one tagged line: "${stdinRecord?.stdin}"`);
+  assert(stdinRecord?.stdin === `hermes review: I edited plan.md (diff in .hermes/features/${SLUG}/review-1.md). Take it into account; the gate is still waiting — do not run \`hi phase done\` again.`, `the agent's stdin got exactly one tagged line: "${stdinRecord?.stdin}"`);
   await bridge.screenshot(join(evidenceDir, "04-review-sent.png"));
 
   log("step 5: ⇧O opens plan.md in $EDITOR in a split");
@@ -527,6 +529,9 @@ try {
   git(wt, "branch", "-q", "-D", `hermes/${SLUG}`);
   await bridge.waitFor("the panel to show the plain branch", `return (e2e.first(".track-branch")?.textContent ?? "") === ${JSON.stringify(SLUG)};`);
   await bridge.click("button.track-make-feature");
+  // It asks first, naming what it writes.
+  await bridge.waitFor("the Make it a feature question", `return !!e2e.first('[data-testid="track-promote-confirm"]');`);
+  await bridge.click("button.track-promote-create");
   await bridge.waitFor("the promoted feature", `const p = e2e.first('[data-testid="track-panel"]'); return p && p.dataset.slug === ${JSON.stringify(SLUG)} && p.dataset.phase === "questions";`);
   assert(existsSync(featureMdOf(wt)), "Make it a feature created .hermes/features/<slug>/feature.md for the branch");
   assert(git(wt, "branch", "--show-current") === `hermes/${SLUG}`, "and put the worktree on hermes/<slug>, like hi feature new");
