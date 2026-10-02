@@ -163,7 +163,7 @@
   border-top: 1px solid var(--border);
   /* A long list scrolls here, so the actions below stay in reach. */
   flex: 0 1 auto;
-  min-height: 64px;
+  min-height: var(--space-8);
   overflow-y: auto;
 }
 
