@@ -130,6 +130,43 @@ describe("AgentSessionStore", () => {
     }
   });
 
+  it("an init that fired while the store was still subscribing is taken from the cache", async () => {
+    // The store exists before the init, but its listener is registered only
+    // after the init went by; the session's own listener cached it.
+    const bus = makeStubBus();
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    const slowListen: typeof bus.listen = (name, handler) => gate.then(() => bus.listen(name, handler));
+    const store = new AgentSessionStore("racy", slowListen);
+    try {
+      cacheAgentInit("racy", makeInitEvent("uuid-racy") as InitEvent);
+      expect(store.getSnapshot().state.initialized).toBe(false);
+      release();
+      await gate;
+      await new Promise((r) => setTimeout(r, 0));
+      expect(store.getSnapshot().state.initialized).toBe(true);
+      expect(store.getSnapshot().state.initEvent?.model).toBe("claude-sonnet-4-6");
+    } finally {
+      clearAgentInitCache("racy");
+    }
+  });
+
+  it("the first agent event after a missed init brings the cached init in", async () => {
+    const bus = makeStubBus();
+    const store = new AgentSessionStore("missed", bus.listen);
+    await Promise.resolve();
+    cacheAgentInit("missed", makeInitEvent("uuid-missed") as InitEvent);
+    try {
+      const [handle] = [...bus.channels.get("agent-event-missed")!];
+      handle.fire(makeAssistantEvent("m1", "Thinking"));
+      const { state } = store.getSnapshot();
+      expect(state.initialized).toBe(true);
+      expect(state.messages).toHaveLength(1);
+    } finally {
+      clearAgentInitCache("missed");
+    }
+  });
+
   it("a store with no init seen yet starts uninitialized", async () => {
     const bus = makeStubBus();
     const store = new AgentSessionStore("never", bus.listen);

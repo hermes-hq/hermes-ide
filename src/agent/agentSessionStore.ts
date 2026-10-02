@@ -43,6 +43,7 @@
  */
 
 import type { AgentEvent } from "./types";
+import { isInitEvent } from "./types";
 import { emptyState, freezePendingThinking, reduceEvent } from "./messageStore";
 import type { AgentSessionState } from "./messageStore";
 import { isPermRequest, type PermRequest } from "../utils/permissionRequest";
@@ -174,6 +175,9 @@ export class AgentSessionStore {
         return;
       }
 
+      // The init may have fired while this listener was still being
+      // registered: the session's own listener cached it, this one missed it.
+      if (!isInitEvent(payload)) this.adoptCachedInit(false);
       this.snapshot = {
         ...this.snapshot,
         state: reduceEvent(this.snapshot.state, payload),
@@ -202,7 +206,10 @@ export class AgentSessionStore {
         };
       }
       this.notify();
-    }).then((un) => this.collect(un)).catch(() => undefined);
+    }).then((un) => {
+      this.collect(un);
+      this.adoptCachedInit(true);
+    }).catch(() => undefined);
 
     listen<string>(`agent-stderr-${sessionId}`, (msg) => {
       if (this.destroyed) return;
@@ -235,6 +242,20 @@ export class AgentSessionStore {
       };
       this.notify();
     }).then((un) => this.collect(un)).catch(() => undefined);
+  }
+
+  /** Takes the session's cached init when this store has not seen one.
+   *  Only marks the store initialized: nothing else in the state belongs
+   *  to an earlier agent process, so nothing is reset. */
+  private adoptCachedInit(notify: boolean) {
+    if (this.destroyed || this.snapshot.state.initialized) return;
+    const init = peekAgentInitCache(this.sessionId);
+    if (!init) return;
+    this.snapshot = {
+      ...this.snapshot,
+      state: { ...this.snapshot.state, initialized: true, initEvent: init },
+    };
+    if (notify) this.notify();
   }
 
   private collect(un: Unlisten) {
