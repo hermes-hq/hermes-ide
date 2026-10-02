@@ -95,7 +95,11 @@ function makeRepo() {
   writeFileSync(join(repo, ".hermes", "worktree.toml"), 'done_when = ["npm test"]\n');
   git("add", ".");
   git("commit", "-q", "-m", "initial");
-  git("remote", "add", "origin", remote);
+  // origin names a GitHub repository (pull requests are offered for one
+  // only); git itself fetches and pushes the local bare remote instead.
+  const ORIGIN_URL = "https://github.com/e2e/f22-repo.git";
+  git("config", `url.${remote}.insteadOf`, ORIGIN_URL);
+  git("remote", "add", "origin", ORIGIN_URL);
   git("push", "-q", "origin", "main");
 }
 
@@ -448,7 +452,8 @@ try {
   assert(sheet.turns === 2, "the turn count is 2");
   assert(sheet.diffstat.files === 2 && sheet.diffstat.insertions === 11 && sheet.diffstat.deletions === 0, "the diffstat counts both new files (+11)");
   assert(Number(sheet.diskBytes) > 0 && /^disk/i.test(sheet.disk), `the disk used is shown ("${sheet.disk}")`);
-  assert(sheet.message.startsWith("Add merge notes\n\n2 turns:\n- Turn 1: 1 file, +2 -0 (notes/merge.txt)"), "the message is drafted from the plan and the turns");
+  // The plan names the commit; the turn list goes to the pull request body.
+  assert(sheet.message.split("\n")[0] === "Add merge notes" && !sheet.message.includes("Turn 1"), "the message is drafted from the plan (the turns stay in the pull request body)");
   assert(!sheet.merge.disabled && /fast-forward/.test(sheet.merge.text), "the merge option says it is a fast-forward");
   assert(sheet.title.endsWith("into main") && sheet.baseNote === null, "the sheet lands into main and adds no branch warning");
   await bridge.screenshot(join(evidenceDir, "01-land-sheet.png"));
@@ -688,10 +693,12 @@ try {
   log(`  link style: ${JSON.stringify(sheet.ghLinkStyle)}`);
   assert(sheet.ghLinkStyle.colour === sheet.ghLinkStyle.linkFg && sheet.ghLinkStyle.colour !== sheet.ghLinkStyle.hint && sheet.ghLinkStyle.underline, "the gh link is drawn as a link (link colour, underlined), not as hint text");
   log(`  title: "${sheet.title}"; branch note: "${sheet.baseNote}"`);
-  assert(sheet.title.endsWith("into release-1"), "the sheet lands into the branch the project folder has checked out");
+  // Task A was started from main: the sheet still lands there (QA-git-6),
+  // and the folder's release-1 is one pick away in "Land into".
+  assert(sheet.title.endsWith("into main") && sheet.baseNote === null, "the sheet lands into main, the branch the task was started from, whatever the project folder has checked out");
   assert(
-    sheet.baseNote === "The project folder has release-1 checked out, so this lands on release-1. To land on your main branch, check it out in the project folder first.",
-    "the sheet warns that landing goes to release-1, not main",
+    await app.bridge.eval(`return [...(e2e.first("#land-sheet-base")?.options ?? [])].some((o) => o.value === "release-1");`),
+    "Land into offers the project folder's release-1",
   );
   await app.bridge.screenshot(join(evidenceDir, "11-gh-missing.png"));
   await closeSheet(app.bridge);
