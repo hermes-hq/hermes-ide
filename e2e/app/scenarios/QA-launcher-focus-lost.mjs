@@ -12,7 +12,7 @@
 // after each of them.
 
 import { MOD, openLauncher, openChip, pickInMenu, pressKeyOnFocus, typeInto, waitLaunchEnabled, waitLauncherClosed } from "../launcher-steps.mjs";
-import { focusOn, focusState, menuAction, runLauncherQa, sleep } from "../qa-launcher-steps.mjs";
+import { focusOn, focusState, launchedSince, menuAction, runLauncherQa, sleep } from "../qa-launcher-steps.mjs";
 
 await runLauncherQa("QA-launcher-focus-lost", async ({ bridge, fx, log, check, evidenceDir }) => {
   const press = (k, m) => pressKeyOnFocus(bridge, k, m);
@@ -89,7 +89,6 @@ await runLauncherQa("QA-launcher-focus-lost", async ({ bridge, fx, log, check, e
   check((await focusState(bridge)).task, "after choosing the free branch name the task field has the keyboard");
   const before = fx.records().length;
   await press("Enter");
-  await sleep(3000);
-  check(fx.records().length > before, "Enter then launches the task");
+  check(await launchedSince(fx, before), "Enter then launches the task");
   await bridge.screenshot(`${evidenceDir}/end.png`);
 });

@@ -234,9 +234,12 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
   await bridge.screenshot(join(evidenceDir, `${shotPrefix}-wizard-new-branch.png`));
   await bridge.click(".session-creator-footer-actions .session-creator-btn-primary");
 
-  // Confirm step: press the primary button until the wizard closes.
+  // Confirm step: press the primary button until the wizard closes, or the
+  // disk guard refuses: then the wizard stays open with everything chosen
+  // and a toast says why (pressing again would only ask again).
+  const doneOrRefused = `return !e2e.first(".session-creator") || e2e.all(".toast-message").some((el) => el.innerText.includes("disk space"));`;
   for (let i = 0; i < 4; i++) {
-    if (!(await bridge.exists(".session-creator"))) break;
+    if (await bridge.eval(doneOrRefused)) break;
     await bridge.clickWhenReady(`
       if (!e2e.first(".session-creator")) return null;
       return e2e.click(e2e.must(
@@ -244,9 +247,9 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
         "the wizard's primary button",
       ));
     `);
-    await sleep(400);
+    await bridge.waitFor("the wizard to close or say why not", doneOrRefused, { timeoutMs: 3_000 }).catch(() => {});
   }
-  await bridge.waitFor("the wizard to close", `return !e2e.first(".session-creator");`, { timeoutMs: 30_000 });
+  await bridge.waitFor("the wizard to close, or the refusal", doneOrRefused, { timeoutMs: 30_000 });
 }
 
 /** Every folder two levels under hermes-worktrees/ (the worktree folders). */

@@ -10,7 +10,7 @@
 // menus open after a pick.
 
 import { openLauncher, pressKeyOnFocus, typeInto, waitLaunchEnabled } from "../launcher-steps.mjs";
-import { focusOn, focusState, runLauncherQa, sleep } from "../qa-launcher-steps.mjs";
+import { focusOn, focusState, launchedSince, runLauncherQa, sleep } from "../qa-launcher-steps.mjs";
 
 await runLauncherQa("QA-launcher-chip-pick-enter", async ({ bridge, fx, log, check }) => {
   const press = (k, m) => pressKeyOnFocus(bridge, k, m);
@@ -62,6 +62,5 @@ await runLauncherQa("QA-launcher-chip-pick-enter", async ({ bridge, fx, log, che
   const before = fx.records().length;
   check((await menuOpen()) === null && (await focusState(bridge)).task, "picking a model closes its menu and gives the task field the keyboard");
   await press("Enter");
-  await sleep(2500);
-  check(fx.records().length > before, "Enter right after picking a model launches the task");
+  check(await launchedSince(fx, before), "Enter right after picking a model launches the task");
 });

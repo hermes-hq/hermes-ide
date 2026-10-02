@@ -158,6 +158,17 @@ export async function runAccountsQa(name, body, { bins = ["claude"], env = {}, b
 export const menuAction = (bridge, action) =>
   bridge.eval(`await window.__TAURI_INTERNALS__.invoke("plugin:event|emit", { event: "menu-action", payload: { action: ${JSON.stringify(action)} } }); return true;`);
 
+/**
+ * Whether a fake agent started after `before` launch records: the launch
+ * goes through the worktree, the shell and the helper first, which takes a
+ * few seconds on a slow runner.
+ */
+export async function launchedSince(fx, before, timeoutMs = 30_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (fx.records().length <= before && Date.now() < deadline) await sleep(300);
+  return fx.records().length > before;
+}
+
 /** Where the keyboard is: on the page itself, in the launcher sheet, or which element. */
 export const focusState = (bridge) =>
   bridge.eval(`

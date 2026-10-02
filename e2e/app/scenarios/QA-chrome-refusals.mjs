@@ -20,6 +20,7 @@
 //   node e2e/app/scenarios/QA-chrome-refusals.mjs
 
 import { mkdirSync, writeFileSync } from "node:fs";
+import { homedir } from "node:os";
 import { join } from "node:path";
 import { launchApp, skipScenario, sleep } from "../harness.mjs";
 import { fakeEnv, invoke, launchWithChoice, onWindows, openAgentsSettings, closeSettings, registryPath, removeWork, setFake, setupFakes, waitForRecord } from "../cap-steps.mjs";
@@ -34,7 +35,16 @@ function startApp(f, evidenceDir, log, run, { first = false, env = {} } = {}) {
   return onWindows ? launchApp({ ...common, home: "real", resetData: first }) : launchApp({ ...common, home: "private", homeDir: f.home });
 }
 
-const caps = (bridge, agentId) => invoke(bridge, "get_agent_capabilities", { agentId, accountId: null, refresh: false });
+/** A path as the app shows it: under the home folder as ~/… with "/" (Windows ignores case). */
+function homeRelative(path) {
+  const home = homedir().replace(/[\\/]+$/, "");
+  const head = path.slice(0, home.length);
+  const same = onWindows ? head.toLowerCase() === home.toLowerCase() : head === home;
+  if (!same || !/[\\/]/.test(path.charAt(home.length))) return path;
+  return `~/${path.slice(home.length + 1).replace(/\\/g, "/")}`;
+}
+
+const caps = (bridge, agentId) =>invoke(bridge, "get_agent_capabilities", { agentId, accountId: null, refresh: false });
 const opusOf = async (bridge) => (await caps(bridge, "claude")).models.find((m) => m.id === "opus");
 
 /** The launcher's model menu item for `modelId` of `agentId`: disabled, and its text. */
@@ -140,7 +150,8 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, apps, onCleanup }) => {
   log(`  banner: ${JSON.stringify(banner)}`);
   // CODEX_HOME points Codex's default profile at the test's folder: the
   // banner names the file there, not the catalog's ~/.codex/config.toml.
-  const configFile = join(codexHome, "config.toml");
+  // Shown as the app shows paths: under the home folder as ~/…, with "/".
+  const configFile = homeRelative(join(codexHome, "config.toml"));
   check(banner.title === `Codex's default model, gpt-5.2-codex (set in ${configFile}), isn't available on your default account`, `the banner names the default model and the config file CODEX_HOME points at ("${banner.title}")`);
   check(!banner.actions.includes("retry-default") && banner.actions.includes("pick-model"), "it offers another model, not the same default again");
   await bridge.screenshot(join(evidenceDir, "02-codex-default-banner.png"));

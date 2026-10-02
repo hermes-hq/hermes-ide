@@ -12,7 +12,7 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { invoke, launcherState, onWindows, openChip, openLauncher, pressKey, pressKeyOnFocus, typeInto } from "../launcher-steps.mjs";
-import { focusState, runLauncherQa, sleep } from "../qa-launcher-steps.mjs";
+import { focusState, launchedSince, runLauncherQa, sleep } from "../qa-launcher-steps.mjs";
 
 await runLauncherQa("QA-launcher-path-enter", async ({ bridge, fx, log, check, evidenceDir }) => {
   await openLauncher(bridge);
@@ -29,8 +29,7 @@ await runLauncherQa("QA-launcher-path-enter", async ({ bridge, fx, log, check, e
   check(s.sheet && !s.menu && (await focusState(bridge)).task, "the folder is confirmed: the menu closed, the keyboard is in the task field");
   check((await launcherState(bridge)).project === "other-repo", "the project chip says other-repo");
   await pressKeyOnFocus(bridge, "Enter");
-  await sleep(3000);
-  check(fx.records().length > before, "the next Enter launches the task");
+  check(await launchedSince(fx, before), "the next Enter launches the task");
 
   if (!onWindows) {
     // "~" is the home folder (the app's private one in this test): asked of the app itself.

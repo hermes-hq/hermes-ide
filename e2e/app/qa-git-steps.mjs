@@ -72,6 +72,9 @@ export function makeRepo(path, { branch = "main", files = { "README.md": "# demo
   gitIn(path, "config", "user.name", "Hermes Test");
   gitIn(path, "config", "user.email", "test@example.com");
   gitIn(path, "config", "commit.gpgsign", "false");
+  // The scenarios' git skips the system config, the app's does not (Git
+  // for Windows sets core.autocrlf there): keep LF for both.
+  gitIn(path, "config", "core.autocrlf", "false");
   for (const [f, c] of Object.entries(files)) {
     mkdirSync(join(path, f, ".."), { recursive: true });
     writeFileSync(join(path, f), c);

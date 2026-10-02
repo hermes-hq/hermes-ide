@@ -40,6 +40,10 @@ export async function emulatePlatform(bridge, rules, log) {
 export async function startApp(tag, evidenceDir, log, onCleanup, apps, launchOpts = {}) {
   const fx = L.launcherFixtures(tag, log);
   onCleanup(() => fx.cleanup());
+  // Windows terminals rebuild PATH from the registry (see N12): the fake
+  // agents must be on it there too (CI runners only).
+  const undoPath = fx.addFakeBinToRegistryPath();
+  if (undoPath) onCleanup(undoPath);
   const app = await fx.launch(evidenceDir, 1, { first: true, ...launchOpts });
   apps.push(app);
   await L.completeClassicOnboarding(app.bridge);
@@ -196,8 +200,11 @@ export function selectLine(bridge, sessionId, pattern) {
     if (!screen) return null;
     const r = screen.getBoundingClientRect();
     const opts = (x, y, buttons) => ({ bubbles: true, cancelable: true, view: window, clientX: x, clientY: y, button: 0, buttons });
-    const cellH = r.height / Math.max(1, window.__HERMES_E2E__.terminalInfo(${JSON.stringify(sessionId)})?.rows || 24);
-    const lines = window.__HERMES_E2E__.readTerminal(${JSON.stringify(sessionId)}) || [];
+    const rows = Math.max(1, window.__HERMES_E2E__.terminalInfo(${JSON.stringify(sessionId)})?.rows || 24);
+    const cellH = r.height / rows;
+    // The rows on screen (the buffer's last rows), not joined: a long
+    // prompt wraps, and scrollback sits above the screen.
+    const lines = window.__HERMES_E2E__.terminalTail(${JSON.stringify(sessionId)}, rows) || [];
     const re = new RegExp(${JSON.stringify(pattern)});
     let row = -1;
     for (let i = lines.length - 1; i >= 0; i--) if (re.test(lines[i])) { row = i; break; }

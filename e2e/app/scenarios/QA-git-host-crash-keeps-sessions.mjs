@@ -89,12 +89,24 @@ try {
   log("step 2: Restart");
   await bridge.clickWhenReady(`const t = e2e.all(".toast").find((x) => /ended/.test(x.innerText)); const btn = t && e2e.all("button", t).find((x) => /Restart/.test(e2e.nameOf(x))); return btn ? e2e.click(btn) : false;`);
   await bridge.waitFor("the sessions to run again", `return e2e.all(".session-item-destroyed").length === 0 && e2e.all(".session-item").length === 2;`, { timeoutMs: 40_000 });
-  await sleep(2000);
-  await bridge.typeInTerminal(a.sessionId, "echo restarted-ok\n");
-  await bridge.waitForTerminal(a.sessionId, /restarted-ok/, { timeoutMs: 30_000 }).then(
-    () => check(true, "the restarted terminal runs commands again"),
-    () => check(false, "the restarted terminal runs commands again"),
-  );
+  // Show the first session: each restarted session takes the pane as it
+  // starts, so the task's may be the one in view. Restart starts it again
+  // under the same id, which replaces its terminal on screen: type once the
+  // new one takes commands.
+  const aRow = `.session-item[data-session-item-id="${a.sessionId}"]`;
+  const showA = `if (document.querySelector('div[data-session-id="${a.sessionId}"]')) return true; const row = e2e.first(${JSON.stringify(aRow)}); return row ? e2e.click(row) : false;`;
+  let ran = false;
+  for (const deadline = Date.now() + 40_000; !ran && Date.now() < deadline; ) {
+    try {
+      await bridge.clickWhenReady(showA);
+      await bridge.typeInTerminal(a.sessionId, "echo restarted-ok\n");
+      await bridge.waitForTerminal(a.sessionId, /^restarted-ok/, { timeoutMs: 4_000 });
+      ran = true;
+    } catch {
+      await sleep(500);
+    }
+  }
+  check(ran, "the restarted terminal runs commands again");
   check(existsSync(wt.worktreePath), "the restarted task still has its worktree");
   pidToKill = await hostPid(bridge).catch(() => null);
 } catch (e) {

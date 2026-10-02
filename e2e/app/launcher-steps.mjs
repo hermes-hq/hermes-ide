@@ -40,6 +40,9 @@ export function launcherFixtures(tag, log) {
     git("config", "user.name", "Hermes Test");
     git("config", "user.email", "test@example.com");
     git("config", "commit.gpgsign", "false");
+    // The scenarios' git skips the system config, the app's does not (Git
+    // for Windows sets core.autocrlf there): keep LF for both.
+    git("config", "core.autocrlf", "false");
     writeFileSync(join(repo, "README.md"), `# ${name}\n`);
     extra?.(repo, git);
     git("add", ".");

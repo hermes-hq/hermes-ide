@@ -147,7 +147,8 @@ try {
     ["Focus Composer", MAC ? "⌘⇧J" : "Ctrl+Shift+J"],
     ["Workbench", MAC ? "⌘⌥B" : "Ctrl+Alt+B"],
     ["Command Palette (alternate)", MAC ? "⌘⇧P" : "Ctrl+Shift+P"],
-    ["Focus Next Pane", MAC ? "⌘⌥→" : "Ctrl+Alt+→"],
+    // Windows/Linux list Alt+→ first (Ctrl+Alt+→ also works there).
+    ["Focus Next Pane", MAC ? "⌘⌥→" : "Alt+→"],
     ["Switch to Session 1–9", MAC ? "⌘1-9" : "Ctrl+1-9"],
   ]) {
     assert(find(action)?.keys === keys, `app-handled "${action}" is listed as ${keys}`);

@@ -12,6 +12,7 @@ import { platform, tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { REPO_ROOT, appBinaryPath, createLogger, launchApp, outDir, sleep } from "./harness.mjs";
 import * as L from "./launcher-steps.mjs";
+import { registryPath } from "./cap-steps.mjs";
 
 export { L, sleep };
 export const onWindows = platform() === "win32";
@@ -178,6 +179,18 @@ export async function taskSetup(tag, evidenceDir, log, { checks = [], track = tr
   const work = mkWork(tag);
   const { repo, git } = mkRepo(join(work, "demo-repo"), { "math.js": "export const sub = (a, b) => a - b;\n", ...files });
   const fake = fakeAgents(work, { mode: "prompts" });
+  // Windows terminals rebuild PATH from the registry (see N12): the fake
+  // agents must be on it there too (CI runners only).
+  const undoPath = registryPath(fake, log);
+  try {
+    return await taskSetupWith({ work, repo, git, fake, undoPath }, tag, evidenceDir, log, { checks, track, task, env });
+  } catch (e) {
+    undoPath?.();
+    throw e;
+  }
+}
+
+async function taskSetupWith({ work, repo, git, fake, undoPath }, tag, evidenceDir, log, { checks, track, task, env }) {
   const homeDir = onWindows ? undefined : join(work, "home");
   // A crowded developer disk would block the launcher's new worktree (it
   // wants 10 GB free); the test worktrees are a few KB.
@@ -204,6 +217,7 @@ export async function taskSetup(tag, evidenceDir, log, { checks = [], track = tr
   };
   const cleanup = async () => {
     if (app.isRunning()) await app.stop();
+    undoPath?.();
     rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   };
   return { work, repo, git, fake, app, bridge, sid, wt, hi, cleanup };

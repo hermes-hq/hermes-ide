@@ -61,6 +61,17 @@ export function resetE2eDataDir() {
     throw new Error(`refusing to reset unexpected directory: ${dir}`);
   }
   if (existsSync(dir)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  // Windows keeps the webview's own storage (localStorage: the UI language,
+  // the keyboard rules a scenario emulates) apart, under %LOCALAPPDATA%: a
+  // first launch starts without it too, or one scenario's leaks into the next.
+  if (platform() === "win32" && process.env.LOCALAPPDATA) {
+    const webview = join(process.env.LOCALAPPDATA, E2E_IDENTIFIER, "EBWebView");
+    try {
+      if (existsSync(webview)) rmSync(webview, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (e) {
+      console.warn(`[e2e] could not reset the webview's storage at ${webview}: ${e.message}`);
+    }
+  }
 }
 
 // ─── Logging ─────────────────────────────────────────────────────────

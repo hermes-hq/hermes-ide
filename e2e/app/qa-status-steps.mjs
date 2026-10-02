@@ -50,6 +50,10 @@ export async function waitForMessages(rx, n, timeoutMs = 15_000) {
 export async function startApp(tag, evidenceDir, log, onCleanup, apps, { env } = {}) {
   const fx = launcherFixtures(tag, log);
   onCleanup(() => fx.cleanup());
+  // Windows terminals rebuild PATH from the registry (see N12): the fake
+  // agents must be on it there too (CI runners only).
+  const undoPath = fx.addFakeBinToRegistryPath();
+  if (undoPath) onCleanup(undoPath);
   const app = await fx.launch(evidenceDir, 1, { first: true, ...(env ? { env } : {}) });
   apps.push(app);
   await completeClassicOnboarding(app.bridge);
