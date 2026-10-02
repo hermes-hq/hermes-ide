@@ -234,6 +234,8 @@ export interface WorktreeCreateResult {
   worktreePath: string;
   branchName: string;
   isMainWorktree: boolean;
+  /** Made, but git reported a problem afterwards (a hook failed), in words. */
+  warning?: string | null;
 }
 
 /** Result of committing a session's uncommitted work on close. */
@@ -251,9 +253,24 @@ export interface WorktreeChangedFile {
   status: string;
 }
 
+/** What a worktree's HEAD is doing (the close dialog's other questions). */
+export interface WorktreeHeadState {
+  /** The branch HEAD is really on; null when detached. */
+  branch: string | null;
+  detached: boolean;
+  head: string | null;
+  /** Commits on a detached HEAD that no branch, tag or remote branch has. */
+  lostCommits: number;
+  /** "rebase" | "merge" | "bisect" | "cherry-pick" | "revert" while one is in progress. */
+  operation: string | null;
+  /** Submodules with uncommitted changes inside them. */
+  dirtySubmodules: string[];
+}
+
 export interface WorktreeChanges {
   has_changes: boolean;
   files: WorktreeChangedFile[];
+  head?: WorktreeHeadState | null;
 }
 
 // ─── Merge Conflict Types ────────────────────────────────────────────

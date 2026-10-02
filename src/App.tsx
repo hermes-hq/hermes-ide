@@ -82,10 +82,11 @@ import { ToastContainer } from "./components/ToastContainer";
 import { WorktreeRecipePanel } from "./components/WorktreeRecipePanel";
 import { useToastStore } from "./hooks/useToastStore";
 import { useWorktreeErrorToasts } from "./hooks/useWorktreeErrorToasts";
+import { useSessionNoticeToasts } from "./hooks/useSessionNoticeToasts";
 import { PluginUpdateConfirmDialog } from "./components/PluginUpdateConfirmDialog";
 import { launchFailedMessage } from "./catalog/agentCatalog";
 import { OnboardingGate } from "./components/OnboardingGate";
-import { getAgent } from "./catalog/agentCatalog";
+import { agentDisplayName, getAgent } from "./catalog/agentCatalog";
 import { getProjectsOrdered, getSessionProjects } from "./api/projects";
 import { getSessionWorktreeInfo } from "./api/git";
 import { probeTaskRepo, taskTrackPrompt, writeTaskDoneWhen, writeTaskFeatureFile } from "./api/launcher";
@@ -335,11 +336,14 @@ function AppContent() {
     let unlisten: (() => void) | null = null;
     listen<{ sessionId: string; branchName: string; error: string }>("worktree-cleanup-failed", (event) => {
       if (cancelled) return;
-      const { branchName } = event.payload;
+      const { branchName, error } = event.payload;
+      // Kept on purpose (a submodule's commits exist only there): say so
+      // as the backend did, and leave the notice up.
+      const kept = /Kept the worktree at /.test(error ?? "");
       toastStoreRef.current.addToast({
-        message: `Failed to clean up branch worktree '${branchName}'. It will be retried on next startup.`,
+        message: kept ? error : `Failed to clean up branch worktree '${branchName}'. It will be retried on next startup.`,
         type: "warning",
-        duration: 8000,
+        duration: kept ? null : 8000,
       });
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
@@ -450,6 +454,28 @@ function AppContent() {
 
   // ── Worktree creation failures (#286) ──
   useWorktreeErrorToasts(toastStore.addToast);
+
+  // ── Sessions that ended on their own, worktrees kept on close ──
+  useSessionNoticeToasts(toastStore.addToast, {
+    // Same id: its worktree link and terminal output stay; a new program starts.
+    restart: (ids) => {
+      for (const id of ids) {
+        const s = state.sessions[id];
+        if (!s) continue;
+        void createSession({
+          sessionId: id,
+          label: s.label,
+          workingDirectory: s.working_directory || undefined,
+          color: s.color || undefined,
+          group: s.group ?? undefined,
+          aiProvider: s.ai_provider ?? undefined,
+        });
+      }
+    },
+    close: (ids) => {
+      for (const id of ids) void requestCloseSession(id);
+    },
+  });
 
   const pluginRuntimeRef = useRef<PluginRuntime | null>(null);
 
@@ -1961,7 +1987,16 @@ function AppContent() {
             // createSession(), which makes the new session active and swaps
             // it into the focused pane.
             const focusedBefore = focusedPaneSnapshot(state.layout);
-            const session = await createSession(opts);
+            // A worktree that could not be made (a toast says why) keeps the
+            // wizard open with everything chosen, so another way can be
+            // picked; a cancel closes it as before.
+            let worktreeFailed = false;
+            const onWorktreeErrors = (e: Event) => {
+              if ((e as CustomEvent<{ fatal?: boolean }>).detail?.fatal) worktreeFailed = true;
+            };
+            window.addEventListener("hermes:worktree-errors", onWorktreeErrors);
+            const session = await createSession(opts).finally(() => window.removeEventListener("hermes:worktree-errors", onWorktreeErrors));
+            if (!session && worktreeFailed) return;
             setSessionCreatorOpen(false);
             if (session) {
               const split = pendingSplit.current;
@@ -2022,6 +2057,11 @@ function AppContent() {
         <CloseSessionDialog
           sessionId={state.pendingCloseSessionId}
           sessionMode={state.sessions[state.pendingCloseSessionId]?.mode}
+          label={state.sessions[state.pendingCloseSessionId]?.label}
+          agentName={(() => {
+            const s = state.sessions[state.pendingCloseSessionId];
+            return s ? agentDisplayName(s) ?? getAgent(s.ai_provider)?.name ?? null : null;
+          })()}
           onConfirm={(id) => {
             dispatch({ type: "CANCEL_CLOSE_SESSION" });
             closeSession(id);

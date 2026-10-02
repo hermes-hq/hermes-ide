@@ -285,6 +285,8 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     const it = e2e.all(".git-branch-selector .git-branch-item").find((el) => e2e.norm(el.innerText).replace(/^\\*/, "").trim().startsWith("side"));
     return e2e.click(e2e.must(it, "the side branch"));
   `);
+  // A task's own worktree: the switcher asks before moving it (QA-git-5).
+  await bridge.clickWhenReady(`const b = e2e.first(".git-branch-switch-confirm .git-branch-switch-yes"); return b ? e2e.click(b) : false;`, { timeoutMs: 10_000 });
   await bridge.waitFor("the section to follow the switch", `
     return e2e.first(${JSON.stringify(SECTION)})?.dataset.branch === "side";
   `, { timeoutMs: 15_000 });

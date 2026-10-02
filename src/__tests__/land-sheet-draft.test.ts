@@ -10,6 +10,7 @@ vi.mock("@tauri-apps/api/core", () => ({ invoke: h.invoke }));
 
 import {
   baseBranchNote,
+  baseMismatchNote,
   branchStem,
   ciLogRequest,
   defaultLandMode,
@@ -141,16 +142,28 @@ describe("the drafted message", () => {
     expect(draftSubject(input({ branch: "hermes/", label: "" }))).toBe("Land task");
   });
 
-  it("lists every turn with what it changed", () => {
-    expect(draftMessage(input())).toBe(
-      [
-        "Fix login redirect",
-        "",
-        "2 turns:",
-        "- Turn 1: 2 files, +10 -1 (src/a.ts, src/b.ts)",
-        "- Turn 2: 1 file, +3 -0 (README.md)",
-      ].join("\n"),
+  it("keeps the turn list out of the commit (it belongs to the pull request body)", () => {
+    const message = draftMessage(input());
+    expect(message).not.toContain("Turn 1");
+    expect(message.split("\n")[0]).toBe("Fix login redirect");
+  });
+
+  it("drafts the subject from the task typed in the launcher, and the body from the task and Done-When", () => {
+    const task = "Fix the flaky login test (CI only, see #42)";
+    expect(draftSubject(input({ task }))).toBe(task);
+    expect(draftMessage(input({ task, doneWhen: ["npm test", "npm run lint"] }))).toBe(
+      `${task}\n\nDone-When: npm test; npm run lint`,
     );
+    // A task longer than one line: its first line, the whole task below.
+    const long = "Make Ölçüm export work\n\nThe CSV export drops umlauts in names.";
+    expect(draftMessage(input({ task: long }))).toBe(`Make Ölçüm export work\n\n${long}`);
+    // The plan's title still wins.
+    const feature = pickFeature([{ folder: "f", text: FEATURE }], "hermes/search-index");
+    expect(draftSubject(input({ task, feature }))).toBe("Search index for notes");
+    // At most 72 characters, cut at a word.
+    const subject = draftSubject(input({ task: "word ".repeat(30) }));
+    expect(subject.length).toBeLessThanOrEqual(72);
+    expect(subject.endsWith("…")).toBe(true);
   });
 
   it("falls back to the totals when no turn was recorded", () => {
@@ -265,8 +278,50 @@ describe("which branch landing goes to", () => {
 
   it("warns when the project folder is on another branch", () => {
     expect(baseBranchNote("release-1")).toBe(
-      "The project folder has release-1 checked out, so this lands on release-1. To land on your main branch, check it out in the project folder first.",
+      "The project folder has release-1 checked out, so this lands on release-1. To land on your main branch, pick it in Land into.",
     );
+  });
+
+  it("says nothing when the base is the branch the task was started from", () => {
+    expect(baseBranchNote("develop", "develop")).toBeNull();
+  });
+
+  it("warns when landing elsewhere than where the task started would bring that branch's commits", () => {
+    expect(baseMismatchNote({ recorded: "develop", commits: 1 }, "main")).toBe(
+      "This task was started from develop. Landing into main would also bring develop's 1 commit.",
+    );
+    expect(baseMismatchNote({ recorded: "develop", commits: 3 }, "main")).toContain("develop's 3 commits");
+    expect(baseMismatchNote(null, "main")).toBeNull();
+    expect(baseMismatchNote({ recorded: "develop", commits: 1 }, "develop")).toBeNull();
+  });
+});
+
+describe("pull requests and remotes", () => {
+  const base = { name: "main", head: "a", checkedOutAt: null };
+  const preview = (over: Partial<LandPreview> = {}): LandPreview =>
+    ({
+      branch: "hermes/x", head: "b", uncommittedFiles: 1, commitsAhead: 1,
+      diffstat: { files: 1, insertions: 1, deletions: 0 }, changedFiles: ["a"], base,
+      merge: { kind: "fast_forward" }, worktreePath: "/w", repoPath: "/r", shared: false,
+      remote: "origin", worktreeToml: null, features: [], landings: [], ...over,
+    }) as LandPreview;
+
+  it("with no remote, says only that (never also to sign in to gh)", () => {
+    const a = landAvailability(preview({ remote: null }), { state: "signed_out", detail: "" });
+    expect(a.pr).toBe("This repository has no remote. Add one (git remote add origin <url>) to open a pull request.");
+  });
+
+  it("a remote that is not on GitHub: no pull request, and the sheet picks a local merge", () => {
+    const gh = { state: "not_github" as const, detail: "origin (/srv/x.git) is not a GitHub repository" };
+    const a = landAvailability(preview(), gh);
+    expect(a.pr).toBe("origin isn't a GitHub repository.");
+    expect(defaultLandMode(a, gh)).toBe("merge");
+  });
+
+  it("a dirty file in the project folder that landing writes blocks the merge, without ever saying stash", () => {
+    const a = landAvailability(preview({ merge: { kind: "dirty_base", files: ["README.md"] } }), { state: "ready", detail: "" });
+    expect(a.merge).toBe("README.md has uncommitted changes in the project folder (main).");
+    expect(a.merge).not.toMatch(/stash/i);
   });
 });
 

@@ -28,6 +28,10 @@ pub struct WorktreeCreateResult {
     pub worktree_path: String,
     pub branch_name: String,
     pub is_main_worktree: bool,
+    /// Something went wrong that did not stop the worktree from being made
+    /// (a hook that failed after git checked it out), in words.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 /// Prefix of the error `create_worktree` returns when the branch is already
@@ -414,11 +418,12 @@ pub fn attach_existing_worktree(
         worktree_path: path,
         branch_name: branch_name.to_string(),
         is_main_worktree: is_main,
+        warning: None,
     })
 }
 
 /// First free `hermes-archive/<branch>` name (then `-2`, `-3`, ...).
-fn free_archive_branch_name(repo: &Repository, branch: &str) -> String {
+pub(crate) fn free_archive_branch_name(repo: &Repository, branch: &str) -> String {
     let stem = branch.strip_prefix("hermes/").unwrap_or(branch);
     let base = format!("hermes-archive/{}", stem);
     // Free in letter case too: on macOS and Windows `hermes-archive/Fix`
@@ -457,6 +462,24 @@ pub fn commit_worktree_changes(
     target: CommitTarget,
     skip: &dyn Fn(&str) -> bool,
 ) -> Result<CommitOutcome, String> {
+    commit_worktree_changes_on(worktree_path, message, target, skip, None)
+}
+
+/// `commit_worktree_changes`, refusing (and changing nothing) when the
+/// worktree is no longer on `expected_branch`: the close dialog names the
+/// branch it commits to, and the commit must land exactly there.
+///
+/// The commit is made by `git commit` itself, so the repository's hooks run
+/// and its signing settings apply; a hook that refuses comes back as a
+/// `HOOK_REFUSED:` error and the index is put back as it was.
+pub fn commit_worktree_changes_on(
+    worktree_path: &str,
+    message: &str,
+    target: CommitTarget,
+    skip: &dyn Fn(&str) -> bool,
+    expected_branch: Option<&str>,
+) -> Result<CommitOutcome, String> {
+    let dir = Path::new(worktree_path);
     let repo = Repository::open(worktree_path)
         .map_err(|e| format!("Failed to open '{}': {}", worktree_path, e))?;
     let head = repo
@@ -470,9 +493,31 @@ pub fn commit_worktree_changes(
     } else {
         None
     };
+    drop(head);
+    if let Some(expected) = expected_branch {
+        if branch.as_deref() != Some(expected) {
+            return Err(format!(
+                "This task's worktree is on {}, not {}; nothing was committed",
+                branch.as_deref().unwrap_or("no branch (detached HEAD)"),
+                expected
+            ));
+        }
+    }
     if target == CommitTarget::Session && branch.is_none() {
         return Err("This session is not on a branch (detached HEAD); nothing to commit to".into());
     }
+
+    // The index as it is now, put back if the commit does not happen.
+    let index_file = repo.path().join("index");
+    let index_before = std::fs::read(&index_file).ok();
+    let restore_index = || match &index_before {
+        Some(bytes) => {
+            let _ = std::fs::write(&index_file, bytes);
+        }
+        None => {
+            let _ = std::fs::remove_file(&index_file);
+        }
+    };
 
     let mut index = repo
         .index()
@@ -507,38 +552,72 @@ pub fn commit_worktree_changes(
     if files == 0 {
         return Err("There are no changes to commit".into());
     }
-
-    let sig = repo
-        .signature()
-        .or_else(|_| git2::Signature::now("Hermes", "hermes@localhost"))
-        .map_err(|e| format!("Failed to build commit author: {}", e))?;
+    index
+        .write()
+        .map_err(|e| format!("Failed to write index: {}", e))?;
 
     match target {
-        CommitTarget::Session => {
-            let id = repo
-                .commit(Some("HEAD"), &sig, &sig, message, &tree, &[&parent])
-                .map_err(|e| format!("Commit failed: {}", e))?;
-            // Keep the on-disk index in step with the new commit.
-            index
-                .write()
-                .map_err(|e| format!("Failed to write index: {}", e))?;
-            Ok(CommitOutcome {
+        CommitTarget::Session => match crate::git::safety::commit_staged(dir, message, None) {
+            Ok(id) => Ok(CommitOutcome {
                 branch: branch.unwrap_or_default(),
-                commit: id.to_string(),
+                commit: id,
                 files,
-            })
-        }
+            }),
+            Err(e) => {
+                restore_index();
+                Err(e)
+            }
+        },
         CommitTarget::Archive => {
+            // `git commit` commits on the branch HEAD names: point HEAD at a
+            // new archive branch cut from the same commit (no file moves),
+            // commit, then point HEAD back and put the index back.
             let name = free_archive_branch_name(&repo, branch.as_deref().unwrap_or("detached"));
-            let refname = format!("refs/heads/{}", name);
-            let id = repo
-                .commit(Some(&refname), &sig, &sig, message, &tree, &[&parent])
-                .map_err(|e| format!("Commit failed: {}", e))?;
-            Ok(CommitOutcome {
-                branch: name,
-                commit: id.to_string(),
-                files,
-            })
+            repo.branch(&name, &parent, false)
+                .map_err(|e| format!("Failed to create {}: {}", name, e))?;
+            let delete_archive = || {
+                if let Ok(mut b) = repo.find_branch(&name, BranchType::Local) {
+                    let _ = b.delete();
+                }
+            };
+            let attach = crate::git::safety::run(
+                crate::git::safety::git_in(dir).args([
+                    "symbolic-ref",
+                    "HEAD",
+                    &format!("refs/heads/{name}"),
+                ]),
+                None,
+            )?;
+            if !attach.ok {
+                delete_archive();
+                restore_index();
+                return Err(format!("Could not prepare {}: {}", name, attach.stderr));
+            }
+            // A snapshot on a hermes-archive/ branch, like a stash: the
+            // hooks that guard real branches do not run (that is what
+            // "Archive instead" after a refusing hook relies on).
+            let committed = crate::git::safety::commit_staged_with(dir, message, None, false);
+            let mut back = crate::git::safety::git_in(dir);
+            match &branch {
+                Some(b) => back.args(["symbolic-ref", "HEAD", &format!("refs/heads/{b}")]),
+                None => back.args(["update-ref", "--no-deref", "HEAD", &parent.id().to_string()]),
+            };
+            let restored = crate::git::safety::run(&mut back, None);
+            restore_index();
+            if !matches!(restored, Ok(ref r) if r.ok) {
+                log::warn!("[worktree] HEAD was not put back after archiving on {name}");
+            }
+            match committed {
+                Ok(id) => Ok(CommitOutcome {
+                    branch: name,
+                    commit: id,
+                    files,
+                }),
+                Err(e) => {
+                    delete_archive();
+                    Err(e)
+                }
+            }
         }
     }
 }
@@ -614,6 +693,7 @@ pub fn create_worktree_from(
                 worktree_path: wt_path_str.to_string(),
                 branch_name: local_name,
                 is_main_worktree: false,
+                warning: None,
             });
         }
 
@@ -651,8 +731,7 @@ pub fn create_worktree_from(
             }
 
             // Same commit — use the existing local branch directly
-            let mut cmd = crate::git::cli::git_command();
-            cmd.current_dir(repo_path);
+            let mut cmd = crate::git::safety::git_in(Path::new(repo_path));
             cmd.args(["worktree", "add", wt_path_str, &local_name]);
 
             let output = cmd
@@ -660,26 +739,26 @@ pub fn create_worktree_from(
                 .map_err(|e| format!("Failed to run 'git worktree add': {}", e))?;
 
             if !output.status.success() {
-                let stderr = String::from_utf8_lossy(&output.stderr);
+                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
                 if let Some(err) = branch_in_use_from_stderr(repo_path, &local_name, &stderr) {
                     return Err(err);
                 }
 
-                return Err(format!("git worktree add failed: {}", stderr.trim()));
+                return settle_failed_add(repo_path, &wt_path, &local_name, false, &stderr);
             }
 
             return Ok(WorktreeCreateResult {
                 worktree_path: wt_path_str.to_string(),
                 branch_name: local_name,
                 is_main_worktree: false,
+                warning: None,
             });
         }
 
         // No local branch exists — create one tracking the remote ref
         // `git worktree add -b <local_name> <path> <remote_ref>`
-        let mut cmd = crate::git::cli::git_command();
-        cmd.current_dir(repo_path);
+        let mut cmd = crate::git::safety::git_in(Path::new(repo_path));
         cmd.args([
             "worktree",
             "add",
@@ -694,14 +773,16 @@ pub fn create_worktree_from(
             .map_err(|e| format!("Failed to run 'git worktree add': {}", e))?;
 
         if !output.status.success() {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            return Err(format!("git worktree add failed: {}", stderr.trim()));
+            let stderr = String::from_utf8_lossy(&output.stderr).to_string();
+            // git made the branch itself (-b): it was not there before.
+            return settle_failed_add(repo_path, &wt_path, &local_name, true, &stderr);
         }
 
         return Ok(WorktreeCreateResult {
             worktree_path: wt_path_str.to_string(),
             branch_name: local_name,
             is_main_worktree: false,
+            warning: None,
         });
     }
 
@@ -718,6 +799,7 @@ pub fn create_worktree_from(
             worktree_path: wt_path_str.to_string(),
             branch_name: branch_name.to_string(),
             is_main_worktree: false,
+            warning: None,
         });
     }
 
@@ -726,6 +808,7 @@ pub fn create_worktree_from(
     // `git worktree add … Develop` would check out `develop`, and the
     // session's commits would move it. An existing branch is used only when
     // it was chosen as one, under its exact name.
+    let mut created_branch = false;
     match local_branch_clash(&repo, branch_name) {
         Some(clash @ (BranchClash::Case(_) | BranchClash::Folder(_))) => {
             return Err(branch_clash_error(branch_name, &clash));
@@ -748,22 +831,26 @@ pub fn create_worktree_from(
                     .find_branch(base, BranchType::Local)
                     .map_err(|e| format!("Base branch '{}' not found: {}", base, e))?
                     .into_reference(),
-                None => repo
-                    .head()
-                    .map_err(|e| format!("Failed to get HEAD: {}", e))?,
+                None => repo.head().map_err(|e| {
+                    if e.code() == git2::ErrorCode::UnbornBranch {
+                        no_commits_yet(repo_path)
+                    } else {
+                        format!("Failed to get HEAD: {}", plain_git2_error(&e))
+                    }
+                })?,
             };
             let commit = base
                 .peel_to_commit()
-                .map_err(|e| format!("Failed to resolve base commit: {}", e))?;
+                .map_err(|e| format!("Failed to resolve base commit: {}", plain_git2_error(&e)))?;
             repo.branch(branch_name, &commit, false)
-                .map_err(|e| format!("Failed to create branch '{}': {}", branch_name, e))?;
+                .map_err(|e| branch_create_error(branch_name, &e))?;
+            created_branch = true;
         }
         None => {}
     }
 
-    // Build the `git worktree add` command
-    let mut cmd = crate::git::cli::git_command();
-    cmd.current_dir(repo_path);
+    // Build the `git worktree add` command (hooks get the login shell's PATH)
+    let mut cmd = crate::git::safety::git_in(Path::new(repo_path));
     cmd.args(["worktree", "add", wt_path_str, branch_name]);
 
     let output = cmd
@@ -771,22 +858,191 @@ pub fn create_worktree_from(
         .map_err(|e| format!("Failed to run 'git worktree add': {}", e))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = String::from_utf8_lossy(&output.stderr).to_string();
 
         // The branch is already checked out somewhere else. Never hand back
         // that other checkout: the caller must ask the user what to do.
         if let Some(err) = branch_in_use_from_stderr(repo_path, branch_name, &stderr) {
+            if created_branch {
+                delete_branch_quietly(repo_path, branch_name);
+            }
             return Err(err);
         }
 
-        return Err(format!("git worktree add failed: {}", stderr.trim()));
+        return settle_failed_add(repo_path, &wt_path, branch_name, created_branch, &stderr);
     }
 
     Ok(WorktreeCreateResult {
         worktree_path: wt_path_str.to_string(),
         branch_name: branch_name.to_string(),
         is_main_worktree: false,
+        warning: None,
     })
+}
+
+/// The git config key that keeps the branch a task branch was cut from.
+fn base_branch_key(branch: &str) -> String {
+    format!("branch.{branch}.hermesBase")
+}
+
+/// Remember, in the repository's own config, that `branch` was cut from
+/// `base`: it survives the session's record (a restored or re-linked
+/// worktree), and goes with the branch when git deletes it.
+pub fn record_base_branch(repo_path: &str, branch: &str, base: &str) -> Result<(), String> {
+    let repo = Repository::open(repo_path).map_err(|e| plain_git2_error(&e))?;
+    let mut cfg = repo.config().map_err(|e| plain_git2_error(&e))?;
+    cfg.set_str(&base_branch_key(branch), base)
+        .map_err(|e| plain_git2_error(&e))
+}
+
+/// The branch `branch` was cut from, as `record_base_branch` kept it.
+pub fn recorded_base_branch(repo_path: &str, branch: &str) -> Option<String> {
+    let repo = Repository::open(repo_path).ok()?;
+    let cfg = repo.config().ok()?.snapshot().ok()?;
+    cfg.get_string(&base_branch_key(branch))
+        .ok()
+        .filter(|b| !b.is_empty())
+}
+
+/// "<folder> has no commits yet…": a worktree needs a commit to start from.
+pub fn no_commits_yet(repo_path: &str) -> String {
+    let name = Path::new(repo_path)
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| repo_path.to_string());
+    format!("{name} has no commits yet. Make a first commit, or continue without isolation.")
+}
+
+/// A libgit2 error as a sentence: its message without the class and code
+/// details (`; class=Reference (4); code=InvalidSpec (-12)`).
+pub fn plain_git2_error(e: &git2::Error) -> String {
+    let msg = e.message().trim();
+    let msg = msg.split("; class=").next().unwrap_or(msg).trim();
+    let mut s = msg.to_string();
+    if let Some(first) = s.get(..1) {
+        s = first.to_uppercase() + &s[1..];
+    }
+    s
+}
+
+/// Why `branch` could not be created, in words.
+fn branch_create_error(branch: &str, e: &git2::Error) -> String {
+    match e.code() {
+        git2::ErrorCode::InvalidSpec => format!("{branch} is not a name git accepts for a branch."),
+        git2::ErrorCode::Exists => format!("A branch named {branch} already exists."),
+        git2::ErrorCode::Locked => {
+            "The repository is busy (another git command holds its lock). Try again in a moment."
+                .to_string()
+        }
+        _ => format!(
+            "Could not create the branch {branch}: {}",
+            plain_git2_error(e)
+        ),
+    }
+}
+
+fn delete_branch_quietly(repo_path: &str, branch: &str) {
+    if let Ok(repo) = Repository::open(repo_path) {
+        if let Ok(mut b) = repo.find_branch(branch, BranchType::Local) {
+            if let Err(e) = b.delete() {
+                log::warn!("[worktree] could not delete the branch {branch} this launch made: {e}");
+            }
+        }
+    }
+}
+
+/// Whether `dir` is a checkout of `branch` that git knows as a worktree.
+fn is_checkout_of(dir: &Path, branch: &str) -> bool {
+    let Ok(repo) = Repository::open(dir) else {
+        return false;
+    };
+    let Ok(head) = repo.head() else {
+        return false;
+    };
+    head.is_branch() && head.shorthand() == Some(branch) && repo.is_worktree()
+}
+
+/// The lines a hook printed, trimmed for a notice.
+fn hook_output(stderr: &str) -> String {
+    let lines: Vec<&str> = stderr
+        .lines()
+        .map(str::trim)
+        .filter(|l| {
+            !l.is_empty()
+                && !l.starts_with("Preparing worktree")
+                && !l.starts_with("HEAD is now at")
+        })
+        .collect();
+    let text = lines.join(" ");
+    if text.chars().count() > 400 {
+        format!("{}…", text.chars().take(400).collect::<String>())
+    } else {
+        text
+    }
+}
+
+/// `git worktree add` exited non-zero. When git still made the checkout on
+/// `branch` (a post-checkout hook failed after it), the session starts there
+/// with a warning that quotes the hook. Otherwise nothing is left behind:
+/// the folder git may have started goes, and so does the branch, if this
+/// call made it.
+fn settle_failed_add(
+    repo_path: &str,
+    wt_path: &Path,
+    branch: &str,
+    created_branch: bool,
+    stderr: &str,
+) -> Result<WorktreeCreateResult, String> {
+    if is_checkout_of(wt_path, branch) {
+        let said = hook_output(stderr);
+        log::warn!("[worktree] git made {branch} but exited non-zero: {said}");
+        return Ok(WorktreeCreateResult {
+            worktree_path: wt_path.to_string_lossy().to_string(),
+            branch_name: branch.to_string(),
+            is_main_worktree: false,
+            warning: Some(if said.is_empty() {
+                "git reported a problem after making this task's worktree (a hook failed); the worktree is ready.".to_string()
+            } else {
+                format!("A git hook failed after the worktree was made; the task started anyway. The hook said: {said}")
+            }),
+        });
+    }
+    // The folder did not exist before this call (an existing one is reused
+    // above), so whatever is there now was made by this attempt.
+    if wt_path.exists() {
+        let _ = crate::git::cli::git_command()
+            .current_dir(repo_path)
+            .args(["worktree", "remove", "--force"])
+            .arg(wt_path)
+            .output();
+        if wt_path.exists() && is_instance_worktree_path(&wt_path.to_string_lossy()) {
+            let _ = fs::remove_dir_all(wt_path);
+        }
+    }
+    let _ = crate::git::cli::git_command()
+        .current_dir(repo_path)
+        .args(["worktree", "prune"])
+        .output();
+    if created_branch {
+        delete_branch_quietly(repo_path, branch);
+    }
+    Err(describe_add_failure(branch, stderr))
+}
+
+/// What a failed `git worktree add` means, in words.
+fn describe_add_failure(branch: &str, stderr: &str) -> String {
+    let lower = stderr.to_lowercase();
+    if lower.contains("file name too long") || lower.contains("filename too long") {
+        return "This name is too long for a worktree folder (max ~200 characters).".to_string();
+    }
+    if lower.contains("is not a valid branch name") || lower.contains("invalid reference") {
+        return format!("{branch} is not a name git accepts for a branch.");
+    }
+    let said = hook_output(stderr);
+    let said = said
+        .trim_start_matches("fatal: ")
+        .trim_start_matches("error: ");
+    format!("Could not make a worktree for {branch}: {said}")
 }
 
 /// Remove a worktree for a session.
@@ -802,7 +1058,7 @@ pub fn create_worktree_from(
 /// repo root itself.
 pub fn remove_worktree(
     repo_path: &str,
-    _session_id: &str,
+    session_id: &str,
     worktree_path: &str,
 ) -> Result<(), String> {
     // ── SAFETY CHECKS ──────────────────────────────────────────────
@@ -840,6 +1096,25 @@ pub fn remove_worktree(
             return Err(format!(
                 "SAFETY: refusing to remove ancestor of repo root: '{}'",
                 worktree_path
+            ));
+        }
+    }
+
+    // ── SUBMODULES ─────────────────────────────────────────────────
+    // A submodule initialised inside this worktree keeps its git data in
+    // the worktree's own store (.git/worktrees/<wt>/modules/…), which goes
+    // with the worktree. Commits made there exist nowhere else: copy them
+    // to a store that stays first, and keep the worktree when that fails.
+    if Path::new(worktree_path).is_dir() {
+        let stranded = crate::git::safety::rescue_submodule_commits(
+            Path::new(repo_path),
+            Path::new(worktree_path),
+            session_id,
+        );
+        if !stranded.is_empty() {
+            return Err(crate::git::safety::stranded_message(
+                &stranded,
+                worktree_path,
             ));
         }
     }
@@ -2104,6 +2379,7 @@ mod tests {
             worktree_path: "/app/data/hermes-worktrees/hash/abc_main".to_string(),
             branch_name: "main".to_string(),
             is_main_worktree: false,
+            warning: None,
         };
         let json = serde_json::to_value(&result).unwrap();
         assert_eq!(json["branchName"], "main");
@@ -2854,5 +3130,363 @@ mod tests {
             free_archive_branch_name(&repo, "hermes/new"),
             "hermes-archive/new"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_failing_post_checkout_hook_still_gives_the_worktree_with_a_warning() {
+        use std::os::unix::fs::PermissionsExt;
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let hook = repo_dir.path().join(".git/hooks/post-checkout");
+        std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        std::fs::write(
+            &hook,
+            "#!/bin/sh\necho \"This repository is configured for Git LFS but 'git-lfs' was not found on your path.\" >&2\nexit 2\n",
+        )
+        .unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let wt = create_worktree(
+            app_data.path(),
+            repo_path,
+            "s1",
+            "hermes/assets",
+            true,
+            None,
+        )
+        .unwrap();
+        assert!(Path::new(&wt.worktree_path).join("README.md").exists());
+        assert_eq!(
+            git_out(&wt.worktree_path, &["branch", "--show-current"]),
+            "hermes/assets"
+        );
+        let warning = wt.warning.expect("a warning");
+        assert!(warning.contains("git-lfs' was not found"), "{warning}");
+    }
+
+    #[test]
+    fn the_base_branch_is_kept_with_the_branch_in_the_repository() {
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        git_out(repo_path, &["branch", "hermes/task-a"]);
+        assert_eq!(recorded_base_branch(repo_path, "hermes/task-a"), None);
+        record_base_branch(repo_path, "hermes/task-a", "develop").unwrap();
+        assert_eq!(
+            recorded_base_branch(repo_path, "hermes/task-a").as_deref(),
+            Some("develop")
+        );
+        assert_eq!(
+            git_out(repo_path, &["config", "branch.hermes/task-a.hermesBase"]),
+            "develop"
+        );
+    }
+
+    #[test]
+    fn a_failed_add_leaves_neither_a_folder_nor_the_branch_it_made() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        git_out(repo_path, &["branch", "hermes/made-here"]);
+        git_out(repo_path, &["branch", "hermes/was-there"]);
+        let path = app_data
+            .path()
+            .join("hermes-worktrees")
+            .join("x")
+            .join("never-made");
+        let err = settle_failed_add(
+            repo_path,
+            &path,
+            "hermes/made-here",
+            true,
+            "fatal: could not create work tree dir: Permission denied",
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "Could not make a worktree for hermes/made-here: could not create work tree dir: Permission denied"
+        );
+        assert_eq!(
+            git_out(repo_path, &["branch", "--list", "hermes/made-here"]),
+            ""
+        );
+        // A branch that existed before the attempt stays.
+        assert!(
+            settle_failed_add(repo_path, &path, "hermes/was-there", false, "fatal: x").is_err()
+        );
+        assert!(!git_out(repo_path, &["branch", "--list", "hermes/was-there"]).is_empty());
+    }
+
+    #[test]
+    fn a_name_too_long_for_a_folder_and_an_invalid_name_are_said_in_words() {
+        assert_eq!(
+            describe_add_failure(
+                "x",
+                "fatal: could not create directory '/a/b': File name too long"
+            ),
+            "This name is too long for a worktree folder (max ~200 characters)."
+        );
+        let repo_dir = create_test_repo();
+        let repo = Repository::open(repo_dir.path()).unwrap();
+        let head = repo.head().unwrap().peel_to_commit().unwrap();
+        let Err(e) = repo.branch("bad..name", &head, false) else {
+            panic!("bad..name was accepted")
+        };
+        assert_eq!(
+            branch_create_error("bad..name", &e),
+            "bad..name is not a name git accepts for a branch."
+        );
+        assert!(!plain_git2_error(&e).contains("class="));
+    }
+
+    #[test]
+    fn a_repository_with_no_commits_cannot_start_a_worktree_and_says_why() {
+        let app_data = create_test_app_data_dir();
+        let dir = TempDir::new().unwrap();
+        let repo = dir.path().join("fresh-repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(&repo)
+            .output()
+            .unwrap();
+        let err = create_worktree(
+            app_data.path(),
+            repo.to_str().unwrap(),
+            "s1",
+            "hermes/x",
+            true,
+            None,
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "fresh-repo has no commits yet. Make a first commit, or continue without isolation."
+        );
+        assert_eq!(git_out(repo.to_str().unwrap(), &["branch", "--list"]), "");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn closing_commits_through_git_so_a_refusing_hook_stops_it_and_changes_nothing() {
+        use std::os::unix::fs::PermissionsExt;
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let wt = dirty_worktree(app_data.path(), repo_path);
+        let hook = repo_dir.path().join(".git/hooks/pre-commit");
+        std::fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        std::fs::write(&hook, "#!/bin/sh\necho 'eslint: 3 problems' >&2\nexit 1\n").unwrap();
+        std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let before = git_out(repo_path, &["rev-parse", "hermes/task-a"]);
+        let status_before = git_out(&wt.worktree_path, &["status", "--porcelain"]);
+        let err =
+            commit_worktree_changes(&wt.worktree_path, "WIP", CommitTarget::Session, &|_| false)
+                .unwrap_err();
+        assert!(
+            err.starts_with(crate::git::safety::HOOK_REFUSED_PREFIX),
+            "{err}"
+        );
+        assert!(err.contains("eslint: 3 problems"));
+        assert_eq!(git_out(repo_path, &["rev-parse", "hermes/task-a"]), before);
+        assert_eq!(
+            git_out(&wt.worktree_path, &["status", "--porcelain"]),
+            status_before,
+            "the index is as it was"
+        );
+        // "Archive instead" keeps the work on a hermes-archive/ branch (a
+        // snapshot, like a stash: the hook guards the real branch), and
+        // HEAD, index and files are as they were.
+        let out =
+            commit_worktree_changes(&wt.worktree_path, "WIP", CommitTarget::Archive, &|_| false)
+                .unwrap();
+        assert_eq!(out.branch, "hermes-archive/task-a");
+        assert_eq!(git_out(repo_path, &["rev-parse", "hermes/task-a"]), before);
+        assert_eq!(
+            git_out(&wt.worktree_path, &["branch", "--show-current"]),
+            "hermes/task-a"
+        );
+        assert_eq!(
+            git_out(&wt.worktree_path, &["status", "--porcelain"]),
+            status_before
+        );
+    }
+
+    #[test]
+    fn an_archive_that_fails_leaves_no_branch_and_puts_head_back() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let wt = dirty_worktree(app_data.path(), repo_path);
+        // An empty message makes `git commit` refuse.
+        assert!(
+            commit_worktree_changes(&wt.worktree_path, "", CommitTarget::Archive, &|_| false)
+                .is_err()
+        );
+        assert_eq!(
+            git_out(repo_path, &["branch", "--list", "hermes-archive/*"]),
+            ""
+        );
+        assert_eq!(
+            git_out(&wt.worktree_path, &["branch", "--show-current"]),
+            "hermes/task-a"
+        );
+    }
+
+    #[test]
+    fn a_commit_refuses_when_the_worktree_was_switched_to_another_branch() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let wt = dirty_worktree(app_data.path(), repo_path);
+        git_out(
+            &wt.worktree_path,
+            &["checkout", "-q", "-b", "feature/inbox"],
+        );
+        let inbox = git_out(repo_path, &["rev-parse", "feature/inbox"]);
+        let err = commit_worktree_changes_on(
+            &wt.worktree_path,
+            "WIP",
+            CommitTarget::Session,
+            &|_| false,
+            Some("hermes/task-a"),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            "This task's worktree is on feature/inbox, not hermes/task-a; nothing was committed"
+        );
+        assert_eq!(git_out(repo_path, &["rev-parse", "feature/inbox"]), inbox);
+        // Named on purpose, it lands there.
+        let out = commit_worktree_changes_on(
+            &wt.worktree_path,
+            "WIP",
+            CommitTarget::Session,
+            &|_| false,
+            Some("feature/inbox"),
+        )
+        .unwrap();
+        assert_eq!(out.branch, "feature/inbox");
+    }
+
+    #[test]
+    fn archive_keeps_head_index_and_files_as_they_were() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let wt = dirty_worktree(app_data.path(), repo_path);
+        let status_before = git_out(&wt.worktree_path, &["status", "--porcelain"]);
+        commit_worktree_changes(
+            &wt.worktree_path,
+            "archived",
+            CommitTarget::Archive,
+            &|_| false,
+        )
+        .unwrap();
+        assert_eq!(
+            git_out(&wt.worktree_path, &["branch", "--show-current"]),
+            "hermes/task-a"
+        );
+        assert_eq!(
+            git_out(&wt.worktree_path, &["status", "--porcelain"]),
+            status_before
+        );
+    }
+
+    /// A project with a submodule and a task worktree whose submodule has a
+    /// commit made only there.
+    fn worktree_with_submodule_commit(
+        app_data: &Path,
+    ) -> (TempDir, String, WorktreeCreateResult, String) {
+        let t = TempDir::new().unwrap();
+        let sh = |dir: &Path, args: &[&str]| {
+            let out = Command::new("git")
+                .args([
+                    "-c",
+                    "user.email=t@example.com",
+                    "-c",
+                    "user.name=T",
+                    "-c",
+                    "protocol.file.allow=always",
+                    "-c",
+                    "init.defaultBranch=main",
+                ])
+                .arg("-C")
+                .arg(dir)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).trim().to_string()
+        };
+        let lib = t.path().join("lib");
+        std::fs::create_dir_all(&lib).unwrap();
+        sh(&lib, &["init", "-q"]);
+        std::fs::write(lib.join("lib.txt"), "v1\n").unwrap();
+        sh(&lib, &["add", "."]);
+        sh(&lib, &["commit", "-q", "-m", "lib"]);
+        let sup = t.path().join("sup");
+        std::fs::create_dir_all(&sup).unwrap();
+        sh(&sup, &["init", "-q"]);
+        std::fs::write(sup.join("README.md"), "x\n").unwrap();
+        sh(&sup, &["add", "."]);
+        sh(&sup, &["commit", "-q", "-m", "init"]);
+        sh(
+            &sup,
+            &[
+                "submodule",
+                "add",
+                "-q",
+                lib.to_str().unwrap(),
+                "vendor/lib",
+            ],
+        );
+        sh(&sup, &["commit", "-q", "-m", "vendor"]);
+        let sup_path = sup.to_str().unwrap().to_string();
+        let wt = create_worktree(app_data, &sup_path, "s-sub", "hermes/sub", true, None).unwrap();
+        let w = Path::new(&wt.worktree_path).to_path_buf();
+        sh(&w, &["submodule", "update", "--init", "-q"]);
+        let sub = w.join("vendor/lib");
+        std::fs::write(sub.join("lib.txt"), "v2\n").unwrap();
+        sh(&sub, &["commit", "-q", "-am", "fix in lib"]);
+        let sha = sh(&sub, &["rev-parse", "HEAD"]);
+        (t, sup_path, wt, sha)
+    }
+
+    #[test]
+    fn removing_a_worktree_keeps_a_submodule_commit_made_only_there() {
+        let app_data = create_test_app_data_dir();
+        let (_t, sup, wt, sha) = worktree_with_submodule_commit(app_data.path());
+        remove_worktree(&sup, "s-sub", &wt.worktree_path).unwrap();
+        assert!(!Path::new(&wt.worktree_path).exists());
+        let store = Path::new(&sup).join(".git/modules/vendor/lib");
+        let kept = Repository::open(&store).unwrap();
+        assert!(
+            kept.find_commit(git2::Oid::from_str(&sha).unwrap()).is_ok(),
+            "the submodule commit survives"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_submodule_commit_that_cannot_be_kept_keeps_the_worktree() {
+        use std::os::unix::fs::PermissionsExt;
+        let app_data = create_test_app_data_dir();
+        let (_t, sup, wt, _sha) = worktree_with_submodule_commit(app_data.path());
+        // The store that would keep it is read-only.
+        let store = Path::new(&sup).join(".git/modules/vendor/lib/objects");
+        let mode = |p: &Path, m: u32| {
+            std::fs::set_permissions(p, std::fs::Permissions::from_mode(m)).unwrap()
+        };
+        mode(&store, 0o555);
+        let err = remove_worktree(&sup, "s-sub", &wt.worktree_path);
+        mode(&store, 0o755);
+        let err = err.unwrap_err();
+        assert!(err.starts_with("vendor/lib has 1 commit that exists only in this task's worktree. Kept the worktree at "), "{err}");
+        assert!(Path::new(&wt.worktree_path).exists());
     }
 }

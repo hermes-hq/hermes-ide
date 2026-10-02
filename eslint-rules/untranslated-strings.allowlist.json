@@ -25,7 +25,6 @@
     "src/components/CommandsPopover.tsx",
     "src/components/ContextPanel.tsx",
     "src/components/CostDashboard.tsx",
-    "src/components/DirtyWorktreeDialog.tsx",
     "src/components/EffortPicker.tsx",
     "src/components/EmbeddedSlashTerminal.tsx",
     "src/components/EmptyState.tsx",

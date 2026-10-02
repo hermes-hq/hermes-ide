@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type { Project, ProjectOrdered } from "../types/project";
 import type { ProjectContextInfo } from "../types/context";
+import { isAnyHermesWorktreePath } from "../utils/worktree";
 
 export function getProjects(): Promise<Project[]> {
   return invoke<Project[]>("get_registered_projects").then((projects) =>
@@ -8,9 +9,9 @@ export function getProjects(): Promise<Project[]> {
   );
 }
 
-/** Detect both current and legacy worktree path formats. */
+/** Detect both current and legacy worktree path formats (any separator). */
 export function isWorktreePath(path: string): boolean {
-  return path.includes("hermes-worktrees/") || path.includes(".hermes/worktrees/");
+  return isAnyHermesWorktreePath(path);
 }
 
 export function createProject(path: string, name: string | null): Promise<Project> {

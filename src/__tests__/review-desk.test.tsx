@@ -494,13 +494,12 @@ describe("ReviewDesk: Changes", () => {
     await open();
     const box = await waitFor(() => {
       const el = section().querySelector<HTMLTextAreaElement>("textarea.git-commit-textarea")!;
-      expect(el.value).toContain("2 turns:");
+      expect(el.value.split("\n")[0]).toBe("Task");
       return el;
     });
-    // Subject from the branch, then one line per turn (as the Land sheet drafts it).
-    expect(box.value.split("\n")[0]).toBe("Task");
-    expect(box.value).toContain("- Turn 1: 1 file, +1 -1 (src/app.js)");
-    expect(box.value).toContain("- Turn 2: 1 file, +1 -1 (package-lock.json)");
+    // One draft with the Land sheet (land/draft.ts): the subject, no turn
+    // list (that belongs to the pull request body).
+    expect(box.value).not.toContain("- Turn 1");
     expect(screen.getByText("Commit message (drafted from the turns)")).toBeInTheDocument();
     fireEvent.change(box, { target: { value: "Fix the flaky login test" } });
     fireEvent.click([...section().querySelectorAll("button")].find((b) => b.textContent === "Commit")!);

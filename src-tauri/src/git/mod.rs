@@ -4,6 +4,7 @@ pub mod disk_guard;
 pub mod fast_setup;
 pub mod journal;
 pub mod recipe;
+pub mod safety;
 pub mod watcher;
 pub mod worktree;
 
@@ -682,24 +683,15 @@ pub fn git_unstage(
         .map_err(|e| format!("DB lock error: {}", e))?;
     let project_path = resolve_worktree_path(&db, &session_id, &project_id)?;
     drop(db);
-    let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
 
-    // `reset_default` resets index entries to match the given commit
-    // (libgit2's equivalent of `git reset` for paths).  The target
-    // argument must be peelable to a commit — passing the HEAD's tree
-    // (as we did pre-1.1.15) tripped libgit2's peel-to-commit check
-    // with: "git_object … can not be successfully peeled into a commit".
-    // Use the HEAD commit itself; trees are not commitish.
-    let head_commit = repo.head().and_then(|h| h.peel_to_commit()).ok();
-
-    if paths.len() == 1 && paths[0] == "." {
-        let all_paths: Vec<String> = vec!["*".to_string()];
-        repo.reset_default(head_commit.as_ref().map(|c| c.as_object()), &all_paths)
-            .map_err(|e| e.to_string())?;
-    } else {
-        repo.reset_default(head_commit.as_ref().map(|c| c.as_object()), &paths)
-            .map_err(|e| e.to_string())?;
+    // `git reset -- <paths>` with literal pathspecs: `pages/[id].tsx` is
+    // that file only (libgit2's reset_default treats it as a pattern).
+    for path in &paths {
+        if path != "." {
+            safe_join(&project_path, path)?;
+        }
     }
+    safety::unstage_paths(Path::new(&project_path), &paths)?;
 
     Ok(GitOperationResult {
         success: true,
@@ -723,16 +715,11 @@ pub fn git_discard_changes(
     drop(db);
     let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
 
-    let mut checkout_builder = git2::build::CheckoutBuilder::new();
-    checkout_builder.force();
-
     for path in &paths {
         safe_join(&project_path, path)?;
-        checkout_builder.path(path.as_str());
     }
-
-    repo.checkout_head(Some(&mut checkout_builder))
-        .map_err(|e| format!("Failed to discard changes: {}", e))?;
+    // Literal paths: discarding `pages/[id].tsx` never touches pages/i.tsx.
+    safety::discard_paths(&repo, &paths)?;
 
     Ok(GitOperationResult {
         success: true,
@@ -759,29 +746,26 @@ pub fn git_commit(
     let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
 
     // 3C: Use author overrides if provided, otherwise fall back to repo config
-    let sig = match (&author_name, &author_email) {
+    let author = match (&author_name, &author_email) {
         (Some(name), Some(email)) if !name.is_empty() && !email.is_empty() => {
-            git2::Signature::now(name, email).map_err(|e| e.to_string())?
+            Some((name.as_str(), email.as_str()))
         }
-        _ => repo.signature().map_err(|e| {
-            format!(
-                "Git user not configured. Run: git config --global user.name \"...\"; \
-                 git config --global user.email \"...\"\nError: {}",
-                e
-            )
-        })?,
+        _ => {
+            repo.signature().map_err(|e| {
+                format!(
+                    "Git user not configured. Run: git config --global user.name \"...\"; \
+                     git config --global user.email \"...\"\nError: {}",
+                    e
+                )
+            })?;
+            None
+        }
     };
+    drop(repo);
 
-    let mut index = repo.index().map_err(|e| e.to_string())?;
-    let tree_oid = index.write_tree().map_err(|e| e.to_string())?;
-    let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
-
-    let parent = repo.head().ok().and_then(|h| h.peel_to_commit().ok());
-
-    let parents: Vec<&git2::Commit> = parent.iter().collect();
-
-    repo.commit(Some("HEAD"), &sig, &sig, &message, &tree, &parents)
-        .map_err(|e| e.to_string())?;
+    // `git commit` itself: the repository's hooks run and its signing
+    // settings apply. A hook that refuses comes back as HOOK_REFUSED.
+    safety::commit_staged(Path::new(&project_path), &message, author)?;
 
     Ok(GitOperationResult {
         success: true,
@@ -898,16 +882,14 @@ pub async fn git_pull(
             });
         }
 
-        if merge_analysis.is_fast_forward() {
-            let refname = format!("refs/heads/{}", branch_name);
-            let mut reference = repo.find_reference(&refname).map_err(|e| e.to_string())?;
-            reference
-                .set_target(fetch_commit.id(), "fast-forward pull")
-                .map_err(|e| e.to_string())?;
-            repo.set_head(&refname).map_err(|e| e.to_string())?;
-            repo.checkout_head(Some(git2::build::CheckoutBuilder::default().force()))
-                .map_err(|e| e.to_string())?;
+        let target = fetch_commit.id().to_string();
+        let dir = Path::new(&project_path);
 
+        // Both paths go through the git CLI, which refuses rather than
+        // overwrite an uncommitted edit the incoming commits also change
+        // (a forced libgit2 checkout used to reset such files silently).
+        if merge_analysis.is_fast_forward() {
+            safety::fast_forward(dir, &target)?;
             return Ok(GitOperationResult {
                 success: true,
                 message: "Fast-forward pull complete".to_string(),
@@ -917,62 +899,20 @@ pub async fn git_pull(
 
         // Perform actual merge
         if merge_analysis.is_normal() {
-            let fetch_commit_obj = repo
-                .find_commit(fetch_commit.id())
-                .map_err(|e| e.to_string())?;
-
-            // Merge the fetched commit
-            let mut merge_opts = git2::MergeOptions::new();
-            let mut checkout_builder = git2::build::CheckoutBuilder::new();
-            checkout_builder.allow_conflicts(true);
-
-            repo.merge(
-                &[&fetch_commit],
-                Some(&mut merge_opts),
-                Some(&mut checkout_builder),
-            )
-            .map_err(|e| format!("Merge failed: {}", e))?;
-
-            // Check for conflicts
-            let index = repo.index().map_err(|e| e.to_string())?;
-            if index.has_conflicts() {
-                return Ok(GitOperationResult {
+            let msg = format!("Merge branch '{}' of {}", branch_name, remote_name);
+            return match safety::merge(dir, &target, &msg)? {
+                safety::MergeRun::Conflicts => Ok(GitOperationResult {
                     success: false,
                     message: "Pull complete but merge has conflicts. Resolve them to finish the merge."
                         .to_string(),
                     error: Some("Merge conflicts detected".to_string()),
-                });
-            }
-
-            // Auto-commit if no conflicts
-            let sig = repo.signature().map_err(|e| e.to_string())?;
-            let mut index = repo.index().map_err(|e| e.to_string())?;
-            let tree_oid = index.write_tree().map_err(|e| e.to_string())?;
-            let tree = repo.find_tree(tree_oid).map_err(|e| e.to_string())?;
-
-            let head_commit = repo
-                .head()
-                .and_then(|h| h.peel_to_commit())
-                .map_err(|e| e.to_string())?;
-
-            let msg = format!("Merge branch '{}' of {}", branch_name, remote_name);
-            repo.commit(
-                Some("HEAD"),
-                &sig,
-                &sig,
-                &msg,
-                &tree,
-                &[&head_commit, &fetch_commit_obj],
-            )
-            .map_err(|e| format!("Merge commit failed: {}", e))?;
-
-            repo.cleanup_state().map_err(|e| e.to_string())?;
-
-            return Ok(GitOperationResult {
-                success: true,
-                message: "Pull with merge complete".to_string(),
-                error: None,
-            });
+                }),
+                safety::MergeRun::Merged => Ok(GitOperationResult {
+                    success: true,
+                    message: "Pull with merge complete".to_string(),
+                    error: None,
+                }),
+            };
         }
 
         Err("Pull failed: unexpected merge analysis result".to_string())
@@ -1701,10 +1641,16 @@ pub fn git_delete_branch(
             .delete()
             .map_err(|e| format!("Failed to force delete '{}': {}", name, e))?;
     } else {
+        // Like `git branch -d`: a branch whose commits no other branch has
+        // is kept, and the person is asked (BRANCH_UNMERGED).
+        if let Some(unmerged) = safety::unmerged_commits(&repo, &name)? {
+            return Err(unmerged.error());
+        }
         branch.delete().map_err(|e| {
             format!(
-                "Failed to delete '{}': {}. Use force delete if unmerged.",
-                name, e
+                "Could not delete {}: {}",
+                name,
+                worktree::plain_git2_error(&e)
             )
         })?;
     }
@@ -2609,17 +2555,11 @@ pub fn git_abort_merge(
     if repo.state() != git2::RepositoryState::Merge {
         return Err("No merge in progress".to_string());
     }
+    drop(repo);
 
-    // Reset to HEAD
-    let head = repo
-        .head()
-        .and_then(|h| h.peel_to_commit())
-        .map_err(|e| format!("Cannot resolve HEAD: {}", e))?;
-    repo.reset(head.as_object(), git2::ResetType::Hard, None)
-        .map_err(|e| format!("Reset failed: {}", e))?;
-
-    repo.cleanup_state()
-        .map_err(|e| format!("Cleanup failed: {}", e))?;
+    // `git merge --abort`, not a hard reset: the files the merge changed go
+    // back, every other uncommitted edit stays. git's refusal is shown.
+    safety::abort_merge(Path::new(&project_path))?;
 
     Ok(GitOperationResult {
         success: true,
@@ -2923,6 +2863,21 @@ pub fn git_create_worktree(
         &intended_path.to_string_lossy(),
     );
 
+    // The branch a new branch is cut from: the launcher's base, else what
+    // the project folder has checked out right now. Land lands into it.
+    let cut_from: Option<String> = if create_branch && from_remote.is_none() {
+        base_branch.clone().or_else(|| {
+            Repository::open(&root_path).ok().and_then(|r| {
+                r.head()
+                    .ok()
+                    .filter(|h| h.is_branch())
+                    .and_then(|h| h.shorthand().map(str::to_string))
+            })
+        })
+    } else {
+        None
+    };
+
     // 2. Create the worktree. A branch that is checked out elsewhere comes
     //    back as a BRANCH_IN_USE error, enriched with who holds it.
     let result = worktree::create_worktree_from(
@@ -2957,6 +2912,18 @@ pub fn git_create_worktree(
         }
         return Err(format!("Failed to record worktree: {}", db_err));
     }
+    if let Some(base) = cut_from.as_deref().filter(|b| *b != result.branch_name) {
+        if let Err(e) = worktree::record_base_branch(&root_path, &result.branch_name, base) {
+            log::warn!("Could not keep the base branch in the repository config: {e}");
+        }
+        if let Err(e) = db.set_worktree_base_branch(&id, base) {
+            log::warn!(
+                "Could not record the base branch of {}: {}",
+                result.branch_name,
+                e
+            );
+        }
+    }
     drop(db);
 
     // Journal: mark CREATE as completed after successful creation + DB insert
@@ -2989,6 +2956,12 @@ fn describe_branch_in_use(state: &State<'_, AppState>, root_path: &str, err: Str
             .find(|row| worktree::same_dir(&row.worktree_path, &path))
             .map(|row| row.session_id)
     });
+    // A checkout in this Hermes' own worktree folder that no session uses
+    // is a leftover of ours (a launch that failed half-way), not "a
+    // checkout outside Hermes".
+    let leftover = session_id.is_none()
+        && !worktree::same_dir(&path, root_path)
+        && worktree::is_instance_worktree_path(&path);
     format!(
         "{}{}",
         worktree::BRANCH_IN_USE_PREFIX,
@@ -2997,6 +2970,7 @@ fn describe_branch_in_use(state: &State<'_, AppState>, root_path: &str, err: Str
             "path": path,
             "sessionId": session_id,
             "projectFolder": worktree::same_dir(&path, root_path),
+            "leftover": leftover,
         })
     )
 }
@@ -3142,6 +3116,8 @@ pub fn git_commit_worktree(
     project_id: String,
     message: String,
     target: worktree::CommitTarget,
+    // The branch the close dialog named: the commit lands there or nowhere.
+    expected_branch: Option<String>,
 ) -> Result<worktree::CommitOutcome, String> {
     let db = state
         .db
@@ -3167,9 +3143,187 @@ pub fn git_commit_worktree(
             "Another session works in this checkout; its changes are left for that session".into(),
         );
     }
-    worktree::commit_worktree_changes(&wt.worktree_path, &message, target, &|p| {
-        is_dirty_close_noise_file(p)
-    })
+    worktree::commit_worktree_changes_on(
+        &wt.worktree_path,
+        &message,
+        target,
+        &|p| is_dirty_close_noise_file(p),
+        expected_branch.as_deref(),
+    )
+}
+
+/// A worktree this Hermes made for `project_id` that no session uses any
+/// more: what the close flow saves from after it stopped the session (the
+/// session's link went first, so the close left the folder). Returns the
+/// project folder.
+fn unused_instance_worktree(
+    state: &State<'_, AppState>,
+    project_id: &str,
+    worktree_path: &str,
+) -> Result<String, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project = db
+        .get_project(project_id)
+        .map_err(|e| format!("Failed to look up project: {}", e))?
+        .ok_or_else(|| format!("Project '{}' not found", project_id))?;
+    let used = db
+        .get_all_session_worktrees()
+        .map_err(|e| format!("Failed to list worktrees: {}", e))?
+        .into_iter()
+        .any(|row| worktree::same_dir(&row.worktree_path, worktree_path));
+    drop(db);
+    if used {
+        return Err("A session still works in that checkout".into());
+    }
+    if !worktree::is_instance_worktree_path(worktree_path) {
+        return Err("That checkout was not made by this Hermes".into());
+    }
+    let same_repo = Repository::open(worktree_path)
+        .ok()
+        .zip(Repository::open(&project.path).ok())
+        .map(|(w, p)| {
+            std::fs::canonicalize(w.commondir()).ok() == std::fs::canonicalize(p.commondir()).ok()
+        })
+        .unwrap_or(false);
+    if !same_repo {
+        return Err("That checkout does not belong to this project".into());
+    }
+    Ok(project.path)
+}
+
+/// Close flow, after the session was stopped: commit the uncommitted work
+/// of its (now unlinked) worktree on `expected_branch` ("session") or on a
+/// new hermes-archive/ branch ("archive"). Nothing to commit is not an
+/// error here: the outcome is then None.
+#[tauri::command]
+pub fn git_commit_kept_worktree(
+    state: State<'_, AppState>,
+    project_id: String,
+    worktree_path: String,
+    message: String,
+    target: worktree::CommitTarget,
+    expected_branch: Option<String>,
+) -> Result<Option<worktree::CommitOutcome>, String> {
+    unused_instance_worktree(&state, &project_id, &worktree_path)?;
+    match worktree::commit_worktree_changes_on(
+        &worktree_path,
+        &message,
+        target,
+        &|p| is_dirty_close_noise_file(p),
+        expected_branch.as_deref(),
+    ) {
+        Ok(out) => Ok(Some(out)),
+        Err(e) if e == "There are no changes to commit" => Ok(None),
+        Err(e) => Err(e),
+    }
+}
+
+/// Close flow, after the session was stopped: keep a detached HEAD's
+/// commits (and, with `message`, the uncommitted changes too) on a new
+/// `hermes-archive/<branch>-detached` branch. Returns the branch.
+#[tauri::command]
+pub fn git_save_kept_detached_head(
+    state: State<'_, AppState>,
+    project_id: String,
+    worktree_path: String,
+    recorded_branch: Option<String>,
+    message: Option<String>,
+) -> Result<String, String> {
+    unused_instance_worktree(&state, &project_id, &worktree_path)?;
+    let name = safety::save_detached_head(Path::new(&worktree_path), recorded_branch.as_deref())?;
+    if let Some(message) = message {
+        match worktree::commit_worktree_changes_on(
+            &worktree_path,
+            &message,
+            worktree::CommitTarget::Session,
+            &|p| is_dirty_close_noise_file(p),
+            Some(&name),
+        ) {
+            Ok(_) => {}
+            Err(e) if e == "There are no changes to commit" => {}
+            Err(e) => return Err(e),
+        }
+    }
+    Ok(name)
+}
+
+/// Close dialog: "Keep the worktree". The session's link to its worktree
+/// goes, so closing the session leaves the folder (and its branch) on disk.
+/// Returns the folder that is kept.
+#[tauri::command]
+pub fn git_keep_worktree(
+    state: State<'_, AppState>,
+    session_id: String,
+    project_id: String,
+) -> Result<String, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let Some(row) = db
+        .get_worktree_by_session_and_project(&session_id, &project_id)
+        .map_err(|e| format!("Failed to look up worktree: {}", e))?
+    else {
+        return Err("This session has no worktree of its own".into());
+    };
+    db.delete_session_worktree(&row.id)?;
+    log::info!(
+        "[worktree] kept {} on close of session {}",
+        row.worktree_path,
+        session_id
+    );
+    Ok(row.worktree_path)
+}
+
+/// Branch In Use → "Remove it and retry": remove a worktree this Hermes made
+/// that no session uses any more (a launch that failed half-way, or a crash
+/// before its record was written). Refuses anything else.
+#[tauri::command]
+pub fn git_remove_leftover_worktree(
+    state: State<'_, AppState>,
+    project_id: String,
+    worktree_path: String,
+    // The session the folder belonged to (names the refs that keep any
+    // submodule commits); None for a leftover of a failed launch.
+    session_id: Option<String>,
+    // The uncommitted work was just archived on a hermes-archive/ branch:
+    // what is still uncommitted in the folder is that saved copy.
+    archived: Option<bool>,
+) -> Result<(), String> {
+    let project_path = unused_instance_worktree(&state, &project_id, &worktree_path)
+        .map_err(|e| format!("{e}; it was not removed"))?;
+    // Work in it is never thrown away from here.
+    if let Ok(repo) = Repository::open(&worktree_path) {
+        let mut opts = StatusOptions::new();
+        opts.include_untracked(true).include_ignored(false);
+        let dirty = !archived.unwrap_or(false)
+            && repo
+                .statuses(Some(&mut opts))
+                .map(|s| {
+                    s.iter().any(|e| {
+                        !e.status().is_empty() && !is_dirty_close_noise_file(e.path().unwrap_or(""))
+                    })
+                })
+                .unwrap_or(true);
+        let lost = safety::head_state(Path::new(&worktree_path))
+            .map(|h| h.lost_commits > 0)
+            .unwrap_or(false);
+        if dirty || lost {
+            return Err(format!(
+                "The leftover worktree at {worktree_path} has work in it that is on no branch; it was kept. Open it in a terminal to keep or remove that work."
+            ));
+        }
+    }
+    worktree::remove_worktree(
+        &project_path,
+        session_id.as_deref().unwrap_or("leftover"),
+        &worktree_path,
+    )?;
+    let _ = worktree::cleanup_stale_worktrees(&project_path);
+    Ok(())
 }
 
 #[tauri::command]
@@ -3603,6 +3757,10 @@ pub fn git_is_git_repo(state: State<'_, AppState>, project_id: String) -> Result
 pub struct WorktreeChanges {
     pub has_changes: bool,
     pub files: Vec<WorktreeChangedFile>,
+    /// The branch HEAD is really on, a detached HEAD's commits that no
+    /// branch has, an operation in progress, and submodules with changes
+    /// inside: what the close dialog must know besides the files.
+    pub head: Option<safety::HeadState>,
 }
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -3678,9 +3836,38 @@ pub fn git_worktree_has_changes(
         });
     }
 
+    let head = safety::head_state(Path::new(&project_path)).ok();
+    // A submodule whose only change is inside it (edits not committed in
+    // the submodule) cannot be committed from here: it is listed on its
+    // own (head.dirtySubmodules), not as a file to commit — unless its
+    // recorded commit changed too.
+    if let Some(h) = &head {
+        if !h.dirty_submodules.is_empty() {
+            let moved: HashSet<String> = repo
+                .submodules()
+                .map(|subs| {
+                    subs.iter()
+                        .filter_map(|sm| {
+                            let st = repo
+                                .submodule_status(sm.name()?, git2::SubmoduleIgnore::None)
+                                .ok()?;
+                            st.intersects(
+                                git2::SubmoduleStatus::WD_MODIFIED
+                                    | git2::SubmoduleStatus::INDEX_MODIFIED,
+                            )
+                            .then(|| sm.path().to_string_lossy().replace('\\', "/"))
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            files.retain(|f| !h.dirty_submodules.contains(&f.path) || moved.contains(&f.path));
+        }
+    }
+
     Ok(WorktreeChanges {
         has_changes: !files.is_empty(),
         files,
+        head,
     })
 }
 

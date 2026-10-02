@@ -39,7 +39,7 @@ import {
 } from "../utils/sessionModePref";
 import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api/ssh";
 import type { PermissionMode, SessionMode, TmuxSessionEntry } from "../types/session";
-import { isGitRepo as checkIsGitRepo } from "../api/git";
+import { isGitRepo as checkIsGitRepo, gitListBranchesForProject } from "../api/git";
 import { LANG_COLORS } from "../utils/langColors";
 import { SessionBranchSelector, type BranchDraft } from "./SessionBranchSelector";
 import { isFeatureFlagEnabled } from "../featureFlags";
@@ -225,6 +225,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // Branch isolation — per-project
   type BranchSelection = { branch: string; createNew: boolean; fromRemote?: string };
   const [gitProjectIds, setGitProjectIds] = useState<string[]>([]);
+  /** Git projects with no commits yet (no branch to cut a task's branch from). */
+  const [unbornProjectIds, setUnbornProjectIds] = useState<string[]>([]);
   const [checkingGit, setCheckingGit] = useState(false);
   // The selection the git check last answered for (see gitCheckPending).
   const [gitCheckedFor, setGitCheckedFor] = useState<readonly string[] | null>(null);
@@ -524,9 +526,22 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
           .catch(() => ({ projectId, isGit: false }))
       )
     )
-      .then((results) => {
+      .then(async (results) => {
         if (cancelled) return;
         const gitIds = results.filter((r) => r.isGit).map((r) => r.projectId);
+        // A repository with no commits yet has no local branch: there is
+        // nothing to cut a task's branch from.
+        const unborn = (
+          await Promise.all(
+            gitIds.map((id) =>
+              gitListBranchesForProject(id)
+                .then((all) => (all.some((b) => !b.is_remote) ? null : id))
+                .catch(() => null),
+            ),
+          )
+        ).filter((id): id is string => id !== null);
+        if (cancelled) return;
+        setUnbornProjectIds(unborn);
         setGitProjectIds(gitIds);
         setGitCheckedFor(selectedProjectIds);
         setBranchSelections((prev) => {
@@ -551,6 +566,10 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // worktree).
   const gitCheckPending =
     checkingGit || (selectedProjectIds.length > 0 && gitCheckedFor !== selectedProjectIds);
+  /** Names of the chosen repositories with no commits yet. */
+  const unbornSelected = selectedProjectIds
+    .filter((id) => unbornProjectIds.includes(id))
+    .map((id) => allProjects.find((r) => r.id === id)?.name || id);
 
   const filtered = useMemo(() => {
     if (!query) return allProjects;
@@ -1244,18 +1263,31 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 })}
               </div>
             </div>
+            {unbornSelected.length > 0 && (
+              <div className="session-creator-unborn" role="note">
+                {unbornSelected.map((name) => (
+                  <div key={name} className="session-creator-unborn-row">{t("session.noCommitsYet", { name })}</div>
+                ))}
+              </div>
+            )}
             <div className="session-creator-footer-actions">
               <Button className="session-creator-btn-secondary" onClick={goBack}>
                 {t("common.back")}
               </Button>
-              <Button className="session-creator-btn-secondary" onClick={handleBranchSkipped}>
+              {/* No commits yet: isolation cannot work, so going on without it is the way forward. */}
+              <Button
+                variant={unbornSelected.length > 0 ? "primary" : "secondary"}
+                className={unbornSelected.length > 0 ? "session-creator-btn-primary session-creator-btn-skip" : "session-creator-btn-secondary session-creator-btn-skip"}
+                onClick={handleBranchSkipped}
+              >
                 {t("session.continueWithoutIsolation")}
               </Button>
               <Button
-                variant="primary"
-                className="session-creator-btn-primary"
+                variant={unbornSelected.length > 0 ? "secondary" : "primary"}
+                className={unbornSelected.length > 0 ? "session-creator-btn-secondary session-creator-btn-continue" : "session-creator-btn-primary session-creator-btn-continue"}
                 onClick={continueFromBranchStep}
-                disabled={!!branchDraft && !branchDraft.ok}
+                disabled={(!!branchDraft && !branchDraft.ok) || unbornSelected.length > 0}
+                title={unbornSelected.length > 0 ? t("session.noCommitsYet", { name: unbornSelected[0] }) : undefined}
               >
                 {t("common.continue")}
               </Button>
@@ -1678,7 +1710,11 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                       {mode === "agent" ? `${t("session.projectContext")}:` : (isShellOnly ? t("session.folder") : t("session.folders"))}
                     </span>
                     <span className="session-creator-summary-value">
-                      {selectedProjectNames.length > 0 ? selectedProjectNames.join(", ") : t("common.none")}
+                      {selectedProjectNames.length > 0
+                        ? selectedProjectNames
+                            .map((n) => (unbornSelected.includes(n) ? t("session.folderNoCommits", { name: n }) : n))
+                            .join(", ")
+                        : t("common.none")}
                     </span>
                   </div>
                   {Object.keys(branchSelections).length > 0 && (

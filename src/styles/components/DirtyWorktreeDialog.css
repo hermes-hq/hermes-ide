@@ -218,3 +218,27 @@
   gap: var(--space-2);
   justify-content: flex-end;
 }
+
+/* ─── Notes and per-project questions ─────────────────────────────── */
+
+.dirty-wt-note {
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  margin: 0 0 var(--space-2) 0;
+  line-height: var(--leading-normal);
+}
+
+.dirty-wt-row {
+  font-size: var(--text-sm);
+  color: var(--text-0);
+  line-height: var(--leading-normal);
+  margin: 0 0 var(--space-1) 0;
+  padding: var(--space-1) var(--space-2);
+  background: var(--bg-2);
+  border-left: calc(var(--space-1) / 2) solid var(--yellow);
+  border-radius: var(--radius);
+}
+
+.dirty-wt-row--check-failed {
+  border-left-color: var(--red);
+}

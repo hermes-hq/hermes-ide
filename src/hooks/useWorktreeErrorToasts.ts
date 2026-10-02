@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import type { ToastStore } from "./useToastStore";
+import { plainGitError } from "../utils/gitErrors";
 
 /** Start of the disk guard's refusal (src-tauri/src/git/disk_guard.rs). */
 const LOW_DISK_PREFIX = "Not enough free disk space";
@@ -14,7 +15,9 @@ export function worktreeErrorToastMessage(errors: string[], fatal: boolean | und
 		const reason = lowDisk.slice(lowDisk.indexOf(LOW_DISK_PREFIX));
 		return fatal ? `Session was not created. ${reason}` : reason;
 	}
-	const details = errors.join("; ");
+	// Sentences, not libgit2 codes or ids (SessionContext already puts the
+	// project's name in front of each error).
+	const details = errors.map((e) => plainGitError(e)).join("; ");
 	return fatal
 		? `Session was not created: could not create a worktree for the selected branch. ${details}`
 		: `Some projects have no branch isolation (worktree creation failed): ${details}`;

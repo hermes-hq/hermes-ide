@@ -192,7 +192,8 @@ describe("what the sheet shows", () => {
     expect(document.querySelector(".land-sheet-diffstat")?.textContent).toContain("3 files +12 -4");
     await waitFor(() => expect(document.querySelector(".land-sheet-disk")?.textContent).toContain("5.0 MB (build output 4.0 MB)"));
     const message = (document.querySelector(".land-sheet-message") as HTMLTextAreaElement).value;
-    expect(message).toBe("Add search\n\n2 turns:\n- Turn 1: 2 files, +9 -1 (src/a.ts)\n- Turn 2: 1 file, +3 -3 (README.md)");
+    // The turns go to the pull request body; the commit names the plan and its checks.
+    expect(message).toBe("Add search\n\nDone-When: npm test");
   });
 
   it("says nothing about the branch when landing goes to main", async () => {
@@ -206,7 +207,7 @@ describe("what the sheet shows", () => {
     render(<I18nProvider><LandSheet sessionId={SID} projectId={PID} onClose={vi.fn()} /></I18nProvider>);
     await screen.findByText("Squash-merge into release-1 locally");
     expect(document.querySelector(".land-sheet-base-note")?.textContent).toBe(
-      "The project folder has release-1 checked out, so this lands on release-1. To land on your main branch, check it out in the project folder first.",
+      "The project folder has release-1 checked out, so this lands on release-1. To land on your main branch, pick it in Land into.",
     );
   });
 

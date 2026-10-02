@@ -1589,6 +1589,35 @@ impl Database {
         Ok(entries)
     }
 
+    /// The branch a task's worktree was cut from (the launcher's base), which
+    /// Land lands into unless told otherwise.
+    pub fn set_worktree_base_branch(&self, id: &str, base_branch: &str) -> Result<(), String> {
+        self.conn
+            .execute(
+                "UPDATE session_worktrees SET base_branch = ?1 WHERE id = ?2",
+                params![base_branch, id],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    }
+
+    pub fn get_worktree_base_branch(
+        &self,
+        session_id: &str,
+        project_id: &str,
+    ) -> Result<Option<String>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT base_branch FROM session_worktrees WHERE session_id = ?1 AND realm_id = ?2",
+            )
+            .map_err(|e| e.to_string())?;
+        let value: Option<Option<String>> = stmt
+            .query_row(params![session_id, project_id], |row| row.get(0))
+            .ok();
+        Ok(value.flatten().filter(|b| !b.is_empty()))
+    }
+
     pub fn update_worktree_branch(&self, id: &str, branch_name: &str) -> Result<(), String> {
         self.conn
             .execute(

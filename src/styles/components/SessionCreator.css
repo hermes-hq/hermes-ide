@@ -353,3 +353,15 @@
 
 /* The opening overlay's rules live in SessionCreatorOpeningOverlay.css so
  * the bundle has them before this modal mounts. */
+
+/* A chosen repository with no commits yet: no task branch can be made. */
+.session-creator-unborn {
+  margin: 0 var(--space-4) var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-left: calc(var(--space-1) / 2) solid var(--yellow);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  color: var(--text-0);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+}

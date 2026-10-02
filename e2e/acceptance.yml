@@ -457,6 +457,72 @@ features:
       FIX-branch-case-5:
         text: "The Branch In Use choice and the Git panel's New Branch check a new name against every local branch, letter case included, say which branch it is in words, and the choice offers that branch on purpose"
         scenarios: [FIX-branch-case.mjs, F09-honest-isolation.mjs, F09-isolation-edge-cases.mjs]
+  QA-git:
+    # Fixes from the git QA sweep (data safety first, then wording), not new
+    # 2.0 work and not behind a feature flag. Negative control (run by hand):
+    # a build of main before the fixes ends each scenario in RESULT: FAIL.
+    # Scenarios that need a POSIX shell (hooks, loops) or the session host
+    # run on macOS and Linux.
+    name: "Git operations, task worktrees and closing never lose work, and say what they do in plain words"
+    status: shipped
+    criteria:
+      QA-git-1:
+        text: "Pull keeps uncommitted edits the incoming commits do not touch, and stops (naming the file, never suggesting stash) when they would overwrite one"
+        scenarios: [QA-git-pull-keeps-uncommitted.mjs]
+      QA-git-2:
+        text: "A commit made inside a submodule of a task's worktree survives closing the task; edits inside a submodule are named and the worktree can be kept"
+        scenarios: ["QA-git-submodule-work-kept.mjs@darwin,linux"]
+      QA-git-3:
+        text: "Abort Merge asks first and keeps uncommitted edits the merge never touched"
+        scenarios: [QA-git-abort-merge-keeps-edits.mjs]
+      QA-git-4:
+        text: "Discard restores exactly the file it names, also when its name has [ ] * ?"
+        scenarios: [QA-git-discard-literal-path.mjs]
+      QA-git-5:
+        text: "The branch switcher never deletes a branch with commits no other branch has without asking, asks before moving a task's worktree, and closing commits to the branch the dialog names"
+        scenarios: [QA-git-branch-switcher.mjs]
+      QA-git-6:
+        text: "Land lands into the branch the task was started from, and warns when another base would bring that branch's commits"
+        scenarios: [QA-git-land-into-base.mjs]
+      QA-git-7:
+        text: "Commits on a detached HEAD are never deleted on close without asking, and can be saved on a hermes-archive branch"
+        scenarios: [QA-git-detached-commits-kept.mjs]
+      QA-git-8:
+        text: "A post-checkout hook that fails after git made the worktree starts the task with a warning that quotes it, and leaves nothing behind"
+        scenarios: ["QA-git-hook-failure-no-leftovers.mjs@darwin,linux"]
+      QA-git-9:
+        text: "When the terminal service dies, its sessions stay listed, ended, with their output and worktrees, one notice says so, and Restart brings them back"
+        scenarios: ["QA-git-host-crash-keeps-sessions.mjs@darwin,linux"]
+      QA-git-10:
+        text: "Close session? is a modal alert dialog: Enter on Cancel closes nothing, Escape cancels, Tab stays inside, focus returns to the ×"
+        scenarios: [QA-git-close-dialog-keyboard.mjs]
+      QA-git-11:
+        text: "A worktree whose changes cannot be checked is never deleted on close without asking"
+        scenarios: [QA-git-close-check-fails.mjs]
+      QA-git-12:
+        text: "Closing stops the task's program before saving its work, with no second confirmation"
+        scenarios: ["QA-git-close-while-agent-writes.mjs@darwin,linux"]
+      QA-git-13:
+        text: "Hermes' commits run the repository's hooks; a refusal is shown as the hook said it, with Archive instead"
+        scenarios: ["QA-git-commit-runs-hooks.mjs@darwin,linux"]
+      QA-git-14:
+        text: "A branch name git refuses leaves no branch behind and fails in words, without library codes or ids"
+        scenarios: [QA-git-branch-name-errors.mjs]
+      QA-git-15:
+        text: "Land never squash-merges over an uncommitted edit in the project folder, and names the file"
+        scenarios: [QA-git-land-into-dirty-folder.mjs]
+      QA-git-16:
+        text: "With the UI in German, the Land sheet, Uncommitted Changes and Branch In Use have no English left"
+        scenarios: [QA-git-german-dialogs.mjs]
+      QA-git-17:
+        text: "The Land sheet drafts the subject from the task, says only 'no remote' when there is none, asks before Archive stops an agent, and offers no pull request for a remote that is not on GitHub"
+        scenarios: ["QA-git-land-sheet-polish.mjs@darwin,linux"]
+      QA-git-18:
+        text: "Closing the session in front shows the session that becomes active"
+        scenarios: [QA-git-close-active-pane.mjs]
+      QA-git-19:
+        text: "A New Session in a repository with no commits goes ahead without isolation and says why"
+        scenarios: [QA-git-empty-repo-session.mjs]
   FIX-overlay-focus:
     # A bug fix, not new 2.0 work. Negative control (run by hand): a build of
     # main before the fix ends in RESULT: FAIL (the keyboard ends on <body>,

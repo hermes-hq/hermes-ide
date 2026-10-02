@@ -14,6 +14,48 @@ pub enum GhState {
     Ready,
     Missing,
     SignedOut,
+    /// The remote a pull request would go to is not on a GitHub host gh
+    /// knows (a local path, GitLab, Bitbucket, …).
+    NotGithub,
+}
+
+/// The host of a remote URL: `https://host/…`, `ssh://user@host:port/…`,
+/// `user@host:path` (scp style). None for a local path or `file://`.
+pub fn remote_host(url: &str) -> Option<String> {
+    let url = url.trim();
+    if let Some((scheme, rest)) = url.split_once("://") {
+        if scheme.eq_ignore_ascii_case("file") {
+            return None;
+        }
+        let authority = rest.split('/').next().unwrap_or("");
+        let host = authority.rsplit('@').next().unwrap_or("");
+        let host = host.split(':').next().unwrap_or("");
+        return (!host.is_empty()).then(|| host.to_lowercase());
+    }
+    // scp style: [user@]host:path — but not a Windows drive (C:\…) or a
+    // path that merely contains a colon after a slash.
+    let (before, _) = url.split_once(':')?;
+    if before.contains('/') || before.contains('\\') || before.len() <= 1 {
+        return None;
+    }
+    let host = before.rsplit('@').next().unwrap_or("");
+    (!host.is_empty()).then(|| host.to_lowercase())
+}
+
+/// The URL of `remote` in `repo_path`, as written in the configuration
+/// (before any `url.<base>.insteadOf` rewriting, which is how git fetches
+/// it, not what repository it names).
+pub fn remote_url(repo_path: &Path, remote: &str) -> Option<String> {
+    let repo = git2::Repository::open(repo_path).ok()?;
+    let cfg = repo.config().ok()?;
+    cfg.get_string(&format!("remote.{remote}.url"))
+        .ok()
+        .or_else(|| repo.find_remote(remote).ok()?.url().map(str::to_string))
+}
+
+/// "origin (<url>) is not a GitHub repository".
+pub fn not_github_message(remote: &str, url: &str) -> String {
+    format!("{remote} ({url}) is not a GitHub repository")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -173,14 +215,46 @@ fn first_line(s: &str) -> String {
         .to_string()
 }
 
-pub fn status(dir: &Path) -> GhStatus {
-    let Some(gh) = gh_command() else {
+/// Whether gh can open a pull request for `remote` of `dir`: installed,
+/// the remote on a GitHub host, and signed in to that host. A remote that
+/// is a local path, or on a host gh is not signed in to and that is not
+/// github.com, is `NotGithub`.
+pub fn status_for(dir: &Path, remote: Option<&str>) -> GhStatus {
+    status_for_with(gh_command(), dir, remote)
+}
+
+fn status_for_with(gh: Option<GhCommand>, dir: &Path, remote: Option<&str>) -> GhStatus {
+    let remote = remote.unwrap_or("origin");
+    let url = remote_url(dir, remote);
+    let host = url.as_deref().and_then(remote_host);
+    if let (Some(url), None) = (&url, &host) {
+        return GhStatus {
+            state: GhState::NotGithub,
+            detail: not_github_message(remote, url),
+        };
+    }
+    let Some(gh) = gh else {
         return GhStatus {
             state: GhState::Missing,
             detail: "GitHub CLI (gh) is not installed".into(),
         };
     };
-    match run(&gh, dir, &["auth", "status"], None) {
+    let Some(host) = host else {
+        // No remote at all: the sheet says so on its own.
+        return status_with(&gh, dir, &["auth", "status"]);
+    };
+    let st = status_with(&gh, dir, &["auth", "status", "--hostname", &host]);
+    if st.state == GhState::SignedOut && host != "github.com" && !host.ends_with(".github.com") {
+        return GhStatus {
+            state: GhState::NotGithub,
+            detail: not_github_message(remote, url.as_deref().unwrap_or_default()),
+        };
+    }
+    st
+}
+
+fn status_with(gh: &GhCommand, dir: &Path, args: &[&str]) -> GhStatus {
+    match run(gh, dir, args, None) {
         Ok(out) if out.code == 0 => GhStatus {
             state: GhState::Ready,
             detail: first_line(&format!("{}\n{}", out.stdout, out.stderr)),
@@ -236,6 +310,13 @@ pub fn create_pr(
         Some(body),
     )?;
     if out.code != 0 {
+        let said = format!("{}\n{}", out.stderr, out.stdout);
+        if said.contains("known GitHub host") || said.contains("not a GitHub repository") {
+            let remote = "origin";
+            if let Some(url) = remote_url(dir, remote) {
+                return Err(not_github_message(remote, &url));
+            }
+        }
         return Err(fail("gh could not open the pull request", &out));
     }
     out.stdout
@@ -460,6 +541,68 @@ mod tests {
             },
             log,
         )
+    }
+
+    #[test]
+    fn remote_hosts_are_read_from_every_url_shape() {
+        assert_eq!(
+            remote_host("https://github.com/a/b.git").as_deref(),
+            Some("github.com")
+        );
+        assert_eq!(
+            remote_host("git@github.com:a/b.git").as_deref(),
+            Some("github.com")
+        );
+        assert_eq!(
+            remote_host("ssh://git@gitlab.example.com:2222/a/b").as_deref(),
+            Some("gitlab.example.com")
+        );
+        assert_eq!(
+            remote_host("https://user:tok@GHE.Corp.example/a").as_deref(),
+            Some("ghe.corp.example")
+        );
+        assert_eq!(remote_host("/srv/git/repo.git"), None);
+        assert_eq!(remote_host("file:///srv/git/repo.git"), None);
+        assert_eq!(remote_host("C:\\repos\\x.git"), None);
+        assert_eq!(remote_host("../sibling.git"), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_remote_that_is_not_on_a_github_host_is_not_offered_a_pull_request() {
+        let dir = TempDir::new().unwrap();
+        let repo = dir.path().join("r");
+        fs::create_dir_all(&repo).unwrap();
+        let r = git2::Repository::init(&repo).unwrap();
+        // gh signed in to github.com only.
+        let (gh, _) = script_gh(
+            dir.path(),
+            "case \"$*\" in *github.com*) echo ok; exit 0;; *) echo 'not logged in' >&2; exit 1;; esac",
+        );
+        r.remote("origin", "/srv/git/local.git").unwrap();
+        let st = status_for_with(Some(gh.clone()), &repo, Some("origin"));
+        assert_eq!(st.state, GhState::NotGithub);
+        assert_eq!(
+            st.detail,
+            "origin (/srv/git/local.git) is not a GitHub repository"
+        );
+        r.remote_set_url("origin", "git@gitlab.example.com:team/x.git")
+            .unwrap();
+        assert_eq!(
+            status_for_with(Some(gh.clone()), &repo, Some("origin")).state,
+            GhState::NotGithub
+        );
+        r.remote_set_url("origin", "https://github.com/team/x.git")
+            .unwrap();
+        assert_eq!(
+            status_for_with(Some(gh.clone()), &repo, Some("origin")).state,
+            GhState::Ready
+        );
+        // Not installed still says so for a GitHub remote.
+        assert_eq!(
+            status_for_with(None, &repo, Some("origin")).state,
+            GhState::Missing
+        );
     }
 
     #[cfg(unix)]

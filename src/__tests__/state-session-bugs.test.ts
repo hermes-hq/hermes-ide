@@ -542,13 +542,16 @@ describe("INTEGRATION: Session lifecycle with layout management", () => {
     expect(collectPanes(state.layout.root!).length).toBe(1);
     expect(state.activeSessionId).not.toBeNull();
 
-    // Remove session s1
+    // Remove session s1: s2 becomes active AND is shown in the pane that
+    // showed s1 (LEAD-06: never the empty welcome page while the title and
+    // the list name s2 as active).
     state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s1" });
-    expect(state.layout.root).toBeNull();
     expect(state.activeSessionId).toBe("s2"); // Fallback to s2
+    expect(state.layout.root).toMatchObject({ type: "pane", sessionId: "s2" });
 
     // Remove session s2
     state = sessionReducer(state, { type: "SESSION_REMOVED", id: "s2" });
+    expect(state.layout.root).toBeNull();
     expect(state.activeSessionId).toBeNull();
     expect(Object.keys(state.sessions).length).toBe(0);
   });

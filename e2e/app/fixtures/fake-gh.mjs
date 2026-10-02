@@ -49,7 +49,11 @@ const cmd = `${args[0] ?? ""} ${args[1] ?? ""}`;
 
 if (cmd === "auth status") {
   if (state.signedIn === false) fail("You are not logged into any GitHub hosts. To log in, run: gh auth login");
-  say("github.com\n  ✓ Logged in to github.com account e2e-user (keyring)");
+  // `--hostname <host>`: signed in to github.com (and to state.hosts) only.
+  const at = args.indexOf("--hostname");
+  const host = at >= 0 ? args[at + 1] : "github.com";
+  if (host !== "github.com" && !(state.hosts ?? []).includes(host)) fail(`You are not logged into any accounts on ${host}`);
+  say(`${host}\n  ✓ Logged in to ${host} account e2e-user (keyring)`);
   process.exit(0);
 }
 if (state.signedIn === false) fail("To get started with GitHub CLI, please run:  gh auth login", 4);

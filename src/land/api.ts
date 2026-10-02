@@ -12,7 +12,9 @@ export type MergeCheck =
   | { kind: "clean" }
   | { kind: "conflict"; files: string[] }
   | { kind: "nothing_to_merge" }
-  | { kind: "no_base" };
+  | { kind: "no_base" }
+  /** The base's checkout has uncommitted changes in files landing writes. */
+  | { kind: "dirty_base"; files: string[] };
 
 export interface BaseState {
   name: string;
@@ -68,9 +70,15 @@ export interface LandPreview {
   worktreeToml: string | null;
   features: FeatureFile[];
   landings: LandRecord[];
+  /** The branch the task was started from, when Hermes recorded it. */
+  recordedBase?: string | null;
+  /** Local branches the work could land into. */
+  branches?: string[];
+  /** Landing into the chosen base would also bring the recorded base's own commits. */
+  baseMismatch?: { recorded: string; commits: number } | null;
 }
 
-export type GhState = "ready" | "missing" | "signed_out";
+export type GhState = "ready" | "missing" | "signed_out" | "not_github";
 
 export interface GhStatus {
   state: GhState;
@@ -83,6 +91,8 @@ export interface LandRequest {
   prTitle?: string;
   prBody?: string;
   label: string;
+  /** The branch to land into; omitted: the one the task was started from. */
+  base?: string;
 }
 
 export interface LandOutcome {
@@ -124,8 +134,8 @@ export interface CiLogFile {
   bytes: number;
 }
 
-export function landPreview(sessionId: string, projectId: string): Promise<LandPreview> {
-  return invoke<LandPreview>("land_preview", { sessionId, projectId });
+export function landPreview(sessionId: string, projectId: string, base?: string | null): Promise<LandPreview> {
+  return invoke<LandPreview>("land_preview", { sessionId, projectId, base: base ?? null });
 }
 
 export function landGhStatus(sessionId: string, projectId: string): Promise<GhStatus> {

@@ -28,8 +28,12 @@ import { loadLandTurns, type LandTurn } from "./turnSource";
 import { Button, CloseButton } from "../components/ui/Button";
 import { Checkbox, Radio } from "../components/ui/Choice";
 import { Textarea } from "../components/ui/Input";
+import { NativeSelect } from "../components/ui/Select";
+import { agentDisplayName, getAgent } from "../catalog/agentCatalog";
+import { parseHookRefusal } from "../utils/gitErrors";
 import {
   baseBranchNote,
+  baseMismatchNote,
   ciLogRequest,
   defaultLandMode,
   doneWhenCommands,
@@ -39,6 +43,7 @@ import {
   draftPrBody,
   formatBytes,
   landAvailability,
+  launchedTask,
   mergeNote,
   pickFeature,
   rebaseRequest,
@@ -99,25 +104,41 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
   const [checks, setChecks] = useState<PrCheck[] | null>(null);
   const [checksError, setChecksError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
+  /** The branch picked in "Land into"; null: the one the task was started from. */
+  const [baseChoice, setBaseChoice] = useState<string | null>(null);
+  /** The task as typed in the launcher, for the drafted message. */
+  const [task, setTask] = useState<{ task: string; doneWhen: string[] } | null>(null);
+  /** "Archive: stop … ?" is showing. */
+  const [confirmArchive, setConfirmArchive] = useState(false);
 
   // ── Load everything the sheet shows ────────────────────────────────
   useEffect(() => {
     let cancelled = false;
-    landPreview(sessionId, projectId)
-      .then((p) => {
-        if (cancelled) return;
-        setPreview(p);
-        getWorktreeUsage(p.worktreePath).then((u) => !cancelled && setUsage(u)).catch(() => {});
-      })
-      .catch((e) => !cancelled && setLoadError(errorText(e)));
     landGhStatus(sessionId, projectId)
       .then((g) => !cancelled && setGh(g))
       .catch((e) => !cancelled && setGh({ state: "missing", detail: errorText(e) }));
     loadLandTurns(sessionId).then((t) => !cancelled && setTurns(t));
+    launchedTask(sessionId).then((t) => !cancelled && setTask(t));
     return () => {
       cancelled = true;
     };
   }, [sessionId, projectId]);
+
+  // The preview, again for every base picked in "Land into".
+  useEffect(() => {
+    let cancelled = false;
+    landPreview(sessionId, projectId, baseChoice)
+      .then((p) => {
+        if (cancelled) return;
+        setLoadError(null);
+        setPreview(p);
+        getWorktreeUsage(p.worktreePath).then((u) => !cancelled && setUsage(u)).catch(() => {});
+      })
+      .catch((e) => !cancelled && setLoadError(errorText(e)));
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionId, projectId, baseChoice]);
 
   const feature = useMemo(() => (preview ? pickFeature(preview.features, preview.branch) : null), [preview]);
   const commands = useMemo(
@@ -131,9 +152,17 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
   const draftInput = useMemo(
     () =>
       preview
-        ? { branch: preview.branch, label: label.current, turns, feature, diffstat: preview.diffstat }
+        ? {
+            branch: preview.branch,
+            label: label.current,
+            turns,
+            feature,
+            diffstat: preview.diffstat,
+            task: task?.task ?? null,
+            doneWhen: commands.length > 0 ? commands : task?.doneWhen ?? [],
+          }
         : null,
-    [preview, turns, feature],
+    [preview, turns, feature, task, commands],
   );
   const prBody = useMemo(() => (draftInput ? draftPrBody(draftInput, commands) : ""), [draftInput, commands]);
   const available = preview ? landAvailability(preview, gh) : null;
@@ -196,13 +225,14 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
           message,
           prBody: chosen === "pr" ? prBody : undefined,
           label: label.current,
+          base: preview?.base?.name ?? baseChoice ?? undefined,
         });
         setOutcome(out);
         if (out.status === "landed" && archiveAfter && out.record) {
           try {
             await archiveNow(out.record.id);
           } catch (e) {
-            setActionError(`Landed, but not archived: ${errorText(e)}`);
+            setActionError(t("land.landedNotArchived", { error: errorText(e) }));
           }
         }
       } catch (e) {
@@ -211,10 +241,15 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
         setBusy(null);
       }
     },
-    [sessionId, projectId, message, prBody, archiveAfter, archiveNow],
+    [sessionId, projectId, message, prBody, archiveAfter, archiveNow, preview, baseChoice, t],
   );
 
+  // An agent at work in the session is stopped by archiving: ask first.
+  const agentName = session ? agentDisplayName(session) ?? getAgent(session.ai_provider)?.name ?? null : null;
+  const agentRunning = !!session && session.phase !== "destroyed" && (!!session.detected_agent || !!session.ai_provider);
+
   const archiveOnly = useCallback(async () => {
+    setConfirmArchive(false);
     setBusy("archive");
     setActionError(null);
     try {
@@ -242,12 +277,12 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
         }
         setUndone(out);
       } catch (e) {
-        setActionError(`Undo stopped: ${errorText(e)}`);
+        setActionError(t("land.undoStopped", { error: errorText(e) }));
       } finally {
         setBusy(null);
       }
     },
-    [createSession],
+    [createSession, t],
   );
 
   const landedRecord = outcome?.record ?? archived?.record ?? null;
@@ -279,14 +314,14 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
         const file = await landCiLog(landedRecord.id, check.name, check.link);
         // One line, pasted and never sent: the person presses Enter.
         await writeToSession(sessionId, utf8ToBase64(ciLogRequest(check.name, file.relativePath)));
-        setNote(`Saved the log to ${file.relativePath} and pasted a request into the terminal. Press Enter there to send it.`);
+        setNote(t("land.noteLogSent", { path: file.relativePath }));
       } catch (e) {
         setActionError(errorText(e));
       } finally {
         setBusy(null);
       }
     },
-    [landedRecord, sessionId],
+    [landedRecord, sessionId, t],
   );
 
   const askRebase = useCallback(
@@ -294,12 +329,12 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
       if (!preview?.base) return;
       try {
         await writeToSession(sessionId, utf8ToBase64(rebaseRequest(preview.base.name, files)));
-        setNote("Pasted a rebase request into the terminal. Press Enter there to send it.");
+        setNote(t("land.noteRebasePasted"));
       } catch (e) {
         setActionError(errorText(e));
       }
     },
-    [preview, sessionId],
+    [preview, sessionId, t],
   );
 
   const routeToPr = useCallback(() => {
@@ -317,8 +352,12 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
         ? preview.merge.files
         : null;
   const failing = doneWhen.kind === "failing";
-  const baseNote = baseBranchNote(preview?.base?.name ?? null);
+  const baseNote = baseBranchNote(preview?.base?.name ?? null, preview?.recordedBase ?? null);
+  const mismatchNote = baseMismatchNote(preview?.baseMismatch, preview?.base?.name ?? null);
   const showResult = !!(outcome && outcome.status !== "conflict") || !!archived || !!undone;
+  const baseOptions = preview
+    ? Array.from(new Set([...(preview.base ? [preview.base.name] : []), ...(preview.branches ?? [])]))
+    : [];
 
   return (
     <div className="land-sheet-overlay">
@@ -338,7 +377,27 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
         <div className="land-sheet-body">
           {loadError && <div className="land-sheet-error">{loadError}</div>}
           {!preview && !loadError && <div className="land-sheet-loading">{t("land.readingWorktree")}</div>}
+          {preview && !showResult && baseOptions.length > 0 && (
+            <label className="land-sheet-into">
+              <span className="land-sheet-into-label">{t("land.landInto")}</span>
+              <NativeSelect
+                id="land-sheet-base"
+                size="sm"
+                className="land-sheet-base-select"
+                value={preview.base?.name ?? ""}
+                disabled={busy !== null}
+                onChange={(e) => setBaseChoice(e.target.value || null)}
+              >
+                {baseOptions.map((b) => (
+                  <option key={b} value={b}>
+                    {b}
+                  </option>
+                ))}
+              </NativeSelect>
+            </label>
+          )}
           {baseNote && <div className="land-sheet-note land-sheet-base-note">{baseNote}</div>}
+          {mismatchNote && <div className="land-sheet-warning land-sheet-base-mismatch">{mismatchNote}</div>}
 
           {preview && (
             <div className="land-sheet-summary">
@@ -367,7 +426,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 <span className="land-sheet-stat-label">{t("land.statDisk")}</span>
                 <span className="land-sheet-stat-value">
                   {usage
-                    ? `${formatBytes(usage.total_bytes)}${usage.build_output_bytes > 0 ? ` (build output ${formatBytes(usage.build_output_bytes)})` : ""}`
+                    ? `${formatBytes(usage.total_bytes)}${usage.build_output_bytes > 0 ? ` ${t("land.buildOutput", { size: formatBytes(usage.build_output_bytes) })}` : ""}`
                     : "…"}
                 </span>
               </div>
@@ -399,7 +458,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 <details className="land-sheet-files">
                   <summary>
                     {t(preview.changedFiles.length === 1 ? "land.changedFileOne" : "land.changedFiles", { count: preview.changedFiles.length })}
-                    {preview.uncommittedFiles > 0 ? `, ${preview.uncommittedFiles} not committed yet` : ""}
+                    {preview.uncommittedFiles > 0 ? `, ${t("land.notCommittedYet", { count: preview.uncommittedFiles })}` : ""}
                   </summary>
                   <ul>
                     {preview.changedFiles.slice(0, 200).map((f) => (
@@ -417,22 +476,23 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                   mode="commit"
                   current={mode}
                   onPick={pick}
-                  title={`Commit on ${preview.branch}`}
+                  title={t("land.optCommit", { branch: preview.branch })}
                   reason={available?.commit ?? null}
                 />
                 <LandOption
                   mode="pr"
                   current={mode}
                   onPick={pick}
-                  title={`Commit, push${preview.remote ? ` to ${preview.remote}` : ""} and open a pull request`}
+                  title={preview.remote ? t("land.optPr", { remote: preview.remote }) : t("land.optPrNoRemote")}
                   reason={available?.pr ?? null}
                 >
-                  {gh?.state === "missing" && (
+                  {/* Only when a pull request could be opened once gh is ready (never with no remote, never for another host). */}
+                  {preview.remote && gh?.state === "missing" && (
                     <Button variant="link" size="sm" className="land-sheet-gh-link" onClick={() => void shellOpen(GH_INSTALL_URL)}>
                       {t("land.installGh")}
                     </Button>
                   )}
-                  {gh?.state === "signed_out" && (
+                  {preview.remote && gh?.state === "signed_out" && (
                     <Button variant="link" size="sm" className="land-sheet-gh-link" onClick={() => void shellOpen(GH_SIGN_IN_URL)}>
                       {t("land.signInGh", { command: GH_SIGN_IN_COMMAND })}
                     </Button>
@@ -442,7 +502,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                   mode="merge"
                   current={mode}
                   onPick={pick}
-                  title={`Squash-merge into ${preview.base?.name ?? "the base branch"} locally`}
+                  title={t("land.optMerge", { base: preview.base?.name ?? t("land.theBaseBranch") })}
                   reason={available?.merge ?? null}
                   hint={available?.merge ? null : mergeNote(preview.merge, preview.base?.name ?? null)}
                 />
@@ -503,12 +563,12 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
 
           {outcome?.status === "landed" && outcome.record && (
             <div className="land-sheet-result" data-status="landed">
-              <strong>{t("land.landed")}</strong> {landedText(outcome.record)}
+              <strong>{t("land.landed")}</strong> {landedText(outcome.record, t)}
             </div>
           )}
           {outcome?.status === "failed" && (
             <div className="land-sheet-result land-sheet-error" data-status="failed">
-              {t("land.landingStopped", { error: outcome.error ?? "" })}
+              {t("land.landingStopped", { error: readableLandError(outcome.error ?? "", t) })}
             </div>
           )}
           {archived && (
@@ -551,7 +611,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                         size="sm"
                         className="land-sheet-send-log"
                         disabled={busy !== null || !sessionAlive}
-                        title={sessionAlive ? undefined : "The session was archived"}
+                        title={sessionAlive ? undefined : t("land.sessionArchived")}
                         onClick={() => void sendLog(c)}
                       >
                         {t("land.sendLog")}
@@ -580,15 +640,30 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
         </div>
 
         <div className="land-sheet-footer">
-          {!showResult && preview && (
+          {!showResult && preview && confirmArchive && (
+            <div className="land-sheet-archive-confirm" role="alertdialog" aria-labelledby="land-sheet-archive-confirm-text">
+              <span id="land-sheet-archive-confirm-text" className="land-sheet-archive-confirm-text">
+                {t("land.archiveConfirm", { agent: agentName || t("land.theAgent") })}
+              </span>
+              <span className="land-sheet-spacer" />
+              <Button className="land-sheet-archive-cancel" onClick={() => setConfirmArchive(false)}>
+                {t("common.cancel")}
+              </Button>
+              <Button variant="danger-solid" className="land-sheet-archive-yes" onClick={() => void archiveOnly()}>
+                {t("land.archive")}
+              </Button>
+            </div>
+          )}
+          {!showResult && preview && !confirmArchive && (
             <>
               <Button
                 className="land-sheet-archive"
                 disabled={busy !== null || !!available?.archive}
                 title={available?.archive ?? undefined}
-                onClick={() => void archiveOnly()}
+                // Archiving stops the session's program: ask while an agent runs there.
+                onClick={() => (agentRunning ? setConfirmArchive(true) : void archiveOnly())}
               >
-                {t("land.archiveOnly")}
+                {t("land.archiveEllipsis")}
               </Button>
               <span className="land-sheet-spacer" />
               {/* A failing Done-When check makes Cancel the primary and Land a secondary "Land anyway". */}
@@ -602,7 +677,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 disabled={busy !== null || !mode || !!(mode && available?.[mode]) || !message.trim()}
                 onClick={() => mode && void land(mode)}
               >
-                {busy === "land" ? "Landing…" : failing ? "Land anyway" : "Land"}
+                {busy === "land" ? t("land.landing") : failing ? t("land.landAnyway") : t("land.land")}
               </Button>
             </>
           )}
@@ -610,7 +685,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
             <>
               {landedRecord && !undone && (
                 <Button className="land-sheet-undo" disabled={busy !== null} onClick={() => void undo(landedRecord)}>
-                  {busy === "undo" ? "Undoing…" : "Undo"}
+                  {busy === "undo" ? t("land.undoing") : t("land.undo")}
                 </Button>
               )}
               <span className="land-sheet-spacer" />
@@ -625,17 +700,23 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
   );
 }
 
-function landedText(rec: LandRecord): string {
+/** A refusing commit hook shown as "pre-commit refused: <what it printed>". */
+function readableLandError(error: string, t: (key: string, values?: Record<string, string | number>) => string): string {
+  const hook = parseHookRefusal(error);
+  return hook ? t("dirty.hookRefused", { hook: hook.hook, output: hook.output }) : error;
+}
+
+function landedText(rec: LandRecord, t: (key: string, values?: Record<string, string | number>) => string): string {
   const commit = rec.branchAfter && rec.branchAfter !== rec.branchBefore ? ` (${rec.branchAfter.slice(0, 8)})` : "";
   switch (rec.mode) {
     case "commit":
-      return `Committed on ${rec.branch}${commit}.`;
+      return t("land.resultCommitted", { branch: rec.branch, commit });
     case "pr":
-      return `Pushed ${rec.branch} and opened ${rec.prUrl ?? "a pull request"}.`;
+      return t("land.resultPr", { branch: rec.branch, url: rec.prUrl ?? "" });
     case "merge":
-      return `Squash-merged into ${rec.base ?? "the base"} (${(rec.mergedCommit ?? "").slice(0, 8)}).`;
+      return t("land.resultMerged", { base: rec.base ?? t("land.theBase"), commit: (rec.mergedCommit ?? "").slice(0, 8) });
     case "archive":
-      return "Archived.";
+      return t("land.resultArchived");
   }
 }
 

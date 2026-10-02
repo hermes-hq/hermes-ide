@@ -990,6 +990,10 @@ pub fn run() {
             git::git_attach_worktree,
             git::git_detach_worktree,
             git::git_commit_worktree,
+            git::git_commit_kept_worktree,
+            git::git_save_kept_detached_head,
+            git::git_keep_worktree,
+            git::git_remove_leftover_worktree,
             // Worktree overview & cleanup
             git::git_list_all_worktrees,
             git::git_detect_orphan_worktrees,

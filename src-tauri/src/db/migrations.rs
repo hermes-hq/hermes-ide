@@ -53,6 +53,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "agent accounts, launch history and presets",
         apply: create_launch_choice_tables,
     },
+    Migration {
+        version: 6,
+        name: "worktree base branch",
+        apply: worktree_base_branch_column,
+    },
 ];
 
 /// The schema version this build writes.
@@ -775,6 +780,15 @@ fn worktree_setup_columns(conn: &Connection) -> rusqlite::Result<()> {
         "CREATE UNIQUE INDEX IF NOT EXISTS idx_sw_port_base
              ON session_worktrees(port_base) WHERE port_base IS NOT NULL;",
     )
+}
+
+// ─── Step 6: worktree base branch ────────────────────────────────────
+
+/// The branch a task's worktree was cut from (`base_branch`), so Land lands
+/// into it rather than into whatever the project folder has checked out.
+/// NULL for worktrees made before this step (Land then falls back).
+fn worktree_base_branch_column(conn: &Connection) -> rusqlite::Result<()> {
+    add_column_if_missing(conn, "session_worktrees", "base_branch", "TEXT")
 }
 
 // ─── Step 5: agent accounts, launch history and presets ──────────────
@@ -1604,5 +1618,20 @@ mod tests {
             assert_eq!(rows_after.remove(t), Some(0));
         }
         assert_eq!(rows_after, rows_before, "every existing row is kept");
+    }
+
+    #[test]
+    fn step_6_adds_the_worktree_base_branch_and_keeps_every_row() {
+        let dir = TempDir::new().unwrap();
+        let path = load_fixture(dir.path(), FIXTURES[4].1);
+        let conn = Connection::open(&path).unwrap();
+        migrate(&conn, None, &MIGRATIONS[..5]).unwrap();
+        let rows_before = row_counts(&path);
+        let report = migrate(&conn, Some(&path), &MIGRATIONS[..6]).unwrap();
+        assert_eq!((report.from, report.to), (5, 6));
+        assert!(has_column(&conn, "session_worktrees", "base_branch").unwrap());
+        assert_eq!(row_counts(&path), rows_before, "every existing row is kept");
+        // Running it again changes nothing.
+        worktree_base_branch_column(&conn).unwrap();
     }
 }

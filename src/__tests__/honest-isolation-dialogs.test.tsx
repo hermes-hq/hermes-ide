@@ -100,7 +100,7 @@ describe("DirtyWorktreeDialog", () => {
         onStashAndClose={vi.fn()} onCloseAnyway={vi.fn()} onCancel={vi.fn()}
       />,
     );
-    expect(screen.getByText(/Commit failed for repo/)).toBeInTheDocument();
+    expect(screen.getByText(/Could not save repo:/)).toBeInTheDocument();
   });
 
   it("without the flag it is unchanged (Stash & Close)", () => {
