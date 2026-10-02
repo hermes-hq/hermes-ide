@@ -1534,3 +1534,49 @@ features:
       REAL-STATUS-3:
         text: "Antigravity: working, done, a question and exited as exact within 2 s; its approval, which it never reports, as a guess within 3.5 s"
         scenarios: ["REAL-status-agy.mjs@darwin,linux"]
+  QA-launcher:
+    # Bug fixes from the QA pass over the task launcher, its accounts,
+    # presets and queue, the first-run welcome and the overlays (not new
+    # work). Each scenario is the QA reproduction, kept: a build before the
+    # fix ends in RESULT: FAIL (its header names how). The quit question
+    # with queued tasks rides on the session host, which runs on macOS and
+    # Linux.
+    name: "The launcher, its accounts and queue, and the welcome do what they say, by keyboard too"
+    status: shipped
+    criteria:
+      QA-launcher-1:
+        text: "Launch & next keeps what was typed while the launch ran; only the launched text is cleared"
+        scenarios: [QA-launcher-launch-next-keeps-typing.mjs]
+      QA-launcher-2:
+        text: "The keyboard never lands on the page while the launcher is open: closing a preset form, an offer or a branch row gives it to the task field; a key on the page does too; ⌘N on the open sheet gives it back; Tab stays inside the sheet"
+        scenarios: [QA-launcher-focus-lost.mjs, QA-launcher-tab-trap.mjs]
+      QA-launcher-3:
+        text: "Switching the project brings that project's usual combination, or says what it usually runs once the person changed the choice; ⌘N from a plain shell or a sign-in terminal starts on the project"
+        scenarios: [QA-launcher-usual-per-project.mjs, QA-launcher-start-project.mjs]
+      QA-launcher-4:
+        text: "An added account signs in in its own profile, is judged by its own sign-in (not the default profile's), shows its own models, and a preset on a signed-out account waits for a sign-in or an explicit 'use the default profile this time'"
+        scenarios: [QA-launcher-signin-account.mjs, QA-launcher-default-signed-out.mjs, QA-launcher-models-per-account.mjs, QA-launcher-preset-account-held.mjs]
+      QA-launcher-5:
+        text: "Queued tasks are kept across a quit, which says so, start with their full launch (feature.md, checks, record), and a queued launch says so on screen with Start now; queue rows say which task and where"
+        scenarios: ["QA-launcher-queue-kept-on-quit.mjs@darwin,linux", QA-launcher-queued-task-setup.mjs, QA-launcher-queued-feedback.mjs]
+      QA-launcher-6:
+        text: "Track as a feature on the current checkout creates the feature in the project folder; the task's checks are kept next to its worktree, outside the repository"
+        scenarios: [QA-launcher-track-current-checkout.mjs, QA-launcher-checks-kept.mjs]
+      QA-launcher-7:
+        text: "The unfinished welcome owns the menu bar; its first task survives Back and is never thrown away without asking; the step-2 repository becomes a project; a sign-in done meanwhile is seen at once"
+        scenarios: [QA-launcher-welcome-menu-gate.mjs, QA-launcher-welcome-finish-task.mjs, QA-launcher-signin-recheck.mjs]
+      QA-launcher-8:
+        text: "The welcome is modal for the keyboard (focus per step, Tab inside, Enter in a repository path moves on) and says what a typed path is: missing, no repository, or the repository ~ names"
+        scenarios: [QA-launcher-welcome-keyboard.mjs, QA-launcher-welcome-paths.mjs]
+      QA-launcher-9:
+        text: "Window keys behind an open overlay act on the overlay; Settings, Keyboard Shortcuts and the New Session dialog join one-overlay-at-a-time; a session can be closed by keyboard; the palette's ⌘1–9 are the sessions ⌘1–9 open"
+        scenarios: [QA-launcher-menu-keys-overlay.mjs, QA-launcher-overlays-stack.mjs, QA-launcher-close-session.mjs, QA-launcher-palette-numbers.mjs]
+      QA-launcher-10:
+        text: "Chips: a pick closes the menu and the next Enter launches; Enter in the path field confirms the folder; the reason Launch is off stays beside it"
+        scenarios: [QA-launcher-chip-pick-enter.mjs, QA-launcher-path-enter.mjs, QA-launcher-reason-visible.mjs]
+      QA-launcher-11:
+        text: "Branches: the same task again gets the next free name, names git refuses are flagged before Launch, an empty repository is said, and the current checkout is never carried over and is said in red"
+        scenarios: [QA-launcher-same-task-twice.mjs, QA-launcher-branch-names.mjs, QA-launcher-empty-repo.mjs, QA-launcher-current-checkout-not-sticky.mjs]
+      QA-launcher-12:
+        text: "Presets: names are unique whatever their case, an empty offer name keeps the offer, typed Claude model ids launch, and the preview says what the launch passes"
+        scenarios: [QA-launcher-preset-names.mjs, QA-launcher-offer-empty-name.mjs, QA-launcher-typed-model.mjs, QA-launcher-preview.mjs]

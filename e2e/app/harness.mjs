@@ -718,7 +718,7 @@ export async function launchApp({
         await sleep(100);
         if (!answered && !exited) {
           const clicked = await bridge
-            .eval(`const b = e2e.first('[data-testid="quit-with-agents-dialog"] .quit-dialog-btn-stop'); if (!b) return false; b.click(); return true;`)
+            .eval(`const b = e2e.first('[data-testid="quit-with-agents-dialog"] .quit-dialog-btn-stop, [data-testid="quit-with-agents-dialog"] .quit-dialog-btn-quit'); if (!b) return false; b.click(); return true;`)
             .catch(() => false);
           if (clicked) {
             answered = true;

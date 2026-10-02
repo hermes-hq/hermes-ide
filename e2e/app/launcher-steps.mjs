@@ -337,7 +337,8 @@ export const chooseOption = (bridge, selector, value) =>
       const opt = list && [...list.querySelectorAll('[role="option"]')].find((o) => o.getAttribute("data-value") === ${JSON.stringify(value)});
       if (!opt || opt.getAttribute("aria-disabled") === "true") return false;
       e2e.click(opt);
-      return false;
+      // Picked. A launcher chip menu closes on a pick (its Select goes with it).
+      return true;
     }
     if (![...el.options].some((o) => o.value === ${JSON.stringify(value)})) return false;
     Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, "value").set.call(el, ${JSON.stringify(value)});

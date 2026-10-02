@@ -106,8 +106,15 @@ try {
   assert(at?.mode === "plan", "→ moves to Plan first");
   await pressKeyOnFocus(bridge, "Enter");
   await bridge.waitFor("Plan first chosen", `return /^Plan first/.test(e2e.norm(e2e.first('[data-chip="approval"]')?.innerText ?? ""));`);
+  // A pick closes the menu and gives the task field the keyboard (QA SOLO-10).
+  await bridge.waitFor("the menu to close, the task field focused", `return !e2e.first(".task-launcher-menu") && document.activeElement === e2e.first(".task-launcher-task");`);
+  assert(true, "picking a mode closes the menu and the task field has the keyboard");
+  // Esc without a pick: the menu closes, the focus is back on its chip, the sheet stays.
+  await bridge.eval(`e2e.first('[data-chip="approval"]').focus(); return true;`);
+  await pressKeyOnFocus(bridge, "Enter");
+  await bridge.waitFor("the approval menu", `return !!e2e.first('.task-launcher-menu[data-menu="approval"]');`);
   await pressKeyOnFocus(bridge, "Escape");
-  await bridge.waitFor("the menu to close, focus back on its chip", `return !e2e.first(".task-launcher-menu") && document.activeElement?.getAttribute("data-chip") === "approval";`);
+  await bridge.waitFor("the menu to close, focus back on its chip", `return !e2e.first(".task-launcher-menu") && document.activeElement?.getAttribute("data-chip") === "approval" && !!e2e.first(".task-launcher-sheet");`);
   assert(true, "Esc closes the menu and the focus is back on the chip; the sheet stays");
   await bridge.eval(`e2e.first(".task-launcher-task").focus(); return true;`);
 

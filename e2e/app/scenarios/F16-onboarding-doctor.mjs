@@ -358,7 +358,8 @@ try {
     return chip ? (e2e.click(chip), false) : false;
   `, { timeoutMs: 30_000 });
   await bridge.waitFor("Claude Code in the agent menu", `const b = e2e.first('.task-launcher-menu [data-agent-id="claude"]'); return b ? e2e.click(b) : false;`);
-  await bridge.waitFor("Launch to be ready", `const b = e2e.first(".task-launcher-launch"); return !!b && !b.disabled;`, { timeoutMs: 30_000 });
+  // The welcome has its own primary, Start task ⏎, once a task is typed (QA NEWCOMER-03).
+  await bridge.waitFor("Start task to be ready", `const b = e2e.first(".setup-start-task"); return !!b && !b.disabled;`, { timeoutMs: 30_000 });
   // The project chip's menu shows the repository's path.
   await bridge.waitFor("the project menu", `
     if (e2e.first('.task-launcher-menu[data-menu="project"]')) return true;

@@ -7,7 +7,7 @@
 //   run 2  - Settings > Limits: "Agents running at once" = 3.
 //          - Launch five agent tasks from the New Session wizard. Tasks 1-3
 //            start (their agent prints its banner); tasks 4 and 5 do not: the
-//            session list shows them queued, "3 of 3 running".
+//            session list shows them queued, "3 of 3 slots in use".
 //          - Task 2's agent finishes (it is told to quit): task 4 starts on
 //            its own; task 5 still waits.
 //          - Task 1's agent finishes: task 5 starts; the queue is gone.
@@ -142,7 +142,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   log(`  queue: ${JSON.stringify(queue1)}`);
   assert(Object.keys(running).sort().join(",") === "1,2,3", "tasks 1, 2 and 3 run");
   assert(queue1 && queue1.labels.join(",") === "Task 4,Task 5", "tasks 4 and 5 wait in the queue, in order");
-  assert(queue1.title === "Queued · 2" && queue1.slots === "3 of 3 running", `the queue says "${queue1.title}" / "${queue1.slots}"`);
+  assert(queue1.title === "Queued · 2" && queue1.slots === "3 of 3 slots in use", `the queue says "${queue1.title}" / "${queue1.slots}"`);
   const sessions1 = await bridge.eval(`return e2e.all(".session-item").length;`);
   assert(sessions1 === 3, `three sessions exist (${sessions1})`);
   await bridge.screenshot(join(evidenceDir, "01-two-queued.png"));

@@ -131,7 +131,7 @@ describe("reconcileChoice", () => {
 		expect(none.issues[0].message).toBe("Haiku has no effort levels; the effort is left to Claude Code");
 	});
 
-	it("a signed-out or removed account falls back to the active account", () => {
+	it("a signed-out or removed account is offered the active one, never taken on its own (not launchable)", () => {
 		const out = reconcileChoice(choice({ accountId: "work" }), claudeCaps());
 		expect(out.choice.accountId).toBe("default");
 		expect(out.issues[0]).toEqual({
@@ -144,7 +144,8 @@ describe("reconcileChoice", () => {
 		});
 		const gone = reconcileChoice(choice({ accountId: "old" }), claudeCaps());
 		expect(gone.choice.accountId).toBe("default");
-		expect(gone.launchable).toBe(true);
+		expect(gone.launchable).toBe(false);
+		expect(out.launchable).toBe(false);
 	});
 
 	it("is not launchable when no account is signed in or the agent is not installed", () => {

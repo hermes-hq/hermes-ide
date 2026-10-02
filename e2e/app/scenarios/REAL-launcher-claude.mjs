@@ -188,7 +188,7 @@ try {
   const preview = await bridge.eval(`return e2e.norm(e2e.first(".task-launcher-command")?.textContent ?? "");`);
   log(`  Hermes will run: ${preview}`);
   assert(
-    preview.startsWith("claude --permission-mode acceptEdits") && preview.includes(`--model ${MODEL}`) && preview.includes(`--effort ${EFFORT}`) && preview.includes(`"${TASK}"`),
+    preview.startsWith("claude --permission-mode acceptEdits") && preview.includes(`--model ${MODEL}`) && preview.includes(`--effort ${EFFORT}`) && preview.includes(`'${TASK}'`),
     "the launcher shows the command it will run, with the model, the effort and the task",
   );
   await bridge.screenshot(join(evidenceDir, "01-launcher.png"));
