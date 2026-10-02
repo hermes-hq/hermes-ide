@@ -51,6 +51,11 @@ await runLauncherQa("QA-launcher-focus-lost", async ({ bridge, fx, log, check, e
   await typeInto(bridge, ".task-launcher-preset-name", "Quick fix");
   await focusOn(bridge, ".task-launcher-preset-save");
   await press("Enter");
+  // The save is a round trip to the backend: on a loaded runner it can take
+  // longer than a fixed pause. The form closes once the preset is stored.
+  await bridge
+    .waitFor("the preset form to close after Save", `return !e2e.first(".task-launcher-preset-name") || !!e2e.norm(e2e.first(".task-launcher-preset-error")?.innerText ?? "");`, { timeoutMs: 15_000 })
+    .catch(() => {});
   await settle();
   const saved = await bridge.eval(`return { form: !!e2e.first(".task-launcher-preset-name"), error: e2e.norm(e2e.first(".task-launcher-preset-error")?.innerText ?? ""), focus: document.activeElement?.className ?? null };`);
   log(`  after Save: ${JSON.stringify(saved)}`);
