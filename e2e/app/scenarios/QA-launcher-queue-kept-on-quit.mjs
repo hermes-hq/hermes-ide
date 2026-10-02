@@ -55,12 +55,19 @@ await runLauncherQa("QA-launcher-queue-kept-on-quit", async ({ bridge, fx, log, 
   log("relaunch on the same data");
   const app = await relaunch(2);
   await waitForReturningLaunch(app.bridge);
-  await sleep(4000);
-  const after = await app.bridge.eval(`
+  // A queued task that starts on the relaunch leaves the queue a moment
+  // before its session shows in the sidebar, so poll instead of one look.
+  const snapshot = `
     const H = window.__HERMES_E2E__;
-    return { queue: H.fleetState().queue.map((t) => t.label), sessions: e2e.all(".session-item").map((el) => e2e.norm(el.innerText).slice(0, 60)) };`);
+    return { queue: H.fleetState().queue.map((t) => t.label), sessions: e2e.all(".session-item").map((el) => e2e.norm(el.innerText).slice(0, 60)) };`;
+  const keptIn = (s, name) => s.queue.includes(name) || s.sessions.some((x) => x.includes(name));
+  const bothKept = (s) => keptIn(s, "Waiting task one") && keptIn(s, "Waiting task two");
+  let after = await app.bridge.eval(snapshot);
+  for (const deadline = Date.now() + 20_000; !bothKept(after) && Date.now() < deadline; ) {
+    await sleep(250);
+    after = await app.bridge.eval(snapshot);
+  }
   log(`  after the relaunch: ${JSON.stringify(after)}`);
   await app.bridge.screenshot(join(evidenceDir, "02-after-relaunch.png"));
-  const kept = (name) => after.queue.includes(name) || after.sessions.some((s) => s.includes(name));
-  check(kept("Waiting task one") && kept("Waiting task two"), "both queued tasks are back after the relaunch (waiting or started)");
+  check(bothKept(after), "both queued tasks are back after the relaunch (waiting or started)");
 });
