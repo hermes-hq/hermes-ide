@@ -528,6 +528,22 @@ impl TurnTracker {
         }
     }
 
+    /// The person interrupted the running turn (Claude Code records it in
+    /// its transcript and fires no hook): its `turn_interrupted`, or None
+    /// when no turn runs.
+    pub fn interrupt_running(&mut self, at: i64, source: Option<String>) -> Option<SessionEvent> {
+        if !self.running {
+            return None;
+        }
+        self.running = false;
+        Some(SessionEvent::TurnInterrupted {
+            at,
+            source,
+            tags: None,
+            n: self.n(),
+        })
+    }
+
     /// The running turn failed (a usage limit stopped it, for one): its
     /// `turn_failed`, or None when no turn runs.
     pub fn fail_running(
@@ -665,6 +681,34 @@ mod tests {
         through(&mut t, "UserPromptSubmit", serde_json::json!({}));
         t.abandon();
         assert_eq!(t.current(), None);
+        assert_eq!(
+            through(&mut t, "UserPromptSubmit", serde_json::json!({})),
+            ["turn_start:2", "status:Working"]
+        );
+    }
+
+    #[test]
+    fn an_interrupted_turn_ends_and_the_next_prompt_starts_the_next_turn() {
+        let mut t = TurnTracker::default();
+        assert_eq!(t.interrupt_running(1, None), None, "no turn runs yet");
+        through(&mut t, "UserPromptSubmit", serde_json::json!({}));
+        through(
+            &mut t,
+            "PermissionRequest",
+            serde_json::json!({"tool_name": "Bash"}),
+        );
+        match t.interrupt_running(5, Some("transcript:claude".into())) {
+            Some(SessionEvent::TurnInterrupted { n, at, source, .. }) => {
+                assert_eq!(
+                    (n.get(), at, source.as_deref()),
+                    (1, 5, Some("transcript:claude"))
+                );
+            }
+            other => panic!("unexpected {other:?}"),
+        }
+        assert_eq!(t.current(), None);
+        assert_eq!(t.interrupt_running(6, None), None, "only once");
+        // Without it the next prompt was merged into the interrupted turn.
         assert_eq!(
             through(&mut t, "UserPromptSubmit", serde_json::json!({})),
             ["turn_start:2", "status:Working"]

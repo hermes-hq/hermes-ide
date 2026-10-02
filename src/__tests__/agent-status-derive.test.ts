@@ -291,6 +291,35 @@ describe("deriveStatus: the OS layer (rule 7) sits between named guesses and the
   });
 });
 
+describe("deriveStatus: an answered ask and an interrupted turn (Claude Code fires no hook for either)", () => {
+  const ask = status(1, "needs_approval", "exact", "hook:claude", "Bash");
+  // What the OS layer sends once the person's key answered the ask.
+  const answered = status(2, "idle", "guessed", "hook:claude");
+
+  it("a key after an exact ask hands the status to the OS layer's verdict", () => {
+    expect(derive([ask, answered]).kind).toBe("idle");
+    const working = status(3, "working", "guessed", "os", "a command is running (zsh)");
+    expect(derive([ask, answered, working])).toMatchObject({ kind: "working", source: "os" });
+    // The command ended: the OS layer has no opinion, back to the answer.
+    expect(derive([ask, answered, working, status(4, "idle", "guessed", "os")])).toMatchObject({ kind: "idle", source: "hook:claude" });
+    // The agent's own report after the command wins again.
+    expect(derive([ask, answered, working, status(5, "working", "exact", "hook:claude")]).confidence).toBe("exact");
+    // Without the answer the OS layer cannot move an exact ask (rule 7).
+    expect(derive([ask, working]).kind).toBe("needs_approval");
+  });
+
+  it("an interrupt the agent recorded in its transcript is exact and ends the ask", () => {
+    expect(confidenceOfSource("transcript:claude")).toBe("exact");
+    expect(isAgentReported("transcript:claude")).toBe(true);
+    const interrupted: SessionEvent = { type: "turn_interrupted", at: 3, source: "transcript:claude", n: 2 };
+    expect(derive([ask, interrupted])).toMatchObject({ kind: "idle", confidence: "exact", source: "transcript:claude" });
+    expect(derive([ask, answered, interrupted])).toMatchObject({ kind: "idle", confidence: "exact" });
+    // Hermes's guesses do not move it; the next prompt does.
+    expect(derive([ask, interrupted, status(4, "working", "guessed", "os")]).kind).toBe("idle");
+    expect(derive([ask, interrupted, status(4, "working", "exact", "hook:claude")]).kind).toBe("working");
+  });
+});
+
 describe("deriveStatus: done until seen", () => {
   const done: SessionEvent[] = [{ type: "turn_end", at: 100, source: "hook:x", n: 1 }];
   it("is done while nobody looked", () => {

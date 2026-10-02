@@ -190,6 +190,20 @@ describe("guessedStatus / stripStatus", () => {
     expect(stripStatus(getSessionEventSnapshot(SID), "busy", input)).toMatchObject({ status: { kind: "done_unread", confidence: "exact" }, source: "hook", reporter: "antigravity" });
   });
 
+  it("Claude's approval: the person's key hands it to the OS layer, and an Esc ends the turn as Claude recorded it", () => {
+    const at = (e: SessionEvent, t: number): SessionEvent => ({ ...e, at: t });
+    dispatchSessionEvent(SID, at(status("needs_approval", "exact", "hook:claude", "Bash"), 1_000));
+    // Approved: the OS layer's answer takes the exact ask back...
+    dispatchSessionEvent(SID, at(status("idle", "guessed", "hook:claude"), 2_000));
+    dispatchSessionEvent(SID, at(status("working", "guessed", "os", "a command is running (zsh)"), 2_400));
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toEqual({ status: { kind: "working", confidence: "guessed", detail: "a command is running (zsh)" }, source: "os" });
+    // ...and the next ask, rejected with Esc: the transcript's interrupt.
+    dispatchSessionEvent(SID, at(status("needs_approval", "exact", "hook:claude", "Bash"), 3_000));
+    dispatchSessionEvent(SID, at(status("idle", "guessed", "hook:claude"), 4_000));
+    dispatchSessionEvent(SID, { type: "turn_interrupted", at: 4_600, source: "transcript:claude", n: 2 });
+    expect(stripStatus(getSessionEventSnapshot(SID), "busy")).toEqual({ status: { kind: "idle", confidence: "exact", detail: "" }, source: "hook", reporter: "claude" });
+  });
+
   it("an exit Hermes saw itself (the terminal's process) is exact, from Hermes", () => {
     dispatchSessionEvent(SID, { type: "exit", at: 1, source: "pty", code: 0, signal: null });
     expect(stripStatus(getSessionEventSnapshot(SID), "destroyed")).toEqual({ status: { kind: "exited", confidence: "exact", detail: "" }, source: "hermes" });

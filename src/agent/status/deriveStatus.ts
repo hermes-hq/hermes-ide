@@ -80,7 +80,10 @@ export function isHeuristicSource(source: string | null | undefined): boolean {
 export function confidenceOfSource(source: string | undefined | null): Confidence {
   if (!source) return "signal";
   if (isHeuristicSource(source)) return "guessed";
-  if (source === "hi" || source === "agent-view" || source === "hook" || source.startsWith("hook:") || source.startsWith("protocol:")) {
+  // "transcript:<agent>": what the agent wrote in its own transcript (a turn
+  // the person interrupted, which no hook reports), read from the file the
+  // agent itself named.
+  if (source === "hi" || source === "agent-view" || source === "hook" || source.startsWith("hook:") || source.startsWith("protocol:") || source.startsWith("transcript:")) {
     return "exact";
   }
   return "signal";
@@ -226,9 +229,9 @@ export function isHelperStartedEcho(report: Pick<DerivedStatus, "kind" | "source
   return report.source === "hi" && report.kind === "idle";
 }
 
-/** A source that is the agent itself: its hooks, its event stream, its protocol. */
+/** A source that is the agent itself: its hooks, its event stream, its protocol, its transcript. */
 export function isAgentReported(source: string | null | undefined): boolean {
-  return !!source && (source.startsWith("hook:") || source.startsWith("stream:") || source.startsWith("protocol:"));
+  return !!source && (source.startsWith("hook:") || source.startsWith("stream:") || source.startsWith("protocol:") || source.startsWith("transcript:"));
 }
 
 const NOTHING: DerivedStatus = Object.freeze({ ...UNKNOWN_STATUS, at: null, source: null });

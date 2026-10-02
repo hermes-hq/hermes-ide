@@ -51,13 +51,13 @@ export const STATUS_TONES: Readonly<Record<AgentStatusKind, StatusTone>> = Objec
 
 /**
  * The catalog id of the agent a status source names (`hook:claude`,
- * `hook:claude:osc`, `stream:opencode`, `protocol:codex`), or null for
+ * `hook:claude:osc`, `stream:opencode`, `protocol:codex`, `transcript:claude`), or null for
  * Hermes's own sources and notifications.
  */
 export function reporterOfSource(source: string | null | undefined): string | null {
   if (!source) return null;
   const [kind, id] = source.split(":");
-  return (kind === "hook" || kind === "stream" || kind === "protocol") && id ? id : null;
+  return (kind === "hook" || kind === "stream" || kind === "protocol" || kind === "transcript") && id ? id : null;
 }
 
 /** The language-pack key of a status's word. */

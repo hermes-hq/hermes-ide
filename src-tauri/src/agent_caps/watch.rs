@@ -28,7 +28,7 @@
 //! refusal worded exactly like one in the history is then missed, which
 //! stops nothing.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
@@ -150,7 +150,33 @@ fn forget_untaken(session_id: &str) {
     }
 }
 
+/// Sessions whose current launch the CLI refused, until the next launch.
+fn refused() -> &'static Mutex<HashSet<String>> {
+    static R: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    R.get_or_init(|| Mutex::new(HashSet::new()))
+}
+
+fn set_refused(session_id: &str, yes: bool) {
+    if let Ok(mut r) = refused().lock() {
+        if yes {
+            r.insert(session_id.to_string());
+        } else {
+            r.remove(session_id);
+        }
+    }
+}
+
+/// Whether the CLI refused the session's current launch (its refusal was
+/// found on screen): nothing it reports afterwards starts a turn.
+pub fn was_refused(session_id: &str) -> bool {
+    refused()
+        .lock()
+        .map(|r| r.contains(session_id))
+        .unwrap_or(false)
+}
+
 pub fn start(session_id: &str, agent: &str, how: WatchStart) {
+    set_refused(session_id, false);
     let mode = e2e_mode();
     if signatures::for_agent(agent).is_empty() || mode.as_deref() == Some("off") {
         end(session_id);
@@ -347,6 +373,7 @@ pub fn end(session_id: &str) {
         w.remove(session_id);
     }
     forget_untaken(session_id);
+    set_refused(session_id, false);
 }
 
 /// The CLI took the launch (its first finished turn or tool call): the
@@ -359,6 +386,15 @@ pub fn taken(session_id: &str) -> Option<SessionLaunch> {
         w.remove(session_id);
     }
     untaken().lock().ok()?.remove(session_id)
+}
+
+/// Whether the session's launch may still be refused: neither taken by the
+/// CLI (`taken`) nor refused (a refusal forgets it) yet.
+pub fn is_untaken(session_id: &str) -> bool {
+    untaken()
+        .lock()
+        .map(|u| u.contains_key(session_id))
+        .unwrap_or(false)
 }
 
 /// The agent exited: read its last words for a moment longer, then stop.
@@ -520,6 +556,7 @@ fn scan(watches: &mut HashMap<String, Watch>, session_id: &str) -> Option<Found>
     };
     watches.remove(session_id);
     forget_untaken(session_id);
+    set_refused(session_id, true);
     Some(found)
 }
 
@@ -589,6 +626,20 @@ mod tests {
         assert!(observe("cap-w1", b"Not logged in\r\n").is_none());
         // The refused launch's turn ending later is not "taken".
         assert!(taken("cap-w1").is_none());
+        // What it reports afterwards starts no turn, until the next launch.
+        assert!(was_refused("cap-w1") && !is_untaken("cap-w1"));
+        start(
+            "cap-w1",
+            "claude",
+            how(
+                stop.clone(),
+                "n1",
+                Duration::from_secs(30),
+                SessionLaunch::default(),
+            ),
+        );
+        assert!(!was_refused("cap-w1") && is_untaken("cap-w1"));
+        end("cap-w1");
     }
 
     #[test]

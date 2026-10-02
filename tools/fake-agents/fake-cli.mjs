@@ -35,6 +35,13 @@
 // `a` is a tool call the way Antigravity makes one: PreToolUse (run_command),
 // then it waits for the person's y/n without reporting that it waits; `y`
 // runs the command (a shell child, as long as `z`) and then PostToolUse.
+// `P` is a permission prompt the way Claude Code 2.1.287 answers it: the
+// PermissionRequest hook, then nothing until the person answers — `y` or
+// Enter runs the command (a shell child, as long as `z`) with no hook until
+// its PostToolUse; Esc rejects it: "Interrupted · What should Claude do
+// instead?", no hook at all, and the transcript gets the rejected tool
+// result, "[Request interrupted by user for tool use]" and the turn's
+// `turn_duration` line, as Claude Code writes them.
 //
 // As HERMES_FAKE_AGENT=antigravity, with no --settings, the hooks come from
 // `.agents/hooks.json` in the folder it runs in, in Antigravity's shape: one
@@ -155,6 +162,11 @@
 // Two more mode words for the refusal-safety scenario:
 //   wrap-prompt   the first prompt is drawn in rows of at most 40
 //                 characters (word-wrapped), as a TUI in a narrow pane does
+//   model-not-found-hooks
+//                 a refused model (Claude Code) is refused the way 2.1.287
+//                 does it with a first prompt: the SessionStart hooks, the
+//                 UserPromptSubmit hooks with the prompt, then StopFailure
+//                 with `error: "model_not_found"`, then the refusal on screen
 //   quote-errors  once ready, the agent "answers" with its reply mark
 //                 (Claude Code `⏺`, Codex `•`) quoting its CLI's own refusal
 //                 words, as an agent explaining an error does
@@ -860,6 +872,15 @@ async function refuse(kind) {
 		kind === "signed-out"
 			? "Not logged in · Please run /login"
 			: `There's an issue with the selected model (${model}). It may not exist or you may not have access to it. Run --model to pick a different model.`;
+	if (kind === "model" && has("model-not-found-hooks") && !resumed) {
+		// Claude Code 2.1.287 sends the first prompt before it learns the
+		// model does not exist.
+		await runHooks("SessionStart", { source: "startup" });
+		if (record.prompt) {
+			await runHooks("UserPromptSubmit", { prompt: record.prompt });
+			await runHooks("StopFailure", { error: "model_not_found", last_assistant_message: said });
+		}
+	}
 	if (resumed) remember([said]);
 	out(kind === "signed-out" ? `\r\n${said}\r\n` : `\r\n"${model}" isn't described by this version's model catalog; update Claude Code, or map it with behavesAs…\r\n${said}\r\n`);
 	out("> ");
@@ -1096,6 +1117,45 @@ async function main() {
 					if (answer === "n" || answer === "N") {
 						out("fake-cli: denied\r\n");
 						await runHooks("PermissionDenied", { tool_name: "Bash" });
+						break;
+					}
+				}
+				continue;
+			}
+			case "P": {
+				// Claude Code's permission prompt (see the header).
+				const command = "sleep-for-a-while";
+				out(`\r\nfake-cli: Bash(${command})  Do you want to proceed? [y/Enter, Esc]\r\n`);
+				await runHooks("PermissionRequest", { tool_name: "Bash", tool_input: { command } });
+				for (;;) {
+					const answer = await nextKey();
+					if (answer === null || answer === "\x03") {
+						await quit("interrupted-at-permission");
+						return;
+					}
+					if (answer === "y" || answer === "Y" || answer === "\r") {
+						out(`fake-cli: running the command for ${TOOL_MS} ms\r\n`);
+						note("tool", { shell: TOOL_IN_SHELL, ms: TOOL_MS, approved: true });
+						const argv = toolCommand();
+						await new Promise((resolve) => {
+							const child = spawn(argv[0], argv.slice(1), { stdio: "ignore", windowsHide: true });
+							child.on("exit", resolve);
+							child.on("error", resolve);
+						});
+						out("fake-cli: command finished\r\n");
+						await runHooks("PostToolUse", { tool_name: "Bash", tool_input: { command }, tool_response: {} });
+						break;
+					}
+					if (answer === ESC) {
+						appendTranscript({
+							type: "user",
+							toolUseResult: "User rejected tool use",
+							message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_fake", content: "The user doesn't want to proceed with this tool use.", is_error: true }] },
+						});
+						appendTranscript({ type: "user", message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user for tool use]" }] } });
+						appendTranscript({ type: "system", subtype: "turn_duration", durationMs: 2815, messageCount: 4, isMeta: false });
+						note("rejected", { transcript: !!TRANSCRIPT_DIR });
+						out("  ⎿  Interrupted · What should Claude do instead?\r\n");
 						break;
 					}
 				}

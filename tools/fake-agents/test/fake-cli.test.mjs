@@ -626,6 +626,26 @@ describe("fake-cli transcript (F14 context gauge)", () => {
 		expect(res.stdout).toContain("model call (83003 input tokens)");
 	});
 
+	it("P: an approved command runs with no hook until it ends; Esc writes Claude's rejection and fires nothing", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir, ["PermissionRequest", "PostToolUse"]);
+		const env = { HERMES_FAKE_DIR: dir, HERMES_FAKE_TOOL_MS: "300" };
+		const yes = await run(["--session-id", "p-y", "--settings", file], { env, keys: "Pyq", afterMs: 1200 });
+		const events = () => readFileSync(marks, "utf8").trim().split("\n").map((l) => l.split(" ")[0]);
+		expect(yes.stdout).toContain("command finished");
+		expect(events()).toEqual(["SessionStart", "PermissionRequest", "PostToolUse", "SessionEnd"]);
+		const no = await run(["--session-id", "p-n", "--settings", file], { env, keys: "P\x1bq", afterMs: 1200 });
+		expect(no.stdout).toContain("Interrupted · What should Claude do instead?");
+		expect(events().slice(4)).toEqual(["SessionStart", "PermissionRequest", "SessionEnd"]);
+		const t = lines(join(dir, "transcripts", "p-n.jsonl"));
+		expect(t.map((l) => [l.type, l.subtype ?? null, l.toolUseResult ?? null])).toEqual([
+			["user", null, "User rejected tool use"],
+			["user", null, null],
+			["system", "turn_duration", null],
+		]);
+		expect(t[1].message.content[0].text).toBe("[Request interrupted by user for tool use]");
+	}, 20_000);
+
 	it("without a record folder it keeps a made-up path and writes nothing", async () => {
 		const res = await run(["--session-id", "t-v"], { keys: "cq", afterMs: 800 });
 		expect(res.code).toBe(0);
@@ -688,6 +708,17 @@ describe("fake vendor CLI: models, effort and accounts (2.0 launch contract)", (
 		const agy = await run(["--model", "nope"], { env: { HERMES_FAKE_DIR: tmp(), HERMES_FAKE_AGENT: "antigravity", HERMES_FAKE_REJECT_MODELS: "*" } });
 		expect(agy.code).toBe(1);
 		expect(agy.stdout).toContain('error: invalid model selection (--model "nope" --effort ""): model nope is not recognized');
+	});
+
+	it("model-not-found-hooks: refused the way Claude Code 2.1.287 refuses an unknown model with a first prompt", async () => {
+		const dir = tmp();
+		const { file, marks } = hookSettings(dir, ["UserPromptSubmit", "StopFailure"]);
+		const res = await run(["--session-id", "r-2", "--settings", file, "--model", "not-a-model", "do it"], { env: { HERMES_FAKE_DIR: dir, HERMES_FAKE_REJECT_MODELS: "not-a-model", HERMES_FAKE_MODE: "model-not-found-hooks" }, keys: "q", afterMs: 1500 });
+		expect(res.code).toBe(1);
+		expect(res.stdout).toContain("There's an issue with the selected model (not-a-model).");
+		const ran = readFileSync(marks, "utf8").trim().split("\n");
+		expect(ran.map((l) => l.split(" ")[0])).toEqual(["SessionStart", "UserPromptSubmit", "StopFailure"]);
+		expect(JSON.parse(ran[2].slice("StopFailure ".length)).error).toBe("model_not_found");
 	});
 
 	it("a resumed conversation replays its history and is refused only at its first message", async () => {

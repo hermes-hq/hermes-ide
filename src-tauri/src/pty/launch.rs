@@ -2334,6 +2334,109 @@ impl ModelSwitch {
     }
 }
 
+/// How long the first turn's start is held back while the launch may still
+/// be refused (see [`FirstTurnHold`]). Claude Code 2.1.287 reports an unknown
+/// model about a second after the prompt hook.
+pub const FIRST_TURN_HOLD: Duration = Duration::from_secs(5);
+
+/// The agent ended its turn because the model it was started with does not
+/// exist (Claude Code's `StopFailure` with `error: "model_not_found"`).
+pub fn is_model_not_found(record: &crate::contract::signal::SignalRecord) -> bool {
+    record.event == "StopFailure"
+        && record.payload.get("error").and_then(|e| e.as_str()) == Some("model_not_found")
+}
+
+/// What becomes of a held turn start.
+#[derive(Debug, PartialEq, Eq)]
+pub enum HoldOutcome {
+    /// Still held.
+    Keep,
+    /// The turn is real: send its start now.
+    Release(crate::contract::SessionEvent),
+    /// The launch was refused: the turn never was.
+    Drop,
+}
+
+/// A refused launch runs no turn. Claude Code fires its prompt hook before
+/// it finds out that the model it was started with does not exist (then a
+/// `StopFailure` with `model_not_found`, then the refusal on screen), so the
+/// first turn's start of a launch that may still be refused is held back
+/// until the agent shows the turn is real (anything else it reports, or
+/// [`FIRST_TURN_HOLD`]) and dropped when the launch is refused.
+#[derive(Debug, Default)]
+pub struct FirstTurnHold {
+    held: Option<(crate::contract::SessionEvent, Instant)>,
+}
+
+impl FirstTurnHold {
+    pub fn is_holding(&self) -> bool {
+        self.held.is_some()
+    }
+
+    /// Take the first turn's start out of one record's events, when the
+    /// launch may still be refused and the turn starts with the person's
+    /// prompt (its `working` is then what the held start would say).
+    pub fn take_first_start(
+        &mut self,
+        framed: &mut Vec<crate::contract::SessionEvent>,
+        may_be_refused: bool,
+        now: Instant,
+    ) {
+        if !may_be_refused || self.held.is_some() {
+            return;
+        }
+        if let Some(i) = framed.iter().position(
+            |e| matches!(e, crate::contract::SessionEvent::TurnStart { n, .. } if n.get() == 1),
+        ) {
+            self.held = Some((framed.remove(i), now));
+        }
+    }
+
+    /// A record of this launch arrived (before anything acts on it);
+    /// `mapped`: what it means. `untaken`: the launch may still be refused
+    /// (false once a refusal was found on screen).
+    pub fn on_record(
+        &mut self,
+        record: &crate::contract::signal::SignalRecord,
+        mapped: &[crate::contract::SessionEvent],
+        untaken: bool,
+    ) -> HoldOutcome {
+        if self.held.is_none() {
+            return HoldOutcome::Keep;
+        }
+        if !untaken || is_model_not_found(record) {
+            self.held = None;
+            return HoldOutcome::Drop;
+        }
+        // Anything else the agent reports goes out after the start, so the
+        // start never lands after (and over) a newer report.
+        let real = !mapped.is_empty();
+        match (real, self.held.take()) {
+            (true, Some((start, _))) => HoldOutcome::Release(start),
+            (_, held) => {
+                self.held = held;
+                HoldOutcome::Keep
+            }
+        }
+    }
+
+    /// Between records: a refusal found on screen drops the turn; past
+    /// [`FIRST_TURN_HOLD`] it is real.
+    pub fn on_tick(&mut self, now: Instant, untaken: bool) -> HoldOutcome {
+        match self.held.take() {
+            None => HoldOutcome::Keep,
+            Some(_) if !untaken => HoldOutcome::Drop,
+            Some((start, since)) if now.duration_since(since) >= FIRST_TURN_HOLD => {
+                HoldOutcome::Release(start)
+            }
+            held => {
+                self.held = held;
+                HoldOutcome::Keep
+            }
+        }
+    }
+}
+
 /// A finished turn: the launch was taken, so a refusal can no longer come.
 /// A hook that says a tool ran (`PostToolUse`, with or without its tool).
 fn ran_a_tool(event: &str) -> bool {
@@ -2393,6 +2496,11 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
     if let Some(stream) = stream {
         super::opencode_stream::watch(app.clone(), Arc::clone(&session), stream, confidence);
     }
+    // PLN-02: the turns the agent's reports mean. Shared with the transcript
+    // watcher, which sees a turn the person interrupted (no hook says so).
+    let turns = Arc::new(StdMutex::new(
+        crate::contract::signal::TurnTracker::default(),
+    ));
     // F14: the same spool names the agent's transcript; its own watcher
     // reads the context usage from there.
     crate::context_usage::watch(
@@ -2400,6 +2508,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
         Arc::clone(&session),
         session_dir.join(SIGNALS_FILE),
         nonce.clone(),
+        Arc::clone(&turns),
     );
     // The OS layer: process facts about this agent, below its own reports.
     super::os_activity::watch(
@@ -2433,8 +2542,8 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
         let reports_in_rollout = crate::agent_catalog::agent(&agent)
             .and_then(|a| a.capabilities.as_ref())
             .is_some_and(|c| c.model_report == "rollout");
-        // PLN-02: the turns the agent's reports mean.
-        let mut turns = crate::contract::signal::TurnTracker::default();
+        // A refused launch runs no turn: its first turn's start waits.
+        let mut first_turn = FirstTurnHold::default();
         // LEAD-01: a reattached agent's spool is read from its start first,
         // to rebuild its status, identity and usage; what it asked for then
         // is not acted on again (no refusal watch, no check results).
@@ -2463,6 +2572,20 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 let Ok(record) = parse_signal_line(line) else {
                     continue;
                 };
+                if record.nonce == nonce && first_turn.is_holding() {
+                    let mapped = map_signal_record(&record, &nonce, confidence, &source);
+                    let untaken = crate::agent_caps::watch::is_untaken(&session_id);
+                    match first_turn.on_record(&record, &mapped, untaken) {
+                        HoldOutcome::Release(start) => out.push(start),
+                        HoldOutcome::Drop => {
+                            log::info!("[LAUNCH] {session_id}: the launch was refused; its first turn never ran");
+                            if let Ok(mut t) = turns.lock() {
+                                t.abandon();
+                            }
+                        }
+                        HoldOutcome::Keep => {}
+                    }
+                }
                 // N19: a record that puts the agent under its usage limit is
                 // told as a `limit` event and a `limited` status; its plain
                 // meaning (an error for the rate-limited stop, an attention
@@ -2490,23 +2613,54 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 let limit_events = limits.observe(&record, &nonce);
                 let is_limit = record.nonce == nonce
                     && crate::limits::classify(&record) == crate::limits::LimitSignal::Limited;
+                // The last status this record means, and how sure it is.
+                let mut record_status: Option<(
+                    crate::contract::AgentStatusKind,
+                    crate::contract::Confidence,
+                )> = None;
                 if !is_limit {
                     let mut named_model = false;
                     let mapped = map_signal_record(&record, &nonce, confidence, &source);
-                    let mut framed = turns.frame(mapped);
-                    if refused {
-                        // A refused launch took no turn (a turn start would
-                        // also clear the refusal the person must see).
-                        turns.abandon();
-                        framed.retain(|e| {
-                            !matches!(e, crate::contract::SessionEvent::TurnStart { .. })
-                        });
+                    // The CLI refused this launch (its words were found on
+                    // screen, maybe before this record was read): whatever
+                    // it reports now starts no turn.
+                    let refused = refused
+                        || (!replaying
+                            && record.nonce == nonce
+                            && crate::agent_caps::watch::was_refused(&session_id));
+                    let mut framed = match turns.lock() {
+                        Ok(mut t) => {
+                            let mut framed = t.frame(mapped);
+                            if refused {
+                                // A refused launch took no turn (a turn start
+                                // would also clear the refusal the person
+                                // must see).
+                                t.abandon();
+                                framed.retain(|e| {
+                                    !matches!(e, crate::contract::SessionEvent::TurnStart { .. })
+                                });
+                            }
+                            framed
+                        }
+                        Err(_) => mapped,
+                    };
+                    if !replaying && record.nonce == nonce {
+                        first_turn.take_first_start(
+                            &mut framed,
+                            crate::agent_caps::watch::PROMPT_SENT_EVENTS
+                                .contains(&record.event.as_str())
+                                && crate::agent_caps::watch::is_untaken(&session_id),
+                            Instant::now(),
+                        );
                     }
                     for event in framed {
                         let event = identity.merge(event, &mut named_model);
                         match &event {
                             crate::contract::SessionEvent::Status { status, .. } => {
                                 reported = Some(status.kind);
+                                if record.nonce == nonce {
+                                    record_status = Some((status.kind, status.confidence));
+                                }
                             }
                             crate::contract::SessionEvent::Exit { .. } => {
                                 reported = Some(crate::contract::AgentStatusKind::Exited);
@@ -2555,9 +2709,9 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 if is_limit {
                     // A usage limit stopped the turn; the `limited` status
                     // that follows is what the session shows.
-                    if let Some(event) =
-                        turns.fail_running(record.at_ms(), Some(source.clone()), String::new())
-                    {
+                    if let Some(event) = turns.lock().ok().and_then(|mut t| {
+                        t.fail_running(record.at_ms(), Some(source.clone()), String::new())
+                    }) {
                         out.push(event);
                     }
                 }
@@ -2576,6 +2730,17 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     } else {
                         super::os_activity::note_agent_signal(&session_id);
                     }
+                    if let Some((kind, sure)) = record_status {
+                        // An exact ask of the person: their next key answers
+                        // it (os_activity, `note_person_input`).
+                        use crate::contract::{AgentStatusKind as K, Confidence};
+                        let asks = sure == Confidence::Exact
+                            && matches!(kind, K::NeedsApproval | K::NeedsAnswer);
+                        super::os_activity::note_agent_status(
+                            &session_id,
+                            asks.then_some(source.as_str()),
+                        );
+                    }
                     let delta = subagent_delta(&record);
                     if delta != 0 {
                         subagents = (subagents + delta).max(0);
@@ -2593,6 +2758,19 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
             // one still running stays, where it started.
             if replaying {
                 out = drop_ended_turns(out);
+            }
+            let untaken = crate::agent_caps::watch::is_untaken(&session_id);
+            match first_turn.on_tick(Instant::now(), untaken) {
+                HoldOutcome::Release(start) => out.push(start),
+                HoldOutcome::Drop => {
+                    log::info!(
+                        "[LAUNCH] {session_id}: the launch was refused; its first turn never ran"
+                    );
+                    if let Ok(mut t) = turns.lock() {
+                        t.abandon();
+                    }
+                }
+                HoldOutcome::Keep => {}
             }
             for event in out {
                 crate::contract::emit_session_event(&app, &session_id, event);
@@ -2799,6 +2977,225 @@ mod tests {
     }
 
     use super::*;
+
+    mod first_turn_hold {
+        use super::super::*;
+        use crate::contract::signal::{map_signal_record, parse_signal_line, TurnTracker};
+        use crate::contract::{Confidence, SessionEvent};
+
+        /// One spool record through the same steps the spool watcher takes.
+        fn feed(
+            hold: &mut FirstTurnHold,
+            turns: &mut TurnTracker,
+            event: &str,
+            payload: &str,
+            untaken: bool,
+            now: Instant,
+        ) -> Vec<String> {
+            let line = format!(
+                r#"{{"v":1,"ts":1790000000,"session":"s","agent":"claude","nonce":"n","event":"{event}","payload":{payload}}}"#
+            );
+            let record = parse_signal_line(&line).unwrap();
+            let mapped = map_signal_record(&record, "n", Confidence::Exact, "hook:claude");
+            let mut out = Vec::new();
+            match hold.on_record(&record, &mapped, untaken) {
+                HoldOutcome::Release(start) => out.push(start),
+                HoldOutcome::Drop => turns.abandon(),
+                HoldOutcome::Keep => {}
+            }
+            let mut framed = turns.frame(mapped);
+            let prompt = crate::agent_caps::watch::PROMPT_SENT_EVENTS.contains(&event);
+            hold.take_first_start(&mut framed, prompt && untaken, now);
+            out.extend(framed);
+            out.iter().map(kind).collect()
+        }
+
+        fn kind(e: &SessionEvent) -> String {
+            match e {
+                SessionEvent::Status { status, .. } => format!("status:{:?}", status.kind),
+                SessionEvent::TurnStart { n, .. } => format!("turn_start:{n}"),
+                SessionEvent::TurnEnd { n, .. } => format!("turn_end:{n}"),
+                SessionEvent::TurnFailed { n, .. } => format!("turn_failed:{n}"),
+                SessionEvent::Exit { .. } => "exit".into(),
+                other => format!("{other:?}").chars().take(10).collect(),
+            }
+        }
+
+        #[test]
+        fn an_unknown_model_on_the_first_turn_runs_no_turn() {
+            // Claude Code 2.1.287 with --model not-a-model: the prompt hook,
+            // then StopFailure model_not_found, then the refusal on screen.
+            let (mut hold, mut turns, t0) = (
+                FirstTurnHold::default(),
+                TurnTracker::default(),
+                Instant::now(),
+            );
+            assert_eq!(
+                feed(&mut hold, &mut turns, "UserPromptSubmit", "{}", true, t0),
+                ["status:Working"],
+                "the start is held back"
+            );
+            assert!(hold.is_holding());
+            assert_eq!(
+                feed(
+                    &mut hold,
+                    &mut turns,
+                    "StopFailure",
+                    r#"{"error":"model_not_found"}"#,
+                    true,
+                    t0
+                ),
+                ["status:Error"],
+                "no turn_failed: no turn ran"
+            );
+            assert!(!hold.is_holding());
+            assert_eq!(turns.current(), None);
+            assert_eq!(
+                hold.on_tick(t0 + FIRST_TURN_HOLD * 2, true),
+                HoldOutcome::Keep
+            );
+            // A retry's first prompt is turn 1 again.
+            feed(&mut hold, &mut turns, "UserPromptSubmit", "{}", true, t0);
+            match hold.on_tick(t0 + FIRST_TURN_HOLD, true) {
+                HoldOutcome::Release(SessionEvent::TurnStart { n, .. }) => assert_eq!(n.get(), 1),
+                other => panic!("unexpected {other:?}"),
+            }
+        }
+
+        #[test]
+        fn a_real_first_turn_starts_when_the_agent_goes_on_or_after_the_hold() {
+            let (mut hold, mut turns, t0) = (
+                FirstTurnHold::default(),
+                TurnTracker::default(),
+                Instant::now(),
+            );
+            feed(&mut hold, &mut turns, "UserPromptSubmit", "{}", true, t0);
+            assert_eq!(
+                feed(
+                    &mut hold,
+                    &mut turns,
+                    "PreToolUse",
+                    r#"{"tool_name":"Bash"}"#,
+                    true,
+                    t0
+                ),
+                ["turn_start:1", "status:Working"],
+                "the start goes out before what follows it"
+            );
+            assert_eq!(
+                feed(&mut hold, &mut turns, "Stop", "{}", true, t0),
+                ["status:DoneUnread", "turn_end:1"]
+            );
+            // Another error (a usage limit, a server error) is a real turn
+            // that failed.
+            let (mut hold, mut turns) = (FirstTurnHold::default(), TurnTracker::default());
+            feed(&mut hold, &mut turns, "UserPromptSubmit", "{}", true, t0);
+            assert_eq!(
+                feed(
+                    &mut hold,
+                    &mut turns,
+                    "StopFailure",
+                    r#"{"error":"server_error"}"#,
+                    true,
+                    t0
+                ),
+                ["turn_start:1", "status:Error", "turn_failed:1"]
+            );
+            // Nothing more from the agent: the hold ends on its own.
+            let (mut hold, mut turns) = (FirstTurnHold::default(), TurnTracker::default());
+            feed(&mut hold, &mut turns, "UserPromptSubmit", "{}", true, t0);
+            assert_eq!(
+                hold.on_tick(t0 + FIRST_TURN_HOLD / 2, true),
+                HoldOutcome::Keep
+            );
+            assert!(matches!(
+                hold.on_tick(t0 + FIRST_TURN_HOLD, true),
+                HoldOutcome::Release(SessionEvent::TurnStart { .. })
+            ));
+        }
+
+        #[test]
+        fn a_refusal_seen_on_screen_drops_the_held_turn() {
+            let (mut hold, mut turns, t0) = (
+                FirstTurnHold::default(),
+                TurnTracker::default(),
+                Instant::now(),
+            );
+            feed(&mut hold, &mut turns, "UserPromptSubmit", "{}", true, t0);
+            // The refusal watch forgot the launch (it was refused): the
+            // helper's exit report that follows starts nothing.
+            assert_eq!(hold.on_tick(t0, false), HoldOutcome::Drop);
+            let (mut hold, mut turns) = (FirstTurnHold::default(), TurnTracker::default());
+            feed(&mut hold, &mut turns, "UserPromptSubmit", "{}", true, t0);
+            assert_eq!(
+                feed(
+                    &mut hold,
+                    &mut turns,
+                    "hermes.exited",
+                    r#"{"exit_code":1}"#,
+                    false,
+                    t0
+                ),
+                ["exit"]
+            );
+        }
+
+        #[test]
+        fn only_a_prompt_is_held_so_the_start_never_lands_over_a_newer_report() {
+            // The first sign of work is an ask (the fake's `p`): its start
+            // goes out with it, never after it (it would read as working).
+            let (mut hold, mut turns, t0) = (
+                FirstTurnHold::default(),
+                TurnTracker::default(),
+                Instant::now(),
+            );
+            assert_eq!(
+                feed(
+                    &mut hold,
+                    &mut turns,
+                    "PermissionRequest",
+                    r#"{"tool_name":"Bash"}"#,
+                    true,
+                    t0
+                ),
+                ["turn_start:1", "status:NeedsApproval"]
+            );
+            assert!(!hold.is_holding());
+            // A held prompt's start goes out before any later report, a
+            // notification included.
+            let (mut hold, mut turns) = (FirstTurnHold::default(), TurnTracker::default());
+            feed(&mut hold, &mut turns, "UserPromptSubmit", "{}", true, t0);
+            let out = feed(
+                &mut hold,
+                &mut turns,
+                "Notification",
+                r#"{"notification_type":"idle_prompt"}"#,
+                true,
+                t0,
+            );
+            assert_eq!(out[0], "turn_start:1");
+        }
+
+        #[test]
+        fn a_launch_that_was_taken_or_is_not_watched_holds_nothing() {
+            let (mut hold, mut turns, t0) = (
+                FirstTurnHold::default(),
+                TurnTracker::default(),
+                Instant::now(),
+            );
+            assert_eq!(
+                feed(&mut hold, &mut turns, "UserPromptSubmit", "{}", false, t0),
+                ["turn_start:1", "status:Working"]
+            );
+            assert!(!hold.is_holding());
+            // Only the first turn is ever held.
+            feed(&mut hold, &mut turns, "Stop", "{}", false, t0);
+            assert_eq!(
+                feed(&mut hold, &mut turns, "UserPromptSubmit", "{}", true, t0),
+                ["turn_start:2", "status:Working"]
+            );
+        }
+    }
 
     #[test]
     fn a_replay_keeps_the_running_turn_where_it_started_and_drops_ended_ones() {

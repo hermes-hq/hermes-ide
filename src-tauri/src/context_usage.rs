@@ -29,6 +29,7 @@ use std::time::Duration;
 use serde_json::Value;
 use tauri::AppHandle;
 
+use crate::contract::signal::TurnTracker;
 use crate::contract::{emit_session_event, SessionEvent, UsageConfidence, Usd};
 use crate::pty::models::{Session, SessionPhase};
 
@@ -640,6 +641,7 @@ impl UsageTracker {
 /// usage goes out, not a replay of every past call and compaction. The
 /// session's totals (F31) go out once per batch, after its other events,
 /// when they changed.
+#[cfg(test)]
 pub fn events_for_lines(
     tracker: &mut UsageTracker,
     spend: &mut SpendTracker,
@@ -648,11 +650,30 @@ pub fn events_for_lines(
     source: &str,
     history: bool,
 ) -> Vec<SessionEvent> {
+    let mut interrupts = InterruptWatch::default();
+    read_lines(tracker, spend, &mut interrupts, lines, at, source, history).0
+}
+
+/// [`events_for_lines`], and how many turns the person interrupted in
+/// these lines (see [`InterruptWatch`]; never in `history`).
+pub fn read_lines(
+    tracker: &mut UsageTracker,
+    spend: &mut SpendTracker,
+    interrupts: &mut InterruptWatch,
+    lines: &[String],
+    at: i64,
+    source: &str,
+    history: bool,
+) -> (Vec<SessionEvent>, usize) {
     let mut events: Vec<SessionEvent> = Vec::new();
+    let mut interrupted = 0;
     for line in lines {
         let Ok(v) = serde_json::from_str::<Value>(line) else {
             continue;
         };
+        if interrupts.feed(&v) && !history {
+            interrupted += 1;
+        }
         if let Some(record) = spend_record(&v) {
             spend.feed(record);
         }
@@ -666,7 +687,75 @@ pub fn events_for_lines(
         events = last.into_iter().collect();
     }
     events.extend(spend.event(at, source));
-    events
+    (events, interrupted)
+}
+
+// ─── A turn the person interrupted ───────────────────────────────────
+
+/// Claude Code fires no hook when the person rejects a tool call with Esc
+/// ("Interrupted · What should Claude do instead?") or interrupts the turn:
+/// its transcript records a `user` line with `toolUseResult: "User rejected
+/// tool use"` or the text `[Request interrupted by user…]`, then the turn's
+/// `system`/`turn_duration` line. This tells that pair apart from the
+/// person's rejection followed by more work (the agent goes on in the same
+/// turn: an `assistant` line or a new prompt comes in between). Only the
+/// line types are read, never the text of the conversation beyond that
+/// marker.
+#[derive(Debug, Default)]
+pub struct InterruptWatch {
+    pending: bool,
+}
+
+const INTERRUPT_MARK: &str = "[Request interrupted by user";
+
+fn is_interrupt_line(v: &Value) -> bool {
+    if v.get("toolUseResult").and_then(Value::as_str) == Some("User rejected tool use") {
+        return true;
+    }
+    let content = v.get("message").and_then(|m| m.get("content"));
+    match content {
+        Some(Value::String(s)) => s.starts_with(INTERRUPT_MARK),
+        Some(Value::Array(parts)) => parts.iter().any(|p| {
+            p.get("type").and_then(Value::as_str) == Some("text")
+                && p.get("text")
+                    .and_then(Value::as_str)
+                    .is_some_and(|t| t.starts_with(INTERRUPT_MARK))
+        }),
+        _ => false,
+    }
+}
+
+impl InterruptWatch {
+    /// One transcript line; true when it closes a turn the person
+    /// interrupted.
+    pub fn feed(&mut self, v: &Value) -> bool {
+        // A sub-agent's lines belong to its own conversation.
+        if v.get("isSidechain").and_then(Value::as_bool) == Some(true) {
+            return false;
+        }
+        match v.get("type").and_then(Value::as_str) {
+            Some("user") => {
+                if is_interrupt_line(v) {
+                    self.pending = true;
+                } else if v.get("toolUseResult").is_none()
+                    && v.get("isMeta").and_then(Value::as_bool) != Some(true)
+                {
+                    // A new prompt: the interrupted turn is behind us.
+                    self.pending = false;
+                }
+                false
+            }
+            // The agent went on after the rejection (feedback was typed).
+            Some("assistant") => {
+                self.pending = false;
+                false
+            }
+            Some("system") if v.get("subtype").and_then(Value::as_str) == Some("turn_duration") => {
+                std::mem::take(&mut self.pending)
+            }
+            _ => false,
+        }
+    }
 }
 
 // ─── The spool: where the transcript is ──────────────────────────────
@@ -726,12 +815,15 @@ fn now_ms() -> i64 {
 }
 
 /// Watch one launch's spool for the transcript it names, and tail that
-/// transcript until the agent is gone or the session is.
+/// transcript until the agent is gone or the session is. `turns`: the
+/// launch's turns (the spool watcher's), ended here when the transcript
+/// shows the person interrupted one (an exact `turn_interrupted`).
 pub(crate) fn watch(
     app: AppHandle,
     session: Arc<StdMutex<Session>>,
     spool_file: PathBuf,
     nonce: String,
+    turns: Arc<StdMutex<TurnTracker>>,
 ) {
     let session_id = match session.lock() {
         Ok(s) => s.id.clone(),
@@ -744,6 +836,7 @@ pub(crate) fn watch(
         let mut transcript: Option<(LineTail, String, bool)> = None;
         let mut tracker = UsageTracker::default();
         let mut spend = SpendTracker::default();
+        let mut interrupts = InterruptWatch::default();
         loop {
             std::thread::sleep(POLL);
             let gone = match session.lock() {
@@ -777,6 +870,7 @@ pub(crate) fn watch(
                             let stated = tracker.stated.take();
                             tracker = UsageTracker::default();
                             tracker.stated = stated;
+                            interrupts = InterruptWatch::default();
                         }
                     }
                     Some(SpoolNote::Exited) => exited = true,
@@ -785,10 +879,28 @@ pub(crate) fn watch(
             }
             if let Some((tail, source, history)) = transcript.as_mut() {
                 let lines = tail.poll();
-                for event in
-                    events_for_lines(&mut tracker, &mut spend, &lines, now_ms(), source, *history)
-                {
+                let at = now_ms();
+                let (events, interrupted) = read_lines(
+                    &mut tracker,
+                    &mut spend,
+                    &mut interrupts,
+                    &lines,
+                    at,
+                    source,
+                    *history,
+                );
+                for event in events {
                     emit_session_event(&app, &session_id, event);
+                }
+                if interrupted > 0 {
+                    let event = turns
+                        .lock()
+                        .ok()
+                        .and_then(|mut t| t.interrupt_running(at, Some(source.clone())));
+                    if let Some(event) = event {
+                        log::info!("[CONTEXT] {session_id}: the person interrupted the turn");
+                        emit_session_event(&app, &session_id, event);
+                    }
                 }
                 *history = false;
             }
@@ -1506,5 +1618,120 @@ mod tests {
         let got = near.poll();
         assert_eq!(got, vec!["line-0998".to_string(), "line-0999".to_string()]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The lines Claude Code 2.1.287 wrote around an Esc at a permission
+    /// prompt (the real transcript's shapes, text shortened).
+    fn rejected_turn() -> Vec<String> {
+        vec![
+            json!({"type":"user","message":{"role":"user","content":"Use the Bash tool to run curl"}}).to_string(),
+            json!({"type":"assistant","message":{"role":"assistant","model":"claude-haiku-4-5-20251001","content":[{"type":"tool_use","name":"Bash","input":{}}],"usage":{"input_tokens":3,"cache_creation_input_tokens":0,"cache_read_input_tokens":0,"output_tokens":5}}}).to_string(),
+            json!({"type":"user","toolUseResult":"User rejected tool use","message":{"role":"user","content":[{"type":"tool_result","content":"The user doesn't want to proceed with this tool use.","is_error":true}]}}).to_string(),
+            json!({"type":"user","message":{"role":"user","content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}}).to_string(),
+            json!({"type":"system","subtype":"turn_duration","durationMs":2815,"messageCount":36}).to_string(),
+        ]
+    }
+
+    fn interrupts(lines: &[String], history: bool) -> usize {
+        let mut w = InterruptWatch::default();
+        let (mut t, mut s) = (UsageTracker::default(), SpendTracker::default());
+        read_lines(
+            &mut t,
+            &mut s,
+            &mut w,
+            lines,
+            1,
+            "transcript:claude",
+            history,
+        )
+        .1
+    }
+
+    #[test]
+    fn an_esc_at_a_permission_prompt_is_an_interrupted_turn() {
+        assert_eq!(interrupts(&rejected_turn(), false), 1);
+        // The usage of the turn's call is still read from the same lines.
+        let mut w = InterruptWatch::default();
+        let (mut t, mut s) = (UsageTracker::default(), SpendTracker::default());
+        let (events, n) = read_lines(
+            &mut t,
+            &mut s,
+            &mut w,
+            &rejected_turn(),
+            1,
+            "transcript:claude",
+            false,
+        );
+        assert_eq!(n, 1);
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Context { .. })));
+        // Split across two reads, it is still one.
+        let lines = rejected_turn();
+        let mut w = InterruptWatch::default();
+        let (mut t, mut s) = (UsageTracker::default(), SpendTracker::default());
+        let a = read_lines(
+            &mut t,
+            &mut s,
+            &mut w,
+            &lines[..4],
+            1,
+            "transcript:claude",
+            false,
+        )
+        .1;
+        let b = read_lines(
+            &mut t,
+            &mut s,
+            &mut w,
+            &lines[4..],
+            2,
+            "transcript:claude",
+            false,
+        )
+        .1;
+        assert_eq!((a, b), (0, 1));
+    }
+
+    #[test]
+    fn a_plain_interrupt_then_the_turn_duration_is_one_too() {
+        let lines = vec![
+            json!({"type":"user","message":{"role":"user","content":"[Request interrupted by user]"}}).to_string(),
+            json!({"type":"system","subtype":"turn_duration","durationMs":900}).to_string(),
+        ];
+        assert_eq!(interrupts(&lines, false), 1);
+    }
+
+    #[test]
+    fn a_finished_turn_or_a_rejection_the_agent_works_past_is_not_interrupted() {
+        // A normal turn: its duration line ends nothing the hooks did not.
+        let normal = vec![
+            json!({"type":"user","message":{"role":"user","content":"Reply with ok"}}).to_string(),
+            json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"ok"}]}}).to_string(),
+            json!({"type":"system","subtype":"stop_hook_summary"}).to_string(),
+            json!({"type":"system","subtype":"turn_duration","durationMs":1427}).to_string(),
+        ];
+        assert_eq!(interrupts(&normal, false), 0);
+        // Rejected with feedback: the agent goes on in the same turn.
+        let mut on = rejected_turn();
+        on.truncate(3);
+        on.push(json!({"type":"assistant","message":{"role":"assistant","content":[{"type":"text","text":"Understood"}]}}).to_string());
+        on.push(json!({"type":"system","subtype":"turn_duration","durationMs":5000}).to_string());
+        assert_eq!(interrupts(&on, false), 0);
+        // A sub-agent's interrupt is its own conversation's.
+        let side: Vec<String> = rejected_turn()
+            .into_iter()
+            .map(|l| {
+                let mut v: Value = serde_json::from_str(&l).unwrap();
+                v["isSidechain"] = json!(true);
+                v.to_string()
+            })
+            .collect();
+        assert_eq!(interrupts(&side, false), 0);
+    }
+
+    #[test]
+    fn an_interrupt_already_in_the_file_is_history() {
+        assert_eq!(interrupts(&rejected_turn(), true), 0);
     }
 }

@@ -32,6 +32,17 @@
 //! status bridge). Once a command starts under the agent, or the tree gets
 //! busy, after the guess, the person has answered: the layer takes the
 //! guess back with a guessed `working` under the same source.
+//!
+//! An agent that asks the person itself (an exact `needs_approval` or
+//! `needs_answer`, Claude Code's PermissionRequest) says nothing when the
+//! person answers yes: its next hook comes once the approved command has
+//! finished, so a long command would read "needs approval" all along. A key
+//! the person sends to that terminal after the ask is the answer
+//! ([`note_person_input`]): the ask is taken back with a guessed `idle`
+//! under the agent's own source (a source may correct itself; a guessed
+//! idle yields to any evidence of work), and from there this layer's
+//! verdict says whether the agent works. Nothing of what was asked or typed
+//! is kept.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
@@ -329,6 +340,27 @@ pub fn approval_answered_event(reason: &str, source: &str, at: i64) -> SessionEv
     }
 }
 
+/// The events that take back an exact ask the person answered (see the
+/// module docs): a guessed `idle` under the ask's own source, then, when
+/// this layer already sees the agent working (it says so only on a
+/// change), that verdict again so it shows at once.
+pub fn ask_answered_events(source: &str, working: Option<&str>, at: i64) -> Vec<SessionEvent> {
+    let mut out = vec![SessionEvent::Status {
+        at,
+        source: Some(source.to_string()),
+        tags: None,
+        status: AgentStatus {
+            kind: AgentStatusKind::Idle,
+            confidence: Confidence::Guessed,
+            detail: String::new(),
+        },
+    }];
+    if let Some(reason) = working {
+        out.push(verdict_event(&Verdict::Working(reason.to_string()), at));
+    }
+    out
+}
+
 /// The guessed "needs approval" for a pending tool call.
 pub fn approval_guess_event(tool: &str, source: &str, at: i64) -> SessionEvent {
     SessionEvent::Status {
@@ -503,6 +535,9 @@ struct Watched {
     seen_helper: bool,
     gone_ticks: u32,
     pending: Option<Pending>,
+    /// The agent's own source while it asks the person (an exact
+    /// `needs_approval` / `needs_answer`), until the person answers.
+    asked: Option<String>,
 }
 
 fn registry() -> &'static Mutex<HashMap<String, Watched>> {
@@ -540,6 +575,7 @@ pub fn watch(
                 seen_helper: false,
                 gone_ticks: 0,
                 pending: None,
+                asked: None,
             },
         );
     }
@@ -579,6 +615,36 @@ pub fn note_agent_signal(session_id: &str) {
             w.pending = None;
         }
     }
+}
+
+/// The agent reported a status: `asking` is its source when the status is
+/// an exact ask of the person (see the module docs), else None.
+pub fn note_agent_status(session_id: &str, asking: Option<&str>) {
+    if let Ok(mut reg) = registry().lock() {
+        if let Some(w) = reg.get_mut(session_id) {
+            w.asked = asking.map(str::to_string);
+        }
+    }
+}
+
+/// The person sent a key to the session's terminal. After an exact ask it
+/// is the answer: the ask is taken back (see the module docs). Returns
+/// whether it was.
+pub fn note_person_input(session_id: &str) -> bool {
+    let answered = registry().lock().ok().and_then(|mut reg| {
+        let w = reg.get_mut(session_id)?;
+        let source = w.asked.take()?;
+        let working = w.judge.working.then(|| w.judge.reason.clone());
+        Some((w.app.clone(), source, working))
+    });
+    let Some((app, source, working)) = answered else {
+        return false;
+    };
+    let at = crate::turn_ledger::now_ms();
+    for event in ask_answered_events(&source, working.as_deref(), at) {
+        crate::contract::emit_session_event(&app, session_id, event);
+    }
+    true
 }
 
 fn run() {
@@ -987,6 +1053,40 @@ mod tests {
             }
             other => panic!("{other:?}"),
         }
+    }
+
+    #[test]
+    fn an_answered_ask_hands_the_status_to_this_layer() {
+        // Quiet so far: a guessed idle under the agent's own source, which
+        // takes back its exact ask and yields to the next verdict.
+        let quiet = ask_answered_events("hook:claude", None, 7);
+        assert_eq!(quiet.len(), 1);
+        match &quiet[0] {
+            SessionEvent::Status {
+                at, source, status, ..
+            } => {
+                assert_eq!((*at, source.as_deref()), (7, Some("hook:claude")));
+                assert_eq!(status.kind, AgentStatusKind::Idle);
+                assert_eq!(status.confidence, Confidence::Guessed);
+                assert_eq!(status.detail, "", "nothing asked or typed is kept");
+            }
+            other => panic!("{other:?}"),
+        }
+        // Already working: that verdict follows at once.
+        let busy = ask_answered_events("hook:claude", Some("a command is running (zsh)"), 7);
+        assert_eq!(busy.len(), 2);
+        assert_eq!(
+            busy[1],
+            verdict_event(&Verdict::Working("a command is running (zsh)".into()), 7)
+        );
+    }
+
+    #[test]
+    fn a_key_answers_only_an_exact_ask_once() {
+        // Nothing watched: nothing to answer.
+        assert!(!note_person_input("no-such-session"));
+        note_agent_status("no-such-session", Some("hook:claude"));
+        assert!(!note_person_input("no-such-session"));
     }
 
     /// The real process table: a helper started as `hi run <id>` (a shell

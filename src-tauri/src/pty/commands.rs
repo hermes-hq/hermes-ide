@@ -2137,6 +2137,12 @@ pub fn write_to_session(
     // first Enter in a resumed agent ends its replayed history.
     crate::agent_caps::watch::user_input(&session_id, &bytes);
 
+    // A key after the agent asked the person (approval, a question) is the
+    // answer; the agent itself says nothing until the work is done.
+    if crate::pty::launch::is_keystroke(&bytes) {
+        crate::pty::os_activity::note_person_input(&session_id);
+    }
+
     // A key typed at an agent's startup prompt answers it: the "waiting at
     // a startup prompt" report must not outlive the prompt.
     if let Ok(mut s) = session.session.lock() {

@@ -14,7 +14,7 @@
 // phase, dimmed, so a session is never labelled with a certainty it does
 // not have.
 
-import { OS_SOURCE, foldStatus, isAgentReported, isHelperStartedEcho, isHeuristicSource, resumedIndex } from "../agent/status/deriveStatus";
+import { OS_SOURCE, confidenceOfSource, foldStatus, isAgentReported, isHelperStartedEcho, isHeuristicSource, resumedIndex } from "../agent/status/deriveStatus";
 import { getAgent } from "../catalog/agentCatalog";
 import { reporterOfSource } from "../agent/status/presentation";
 import { userInputTimes } from "../agent/status/userInput";
@@ -91,8 +91,16 @@ export function stripStatus(
   // (deriveStatus, rule 6).
   let status: AgentStatus | null = null;
   let raw: string | undefined;
+  // A turn the person interrupted ends the turn as the agent recorded it
+  // (its transcript; no hook says so): idle, as sure as its source.
   const reported = (e: SessionEventSnapshot["events"][number]): AgentStatus | null =>
-    e.type === "exit" ? { kind: "exited", confidence: "exact", detail: "" } : e.type === "status" && !isHeuristicSource(e.source) ? e.status : null;
+    e.type === "exit"
+      ? { kind: "exited", confidence: "exact", detail: "" }
+      : e.type === "status" && !isHeuristicSource(e.source)
+        ? e.status
+        : e.type === "turn_interrupted" && !isHeuristicSource(e.source)
+          ? { kind: "idle", confidence: confidenceOfSource(e.source), detail: "" }
+          : null;
   // The launch helper's "started" says nothing once the agent spoke itself
   // (deriveStatus, rule 8): it can land after the agent's first prompt.
   const firstAgentReport = snapshot.events.findIndex((e) => reported(e) !== null && isAgentReported(e.source));
@@ -127,7 +135,7 @@ export function stripStatus(
     }
     return { status: status ?? guessedStatus(phase), source: "guessed" };
   }
-  const source: StatusSource = raw?.startsWith("hook:") ? "hook" : raw === "osc" ? "osc" : raw?.startsWith("stream:") ? "stream" : raw === "e2e" ? "e2e" : raw === "hi" || raw === "hermes" || isHeuristicSource(raw) ? "hermes" : status.confidence === "signal" ? "osc" : "hook";
+  const source: StatusSource = raw?.startsWith("hook:") || raw?.startsWith("transcript:") ? "hook" : raw === "osc" ? "osc" : raw?.startsWith("stream:") ? "stream" : raw === "e2e" ? "e2e" : raw === "hi" || raw === "hermes" || isHeuristicSource(raw) ? "hermes" : status.confidence === "signal" ? "osc" : "hook";
   const reporter = reporterOfSource(raw);
   return reporter && (source === "hook" || source === "stream") ? { status, source, reporter } : { status, source };
 }
