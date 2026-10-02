@@ -1,12 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import "../styles/components/DirtyWorktreeDialog.css";
 import { Button, CloseButton } from "./ui";
+import { translate } from "../i18n/registry";
 
 export interface DirtyWorktreeChange {
   projectId: string;
   projectName: string;
+  /** The branch Hermes recorded for the task's worktree. */
   branchName: string | null;
   files: Array<{ path: string; status: string }>;
+  /** The branch HEAD is really on (null: detached, or unknown). */
+  actualBranch?: string | null;
+  detached?: boolean;
+  /** Commits on a detached HEAD that no branch, tag or remote branch has. */
+  lostCommits?: number;
+  /** An operation in progress: rebase, merge, bisect, cherry-pick, revert. */
+  operation?: string | null;
+  /** Submodules with uncommitted changes inside them. */
+  dirtySubmodules?: string[];
+  /** The check itself failed (the worktree is never deleted unasked then). */
+  checkError?: string | null;
 }
 
 export interface StashError {
@@ -25,9 +38,18 @@ interface DirtyWorktreeDialogProps {
    * branch). Neither of those touches the stash.
    */
   variant?: "stash" | "commit";
+  /** The session's program was running: it is stopped before anything is saved. */
+  agentWorking?: boolean;
+  /** The session already stopped; its worktrees wait on disk to be saved. */
+  closed?: boolean;
+  keptPaths?: Record<string, string>;
+  /** A commit hook refused the commit. */
+  hookRefusal?: { projectName: string; hook: string; output: string } | null;
   onStashAndClose: () => Promise<void> | void;
   onCommitAndClose?: () => Promise<void> | void;
   onArchiveAndClose?: () => Promise<void> | void;
+  onSaveDetachedAndClose?: () => Promise<void> | void;
+  onKeepAndClose?: () => Promise<void> | void;
   onCloseAnyway: () => void;
   onCancel: () => void;
 }
@@ -68,16 +90,51 @@ export function groupFilesByStatus(
   return { modified, added, deleted, other };
 }
 
+type Translate = (key: string, values?: Record<string, string | number>) => string;
+const english: Translate = (key, values = {}) => {
+  const words: Record<string, string> = {
+    "dirty.breakdownModified": "{count} modified",
+    "dirty.breakdownNew": "{count} new",
+    "dirty.breakdownDeleted": "{count} deleted",
+    "dirty.breakdownOther": "{count} other",
+  };
+  return (words[key] ?? key).replace(/\{(\w+)\}/g, (_, k: string) => String(values[k] ?? ""));
+};
+
 export function formatFileBreakdown(
   files: Array<{ path: string; status: string }>,
+  t: Translate = english,
 ): string {
   const { modified, added, deleted, other } = groupFilesByStatus(files);
   const parts: string[] = [];
-  if (modified > 0) parts.push(`${modified} modified`);
-  if (added > 0) parts.push(`${added} new`);
-  if (deleted > 0) parts.push(`${deleted} deleted`);
-  if (other > 0) parts.push(`${other} other`);
+  if (modified > 0) parts.push(t("dirty.breakdownModified", { count: modified }));
+  if (added > 0) parts.push(t("dirty.breakdownNew", { count: added }));
+  if (deleted > 0) parts.push(t("dirty.breakdownDeleted", { count: deleted }));
+  if (other > 0) parts.push(t("dirty.breakdownOther", { count: other }));
   return parts.join(", ");
+}
+
+/** The archive branch a detached HEAD is saved on (the backend may add -2, -3…). */
+export function detachedArchiveBranch(recorded: string | null): string {
+  const stem = (recorded ?? "task").replace(/^hermes\//, "");
+  return `hermes-archive/${stem}-detached`;
+}
+
+/** Which question the dialog asks first, from what the close check found. */
+export type DirtyCloseMode = "check-failed" | "hook-refused" | "detached" | "changes" | "keep-only";
+
+export function dirtyCloseMode(changes: readonly DirtyWorktreeChange[], hookRefused: boolean): DirtyCloseMode {
+  if (hookRefused) return "hook-refused";
+  if (changes.some((c) => c.checkError)) return "check-failed";
+  if (changes.some((c) => c.detached && ((c.lostCommits ?? 0) > 0 || c.files.length > 0))) return "detached";
+  if (changes.some((c) => c.files.length > 0)) return "changes";
+  return "keep-only";
+}
+
+/** The branch the commit button names: the one HEAD is really on when it moved. */
+export function commitBranchLabel(changes: readonly DirtyWorktreeChange[]): { branch: string; switchedFrom: string } | null {
+  const moved = changes.find((c) => c.files.length > 0 && c.actualBranch && c.branchName && c.actualBranch !== c.branchName);
+  return moved ? { branch: moved.actualBranch!, switchedFrom: moved.branchName! } : null;
 }
 
 export function DirtyWorktreeDialog({
@@ -85,16 +142,25 @@ export function DirtyWorktreeDialog({
   changes,
   stashErrors,
   variant = "stash",
+  agentWorking,
+  closed,
+  keptPaths,
+  hookRefusal,
   onStashAndClose,
   onCommitAndClose,
   onArchiveAndClose,
+  onSaveDetachedAndClose,
+  onKeepAndClose,
   onCloseAnyway,
   onCancel,
 }: DirtyWorktreeDialogProps) {
+  // translate, not useI18n: also rendered outside the I18n provider (panel tests).
+  const t = translate;
   const modalRef = useRef<HTMLDivElement>(null);
   const [stashing, setStashing] = useState(false);
-  const [lastAction, setLastAction] = useState<"commit" | "archive">("commit");
   const committing = variant === "commit";
+  const mode = dirtyCloseMode(changes, !!hookRefusal);
+  const moved = commitBranchLabel(changes);
 
   const runBusy = useCallback(async (action: (() => Promise<void> | void) | undefined) => {
     if (!action) return;
@@ -105,16 +171,6 @@ export function DirtyWorktreeDialog({
       setStashing(false);
     }
   }, []);
-
-  const handleStashAndClose = useCallback(() => runBusy(onStashAndClose), [runBusy, onStashAndClose]);
-  const handleCommitAndClose = useCallback(() => {
-    setLastAction("commit");
-    return runBusy(onCommitAndClose);
-  }, [runBusy, onCommitAndClose]);
-  const handleArchiveAndClose = useCallback(() => {
-    setLastAction("archive");
-    return runBusy(onArchiveAndClose);
-  }, [runBusy, onArchiveAndClose]);
 
   const handleKeyDown = useCallback((e: KeyboardEvent) => {
     if (stashing) {
@@ -165,9 +221,17 @@ export function DirtyWorktreeDialog({
     }
   }, []);
 
-  const totalFiles = changes.reduce((sum, c) => sum + c.files.length, 0);
   const allFiles = changes.flatMap((c) => c.files);
-  const breakdown = formatFileBreakdown(allFiles);
+  const breakdown = formatFileBreakdown(allFiles, t);
+  const detachedTarget = changes.find((c) => c.detached && ((c.lostCommits ?? 0) > 0 || c.files.length > 0));
+  const anySubmodule = changes.some((c) => (c.dirtySubmodules?.length ?? 0) > 0);
+  const busyLabel = committing ? t("dirty.saving") : t("dirty.stashing");
+
+  const cancel = (
+    <Button className="dirty-wt-btn-cancel" onClick={onCancel} disabled={stashing}>
+      {t("common.cancel")}
+    </Button>
+  );
 
   return (
     <div className="dirty-wt-overlay" onClick={stashing ? undefined : onCancel}>
@@ -177,72 +241,115 @@ export function DirtyWorktreeDialog({
         role="dialog"
         aria-modal="true"
         aria-labelledby="dirty-wt-dialog-title"
+        data-mode={mode}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header */}
         <div className="dirty-wt-header">
           <span className="dirty-wt-icon">&#9888;</span>
-          <span className="dirty-wt-title" id="dirty-wt-dialog-title">Uncommitted Changes</span>
-          <CloseButton className="dirty-wt-close" onClick={onCancel} disabled={stashing} label="Close" />
+          <span className="dirty-wt-title" id="dirty-wt-dialog-title">{t("dirty.title")}</span>
+          <CloseButton className="dirty-wt-close" onClick={onCancel} disabled={stashing} label={t("common.close")} />
         </div>
 
         {/* Body */}
         <div className="dirty-wt-body">
-          <p className="dirty-wt-message">
-            Session <span className="dirty-wt-session-name">{sessionLabel}</span> has{" "}
-            {totalFiles} uncommitted {totalFiles === 1 ? "change" : "changes"} ({breakdown}) across{" "}
-            {changes.length} {changes.length === 1 ? "project" : "projects"}.
-          </p>
-          <p className="dirty-wt-warning">
-            Closing this session will permanently delete its working directory and all uncommitted changes.
-          </p>
-          {committing ? (
-            <p className="dirty-wt-stash-hint">
-              <strong>Commit to session branch</strong> records every change as a commit on this session&rsquo;s branch.{" "}
-              <strong>Archive</strong> leaves that branch as it is and saves the changes on a new <code>hermes-archive/&hellip;</code> branch.
-              Both keep the branch; neither uses <code>git stash</code>.
+          {allFiles.length > 0 && (
+            <p className="dirty-wt-message">
+              {t("dirty.summary", { label: sessionLabel, breakdown })}
             </p>
+          )}
+          {closed ? (
+            <p className="dirty-wt-note dirty-wt-closed-note">{t("dirty.closedNote")}</p>
           ) : (
-            <p className="dirty-wt-stash-hint">
-              Stashing saves your changes safely in the main repository. You can recover them later with <code>git stash pop</code>.
+            <p className="dirty-wt-warning">{t("dirty.warning")}</p>
+          )}
+          {agentWorking && !closed && (
+            <p className="dirty-wt-note dirty-wt-agent-note">{t("dirty.agentWorking")}</p>
+          )}
+          {moved && (
+            <p className="dirty-wt-note dirty-wt-switched-note">
+              {t("dirty.switchedNote", { recorded: moved.switchedFrom, actual: moved.branch })}
             </p>
+          )}
+          {mode === "changes" && (
+            <p className="dirty-wt-stash-hint">{committing ? t("dirty.commitHint") : t("dirty.stashHint")}</p>
           )}
 
           {changes.map((change) => (
-            <div key={change.projectId} className="dirty-wt-project">
+            <div key={change.projectId} className="dirty-wt-project" data-project-id={change.projectId}>
               <div className="dirty-wt-project-header">
                 <span className="dirty-wt-project-name">{change.projectName}</span>
-                {change.branchName && (
-                  <span className="dirty-wt-branch-name">{change.branchName}</span>
+                {(change.actualBranch ?? change.branchName) && (
+                  <span className="dirty-wt-branch-name">{change.actualBranch ?? change.branchName}</span>
                 )}
-                <span className="dirty-wt-file-breakdown">
-                  {formatFileBreakdown(change.files)}
-                </span>
+                {change.files.length > 0 && (
+                  <span className="dirty-wt-file-breakdown">
+                    {formatFileBreakdown(change.files, t)}
+                  </span>
+                )}
               </div>
-              <ul className="dirty-wt-file-list">
-                {change.files.map((file) => (
-                  <li key={file.path} className="dirty-wt-file-item">
-                    <span className={`dirty-wt-file-status ${statusClass(file.status)}`}>
-                      {statusLabel(file.status)}
-                    </span>
-                    <span className="dirty-wt-file-path">{file.path}</span>
-                  </li>
-                ))}
-              </ul>
+              {change.checkError && (
+                <div className="dirty-wt-row dirty-wt-row--check-failed">
+                  {t("dirty.checkFailed", { project: change.projectName, reason: change.checkError })}
+                </div>
+              )}
+              {(change.lostCommits ?? 0) > 0 && (
+                <div className="dirty-wt-row dirty-wt-row--detached">
+                  {t((change.lostCommits ?? 0) === 1 ? "dirty.lostOne" : "dirty.lostMany", { count: change.lostCommits ?? 0 })}
+                </div>
+              )}
+              {change.operation && (
+                <div className="dirty-wt-row dirty-wt-row--operation">
+                  {t("dirty.operation", { operation: t(`dirty.op.${change.operation}`) })}
+                </div>
+              )}
+              {(change.dirtySubmodules ?? []).map((path) => (
+                <div key={path} className="dirty-wt-row dirty-wt-row--submodule">
+                  {t("dirty.submodule", { path })}
+                </div>
+              ))}
+              {closed && keptPaths?.[change.projectId] && (
+                <div className="dirty-wt-row dirty-wt-row--kept">
+                  {t("dirty.keptAt", { path: keptPaths[change.projectId] })}
+                </div>
+              )}
+              {change.files.length > 0 && (
+                <ul className="dirty-wt-file-list">
+                  {change.files.map((file) => (
+                    <li key={file.path} className="dirty-wt-file-item">
+                      <span className={`dirty-wt-file-status ${statusClass(file.status)}`}>
+                        {statusLabel(file.status)}
+                      </span>
+                      <span className="dirty-wt-file-path">{file.path}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
           ))}
         </div>
 
-        {/* Stash Errors */}
+        {hookRefusal && (
+          <div className="dirty-wt-errors dirty-wt-hook-refused" role="alert">
+            <div className="dirty-wt-error-item">
+              <span className="dirty-wt-error-label">{hookRefusal.projectName}:</span>{" "}
+              <span className="dirty-wt-error-message">
+                {t("dirty.hookRefused", { hook: hookRefusal.hook, output: hookRefusal.output })}
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* Errors */}
         {stashErrors && stashErrors.length > 0 && (
-          <div className="dirty-wt-errors">
+          <div className="dirty-wt-errors" role="alert">
             {stashErrors.map((err, i) => (
               <div key={i} className="dirty-wt-error-item">
                 <span className="dirty-wt-error-label">
-                  {committing ? (lastAction === "archive" ? "Archive" : "Commit") : "Stash"} failed for {err.projectName}:
+                  {t("dirty.failedFor", { project: err.projectName })}
                 </span>{" "}
                 <span className="dirty-wt-error-message">{err.error}</span>
-                <p className="dirty-wt-error-hint">Your changes are still in the working directory.</p>
+                <p className="dirty-wt-error-hint">{t("dirty.stillThere")}</p>
               </div>
             ))}
           </div>
@@ -251,56 +358,90 @@ export function DirtyWorktreeDialog({
         {/* Stashing indicator */}
         {stashing && (
           <div className="dirty-wt-stashing" role="status">
-            {committing ? "Saving changes..." : "Stashing changes..."}
+            {busyLabel}
           </div>
         )}
 
         {/* Actions */}
-        {committing ? (
+        {mode === "hook-refused" ? (
+          <div className="dirty-wt-actions">
+            {cancel}
+            <Button variant="primary" className="dirty-wt-btn--archive-instead" onClick={() => runBusy(onArchiveAndClose)} disabled={stashing}>
+              {t("dirty.archiveInstead")}
+            </Button>
+          </div>
+        ) : mode === "check-failed" ? (
+          <div className="dirty-wt-actions">
+            <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
+              {t("dirty.deleteAnyway")}
+            </Button>
+            {cancel}
+            <Button variant="primary" className="dirty-wt-btn--keep" onClick={() => runBusy(onKeepAndClose)} disabled={stashing}>
+              {t("dirty.keepAndClose")}
+            </Button>
+          </div>
+        ) : mode === "detached" ? (
+          <div className="dirty-wt-actions">
+            <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
+              {t("dirty.discardClose")}
+            </Button>
+            {cancel}
+            <Button variant="primary" className="dirty-wt-btn--save-detached" onClick={() => runBusy(onSaveDetachedAndClose)} disabled={stashing}>
+              {stashing ? busyLabel : t("dirty.saveDetached", { branch: detachedArchiveBranch(detachedTarget?.branchName ?? null) })}
+            </Button>
+          </div>
+        ) : mode === "keep-only" ? (
+          <div className="dirty-wt-actions">
+            <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
+              {t("dirty.discardClose")}
+            </Button>
+            {cancel}
+            <Button variant="primary" className="dirty-wt-btn--keep" onClick={() => runBusy(onKeepAndClose)} disabled={stashing}>
+              {t("dirty.keepAndClose")}
+            </Button>
+          </div>
+        ) : committing ? (
           // Four long choices do not fit one row: the two other ways out sit
           // on a row of their own, above Cancel and the one primary.
           <div className="dirty-wt-actions dirty-wt-actions--rows">
             <div className="dirty-wt-actions-row">
               <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
-                Discard changes and close
+                {t("dirty.discardAndClose")}
               </Button>
-              <Button className="dirty-wt-btn--archive" onClick={handleArchiveAndClose} disabled={stashing}>
-                Archive (keep branch)
+              <Button className="dirty-wt-btn--archive" onClick={() => runBusy(onArchiveAndClose)} disabled={stashing}>
+                {t("dirty.archiveKeep")}
               </Button>
+              {anySubmodule && (
+                <Button className="dirty-wt-btn--keep" onClick={() => runBusy(onKeepAndClose)} disabled={stashing}>
+                  {t("dirty.keepWorktree")}
+                </Button>
+              )}
             </div>
             <div className="dirty-wt-actions-row">
-              <Button className="dirty-wt-btn-cancel" onClick={onCancel} disabled={stashing}>
-                Cancel
-              </Button>
-              <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleCommitAndClose} disabled={stashing}>
-                {stashing ? "Saving changes..." : "Commit to session branch & close"}
+              {cancel}
+              <Button variant="primary" className="dirty-wt-btn--stash" onClick={() => runBusy(onCommitAndClose)} disabled={stashing}>
+                {stashing
+                  ? busyLabel
+                  : moved
+                    ? t("dirty.commitTo", { branch: moved.branch })
+                    : t("dirty.commitToSession")}
               </Button>
             </div>
           </div>
         ) : (
           <div className="dirty-wt-actions">
-            <Button className="dirty-wt-btn-cancel" onClick={onCancel} disabled={stashing}>
-              Cancel
+            {cancel}
+            <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
+              {t("dirty.discardAndClose")}
             </Button>
-            {stashErrors && stashErrors.length > 0 ? (
-              <>
-                <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
-                  Discard changes and close
-                </Button>
-                <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleStashAndClose} disabled={stashing}>
-                  {stashing ? "Stashing changes..." : "Try Again"}
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button variant="danger" className="dirty-wt-btn--close-anyway" onClick={onCloseAnyway} disabled={stashing}>
-                  Discard changes and close
-                </Button>
-                <Button variant="primary" className="dirty-wt-btn--stash" onClick={handleStashAndClose} disabled={stashing}>
-                  {stashing ? "Stashing changes..." : "Stash & Close"}
-                </Button>
-              </>
+            {anySubmodule && (
+              <Button className="dirty-wt-btn--keep" onClick={() => runBusy(onKeepAndClose)} disabled={stashing}>
+                {t("dirty.keepWorktree")}
+              </Button>
             )}
+            <Button variant="primary" className="dirty-wt-btn--stash" onClick={() => runBusy(onStashAndClose)} disabled={stashing}>
+              {stashing ? busyLabel : stashErrors && stashErrors.length > 0 ? t("dirty.tryAgain") : t("dirty.stashAndClose")}
+            </Button>
           </div>
         )}
       </div>

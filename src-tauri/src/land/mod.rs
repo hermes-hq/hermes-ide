@@ -50,6 +50,8 @@ struct Target {
     repo_path: PathBuf,
     worktree_path: PathBuf,
     shared: bool,
+    /// The branch the task's worktree was cut from, when Hermes recorded it.
+    recorded_base: Option<String>,
 }
 
 fn target(
@@ -73,11 +75,32 @@ fn target(
         .count_sessions_for_worktree_path(&wt.worktree_path)
         .map(|n| n > 1)
         .unwrap_or(true);
+    // The session's record, else what the repository kept for the branch
+    // (a worktree re-linked after a restart has a new record).
+    let recorded_base = db
+        .get_worktree_base_branch(session_id, project_id)
+        .ok()
+        .flatten()
+        .or_else(|| {
+            wt.branch_name
+                .as_deref()
+                .and_then(|b| worktree::recorded_base_branch(&project.path, b))
+        });
     Ok(Target {
         repo_path: PathBuf::from(project.path),
         worktree_path: PathBuf::from(wt.worktree_path),
         shared,
+        recorded_base,
     })
+}
+
+/// Landing into another branch than the one the task was started from:
+/// that branch's own commits come along.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BaseMismatch {
+    pub recorded: String,
+    pub commits: u32,
 }
 
 fn noise(path: &str) -> bool {
@@ -132,12 +155,45 @@ pub struct LandPreview {
     pub features: Vec<FeatureFile>,
     /// Earlier landings of this session, oldest first.
     pub landings: Vec<LandRecord>,
+    /// The branch the task was started from, when recorded.
+    pub recorded_base: Option<String>,
+    /// Local branches the work could land into ("Land into: … ▾").
+    pub branches: Vec<String>,
+    /// Set when landing into the chosen base would also bring the recorded
+    /// base's own commits.
+    pub base_mismatch: Option<BaseMismatch>,
 }
 
-fn preview(app_data: &Path, session_id: &str, t: &Target) -> Result<LandPreview, String> {
-    let analysis = ops::analyze(&t.worktree_path, &t.repo_path, &noise)?;
+fn preview(
+    app_data: &Path,
+    session_id: &str,
+    t: &Target,
+    base: Option<&str>,
+) -> Result<LandPreview, String> {
+    let analysis = ops::analyze_into(
+        &t.worktree_path,
+        &t.repo_path,
+        &noise,
+        base.or(t.recorded_base.as_deref()),
+    )?;
     let remote = ops::pick_remote(&t.repo_path, &analysis.branch);
+    let base_mismatch = match (&t.recorded_base, &analysis.base) {
+        (Some(recorded), Some(chosen)) if *recorded != chosen.name => {
+            let commits = ops::commits_not_in(&t.repo_path, recorded, &chosen.name);
+            (commits > 0).then(|| BaseMismatch {
+                recorded: recorded.clone(),
+                commits,
+            })
+        }
+        _ => None,
+    };
     Ok(LandPreview {
+        recorded_base: t.recorded_base.clone(),
+        branches: ops::local_branches(&t.repo_path)
+            .into_iter()
+            .filter(|b| *b != analysis.branch)
+            .collect(),
+        base_mismatch,
         remote,
         worktree_toml: read_capped(&t.worktree_path.join(".hermes").join("worktree.toml")),
         features: feature_files(&t.worktree_path),
@@ -155,10 +211,12 @@ pub async fn land_preview(
     state: State<'_, AppState>,
     session_id: String,
     project_id: String,
+    // The branch picked on the sheet; None: the one the task started from.
+    base: Option<String>,
 ) -> Result<LandPreview, String> {
     let t = target(&state, &session_id, &project_id)?;
     let app_data = crate::instance::app_data_dir(&app)?;
-    tokio::task::spawn_blocking(move || preview(&app_data, &session_id, &t))
+    tokio::task::spawn_blocking(move || preview(&app_data, &session_id, &t, base.as_deref()))
         .await
         .map_err(|e| e.to_string())?
 }
@@ -172,9 +230,15 @@ pub async fn land_gh_status(
     project_id: String,
 ) -> Result<gh::GhStatus, String> {
     let t = target(&state, &session_id, &project_id)?;
-    tokio::task::spawn_blocking(move || gh::status(&t.repo_path))
-        .await
-        .map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || {
+        // The remote the pull request would be pushed to, and its host.
+        let remote = ops::current_branch(&t.worktree_path)
+            .ok()
+            .and_then(|(branch, _)| ops::pick_remote(&t.repo_path, &branch));
+        gh::status_for(&t.repo_path, remote.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -189,6 +253,10 @@ pub struct LandRequest {
     pub pr_body: Option<String>,
     #[serde(default)]
     pub label: String,
+    /// The branch to land into ("Land into: … ▾"); None: the one the task
+    /// was started from, else the project folder's.
+    #[serde(default)]
+    pub base: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -226,7 +294,12 @@ fn execute(
     if subject(&req.message).is_empty() {
         return Err("Write a commit message first".into());
     }
-    let a = ops::analyze(&t.worktree_path, &t.repo_path, &noise)?;
+    let a = ops::analyze_into(
+        &t.worktree_path,
+        &t.repo_path,
+        &noise,
+        req.base.as_deref().or(t.recorded_base.as_deref()),
+    )?;
     let base = a.base.as_ref().map(|b| b.name.clone());
     let has_work = a.uncommitted_files > 0 || a.commits_ahead > 0;
     let mut remote = None;
@@ -254,6 +327,9 @@ fn execute(
                         "'{}' already has everything on this branch",
                         base.unwrap_or_default()
                     ))
+                }
+                ops::MergeCheck::DirtyBase { files } => {
+                    return Err(ops::dirty_base_message(files, &base.unwrap_or_default()))
                 }
                 _ => {}
             }
@@ -848,6 +924,7 @@ mod tests {
             repo_path: repo.to_path_buf(),
             worktree_path: wt.to_path_buf(),
             shared: false,
+            recorded_base: None,
         }
     }
 
@@ -858,7 +935,54 @@ mod tests {
             pr_title: None,
             pr_body: None,
             label: "Task".into(),
+            base: None,
         }
+    }
+
+    #[test]
+    fn landing_goes_into_the_branch_the_task_was_started_from() {
+        let (t, repo, wt) = repo_with_task();
+        let data = TempDir::new().unwrap();
+        // develop has a commit of its own; the project folder stays on main.
+        let dev = t.path().join("dev");
+        ops::tests::sh(&repo, &["branch", "develop"]);
+        ops::tests::sh(
+            &repo,
+            &["worktree", "add", "-q", dev.to_str().unwrap(), "develop"],
+        );
+        fs::write(dev.join("DEVELOP.md"), "only on develop\n").unwrap();
+        ops::tests::sh(&dev, &["add", "."]);
+        ops::tests::sh(&dev, &["commit", "-q", "-m", "develop work"]);
+        ops::tests::sh(&wt, &["reset", "-q", "--hard", "develop"]);
+        fs::write(wt.join("TASK.md"), "task\n").unwrap();
+        let mut target = target_for(&repo, &wt);
+        target.recorded_base = Some("develop".into());
+        let p = preview(data.path(), "s-1", &target, None).unwrap();
+        assert_eq!(p.analysis.base.as_ref().unwrap().name, "develop");
+        assert!(p.base_mismatch.is_none());
+        assert!(!p.analysis.changed_files.contains(&"DEVELOP.md".to_string()));
+        // Picking main on the sheet: develop's own commit would come along.
+        let p = preview(data.path(), "s-1", &target, Some("main")).unwrap();
+        assert_eq!(p.analysis.base.as_ref().unwrap().name, "main");
+        let m = p.base_mismatch.unwrap();
+        assert_eq!((m.recorded.as_str(), m.commits), ("develop", 1));
+        // Landing with no choice goes into develop; main never moves.
+        let main_before = ops::tests::sh(&repo, &["rev-parse", "main"]);
+        let out = execute(
+            data.path(),
+            "s-1",
+            "p-1",
+            &target,
+            &req(LandMode::Merge, "Task notes"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(out.status, LandStatus::Landed, "{:?}", out.error);
+        assert_eq!(ops::tests::sh(&repo, &["rev-parse", "main"]), main_before);
+        assert_eq!(
+            ops::tests::sh(&repo, &["log", "-1", "--format=%s", "develop"]),
+            "Task notes"
+        );
     }
 
     fn no_link(_: &LandRecord) -> Result<(), String> {

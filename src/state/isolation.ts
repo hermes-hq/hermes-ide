@@ -12,6 +12,7 @@
 
 import type { SessionWorktree, WorktreeCreateResult } from "../types/git";
 import { findBranchClash, gitErrorMessage } from "../utils/branchClash";
+import { translate } from "../i18n/registry";
 
 /** Prefix of the backend's "branch already checked out" error (git/worktree.rs). */
 export const BRANCH_IN_USE_PREFIX = "BRANCH_IN_USE:";
@@ -24,6 +25,8 @@ export interface BranchInUse {
   sessionId: string | null;
   /** True when it is the project folder itself. */
   projectFolder: boolean;
+  /** A worktree this Hermes made that no session uses (a launch that failed half-way). */
+  leftover?: boolean;
 }
 
 /** Parse a BRANCH_IN_USE error from `git_create_worktree`; null for any other error. */
@@ -39,6 +42,7 @@ export function parseBranchInUseError(err: unknown): BranchInUse | null {
       path: v.path,
       sessionId: typeof v.sessionId === "string" ? v.sessionId : null,
       projectFolder: v.projectFolder === true,
+      ...(v.leftover === true ? { leftover: true } : {}),
     };
   } catch {
     return null;
@@ -110,6 +114,8 @@ export type BranchConflictChoice =
   | { kind: "new-branch"; name: string }
   /** An existing branch, chosen on purpose (the new name typed was one). */
   | { kind: "existing-branch"; name: string }
+  /** Remove this Hermes' leftover worktree that holds the branch, then try again. */
+  | { kind: "remove-leftover" }
   | { kind: "cancel" };
 
 export interface BranchSelection {
@@ -136,6 +142,8 @@ export interface WorktreeDeps {
   detachWorktree(sessionId: string, projectId: string): Promise<unknown>;
   /** Ask the user what to do about a branch that is checked out elsewhere. */
   resolveConflict(conflict: BranchInUse & { projectId: string }): Promise<BranchConflictChoice>;
+  /** Remove a leftover worktree of this Hermes (refuses one with work in it). */
+  removeLeftover?(projectId: string, path: string): Promise<unknown>;
 }
 
 /** A checkout the user chose to reuse instead of getting one of their own. */
@@ -237,6 +245,20 @@ export async function createSessionWorktrees(
           outcome.cancelled = true;
           return outcome;
         }
+        if (choice.kind === "remove-leftover") {
+          try {
+            await deps.removeLeftover?.(projectId, conflict.path);
+          } catch (removeErr) {
+            outcome.errors.push(`${projectId}: ${gitErrorMessage(removeErr)}`);
+            break;
+          }
+          // The leftover's branch stays: use it as it is.
+          fromRemote = undefined;
+          baseBranch = undefined;
+          branch = conflict.branch;
+          createNew = false;
+          continue;
+        }
         if (choice.kind === "reuse") {
           try {
             await deps.attachWorktree(sessionId, projectId, conflict.branch);
@@ -304,9 +326,11 @@ export function shouldAskAboutChangesOnClose(wt: SessionWorktree | null, honest:
  * next to it, so the user can tell which one it is.
  */
 export function describeBranchHolder(conflict: BranchInUse, holderLabel: string | null): string {
-  if (conflict.projectFolder) return "the project folder";
-  if (holderLabel) return `session "${holderLabel}"`;
-  return "a checkout outside Hermes";
+  if (conflict.projectFolder) return translate("branchInUse.holderProjectFolder");
+  if (holderLabel) return translate("branchInUse.holderSession", { label: holderLabel });
+  // In this Hermes' own worktree folder, used by no session: ours, left over.
+  if (conflict.leftover) return translate("branchInUse.holderLeftover");
+  return translate("branchInUse.holderOutside");
 }
 
 /** Payload of the backend's `session-working-directory-recovered` event. */

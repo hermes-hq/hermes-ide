@@ -1,6 +1,8 @@
-import { memo } from "react";
+import { memo, useState } from "react";
 import type { MergeStatus, ConflictStrategy } from "../types/git";
 import { GitConflictFileRow } from "./GitConflictFileRow";
+import { translate } from "../i18n/registry";
+import { Button } from "./ui";
 
 // ─── Props ───────────────────────────────────────────────────────────
 
@@ -135,6 +137,10 @@ export const GitMergeBanner = memo(function GitMergeBanner({
   onAbort,
   aborting,
 }: GitMergeBannerProps) {
+  // translate, not useI18n: also rendered outside the I18n provider (panel tests).
+  const t = translate;
+  // Abort asks first: the files the merge changed go back.
+  const [confirmAbort, setConfirmAbort] = useState(false);
   if (!mergeStatus.in_merge) return null;
 
   const resolved = getResolvedCount(mergeStatus);
@@ -154,12 +160,33 @@ export const GitMergeBanner = memo(function GitMergeBanner({
       </div>
       <button
         className="git-conflict-btn git-conflict-btn-abort"
-        onClick={onAbort}
+        onClick={() => setConfirmAbort(true)}
         disabled={aborting}
         title="Abort this merge and return to pre-merge state"
       >
         {aborting ? "Aborting\u2026" : "Abort Merge"}
       </button>
+      {confirmAbort && !aborting && (
+        <div className="git-branch-ask git-abort-confirm" role="alertdialog" aria-label={t("merge.abortConfirm")}>
+          <div className="git-branch-ask-text">{t("merge.abortConfirm")}</div>
+          <div className="git-branch-ask-actions">
+            <Button size="sm" className="git-abort-cancel" onClick={() => setConfirmAbort(false)}>
+              {t("common.cancel")}
+            </Button>
+            <Button
+              size="sm"
+              variant="danger"
+              className="git-abort-yes"
+              onClick={() => {
+                setConfirmAbort(false);
+                onAbort();
+              }}
+            >
+              {t("merge.abortYes")}
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Conflicted files (unresolved) */}
       {mergeStatus.conflicted_files.length > 0 && (

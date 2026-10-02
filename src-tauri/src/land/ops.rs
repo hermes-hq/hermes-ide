@@ -101,9 +101,14 @@ pub fn checkout_of_branch(repo_path: &Path, branch: &str) -> Option<PathBuf> {
     None
 }
 
-/// The branch to land on: the one checked out in the project folder, unless
-/// that is the task branch itself; then the first of main, master, trunk.
-pub fn resolve_base(repo_path: &Path, task_branch: &str) -> Option<String> {
+/// The branch to land on: the one the task was started from (`recorded`,
+/// when it still exists), else the one checked out in the project folder,
+/// unless that is the task branch itself; then the first of main, master,
+/// trunk.
+pub fn resolve_base(repo_path: &Path, task_branch: &str, recorded: Option<&str>) -> Option<String> {
+    if let Some(r) = recorded.filter(|r| *r != task_branch && branch_exists(repo_path, r)) {
+        return Some(r.to_string());
+    }
     let repo = Repository::open(repo_path).ok()?;
     if let Ok(head) = repo.head() {
         if head.is_branch() {
@@ -184,6 +189,76 @@ pub enum MergeCheck {
     NothingToMerge,
     /// There is no base branch to land on.
     NoBase,
+    /// The base is checked out (the project folder) with uncommitted
+    /// changes in files landing would write: merging would have to
+    /// overwrite them, so it is not offered.
+    DirtyBase { files: Vec<String> },
+}
+
+/// Files with uncommitted changes (new files included) in a checkout.
+pub fn dirty_files(checkout: &Path) -> Vec<String> {
+    let Ok(repo) = Repository::open(checkout) else {
+        return Vec::new();
+    };
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true)
+        .recurse_untracked_dirs(true)
+        .include_ignored(false);
+    let Ok(statuses) = repo.statuses(Some(&mut opts)) else {
+        return Vec::new();
+    };
+    statuses
+        .iter()
+        .filter(|e| !e.status().is_empty() && !e.status().contains(git2::Status::IGNORED))
+        .filter_map(|e| e.path().map(|p| p.replace('\\', "/")))
+        .collect()
+}
+
+/// The sentence for a base whose checkout has uncommitted changes in files
+/// landing would write.
+pub fn dirty_base_message(files: &[String], base: &str) -> String {
+    let verb = if files.len() == 1 { "has" } else { "have" };
+    format!(
+        "{} {verb} uncommitted changes in the project folder ({base})",
+        crate::git::safety::list_files(files)
+    )
+}
+
+/// Commits `base_head` has that `other_head` does not (how much landing
+/// into `other` would bring along when the task was started from `base`).
+pub fn commits_not_in(repo_path: &Path, base: &str, other: &str) -> u32 {
+    let (Some(b), Some(o)) = (branch_head(repo_path, base), branch_head(repo_path, other)) else {
+        return 0;
+    };
+    let Ok(repo) = Repository::open(repo_path) else {
+        return 0;
+    };
+    let (Ok(b), Ok(o)) = (Oid::from_str(&b), Oid::from_str(&o)) else {
+        return 0;
+    };
+    let Ok(mut walk) = repo.revwalk() else {
+        return 0;
+    };
+    if walk.push(b).is_err() || walk.hide(o).is_err() {
+        return 0;
+    }
+    walk.take(10_000).count() as u32
+}
+
+/// Local branch names, for the Land sheet's "Land into" choice.
+pub fn local_branches(repo_path: &Path) -> Vec<String> {
+    let Ok(repo) = Repository::open(repo_path) else {
+        return Vec::new();
+    };
+    let Ok(branches) = repo.branches(Some(git2::BranchType::Local)) else {
+        return Vec::new();
+    };
+    let mut names: Vec<String> = branches
+        .flatten()
+        .filter_map(|(b, _)| b.name().ok().flatten().map(str::to_string))
+        .collect();
+    names.sort();
+    names
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
@@ -217,6 +292,17 @@ pub fn analyze(
     repo_path: &Path,
     skip: &dyn Fn(&str) -> bool,
 ) -> Result<Analysis, String> {
+    analyze_into(worktree, repo_path, skip, None)
+}
+
+/// `analyze`, landing into `base` (the branch the task was started from, or
+/// the one picked on the sheet) when given and it exists.
+pub fn analyze_into(
+    worktree: &Path,
+    repo_path: &Path,
+    skip: &dyn Fn(&str) -> bool,
+    base: Option<&str>,
+) -> Result<Analysis, String> {
     let (branch, head) = current_branch(worktree)?;
     let snapshot = snapshot_tree(worktree, skip)?;
     let repo = open(worktree)?;
@@ -227,7 +313,7 @@ pub fn analyze(
     let snap_tree = repo.find_tree(snapshot).map_err(|e| e.to_string())?;
     let (uncommitted, _) = diff_trees(&repo, &head_tree, &snap_tree)?;
 
-    let base_name = resolve_base(repo_path, &branch);
+    let base_name = resolve_base(repo_path, &branch, base);
     let Some(base_name) = base_name else {
         let (diffstat, files) = diff_trees(&repo, &head_tree, &snap_tree)?;
         return Ok(Analysis {
@@ -259,9 +345,27 @@ pub fn analyze(
         .find_commit(base_oid)
         .and_then(|c| c.tree())
         .map_err(|e| e.to_string())?;
-    let merge = merge_check(
+    let mut merge = merge_check(
         &repo, merge_base, base_oid, &base_tree, &mb_tree, &snap_tree,
     )?;
+    let checked_out_at = checkout_of_branch(repo_path, &base_name);
+    // Landing writes the task's files into the base's checkout; one with
+    // uncommitted changes in those files would refuse the fast-forward.
+    if matches!(merge, MergeCheck::FastForward | MergeCheck::Clean) {
+        if let Some(dir) = &checked_out_at {
+            let dirty = dirty_files(dir);
+            let mut both: Vec<String> = files
+                .iter()
+                .filter(|f| dirty.contains(f))
+                .cloned()
+                .collect();
+            both.sort();
+            both.dedup();
+            if !both.is_empty() {
+                merge = MergeCheck::DirtyBase { files: both };
+            }
+        }
+    }
     Ok(Analysis {
         branch,
         head,
@@ -270,8 +374,7 @@ pub fn analyze(
         diffstat,
         changed_files: files,
         base: Some(BaseState {
-            checked_out_at: checkout_of_branch(repo_path, &base_name)
-                .map(|p| p.to_string_lossy().to_string()),
+            checked_out_at: checked_out_at.map(|p| p.to_string_lossy().to_string()),
             name: base_name,
             head: base_head,
         }),
@@ -419,7 +522,17 @@ pub fn advance_branch(
             }
             git(&dir, &["merge", "--ff-only", "--quiet", new])
                 .map(|_| ())
-                .map_err(|e| format!("Could not update '{branch}' in {}: {e}", dir.display()))
+                .map_err(|e| {
+                    // Never git's "stash them" advice: say which files are
+                    // in the way, where.
+                    let (tracked, untracked) = crate::git::safety::parse_would_overwrite(&e);
+                    let files: Vec<String> = tracked.into_iter().chain(untracked).collect();
+                    if files.is_empty() {
+                        format!("Could not update '{branch}' in {}: {e}", dir.display())
+                    } else {
+                        dirty_base_message(&files, branch)
+                    }
+                })
         }
         None => git(
             repo_path,
@@ -889,12 +1002,18 @@ pub(crate) mod tests {
     #[test]
     fn the_base_is_the_project_folder_s_branch_unless_that_is_the_task_itself() {
         let (_t, repo, _wt) = repo_with_task();
-        assert_eq!(resolve_base(&repo, "task").as_deref(), Some("main"));
+        assert_eq!(resolve_base(&repo, "task", None).as_deref(), Some("main"));
         // The project folder on another branch: that branch is the base.
         sh(&repo, &["checkout", "-q", "-b", "develop"]);
-        assert_eq!(resolve_base(&repo, "task").as_deref(), Some("develop"));
+        assert_eq!(
+            resolve_base(&repo, "task", None).as_deref(),
+            Some("develop")
+        );
         // The project folder on the task branch itself: main, not the task.
-        assert_eq!(resolve_base(&repo, "develop").as_deref(), Some("main"));
+        assert_eq!(
+            resolve_base(&repo, "develop", None).as_deref(),
+            Some("main")
+        );
     }
 
     #[test]
@@ -902,6 +1021,70 @@ pub(crate) mod tests {
         let (_t, repo, _wt) = repo_with_task();
         // Checked out in the project folder and the only candidate: nothing
         // to land on.
-        assert_eq!(resolve_base(&repo, "main"), None);
+        assert_eq!(resolve_base(&repo, "main", None), None);
+    }
+
+    #[test]
+    fn the_branch_the_task_was_started_from_is_the_base() {
+        let (t, repo, wt) = repo_with_task();
+        // develop is one commit ahead of main; the project folder stays on main.
+        sh(&repo, &["branch", "develop"]);
+        let dev = t.path().join("dev");
+        sh(
+            &repo,
+            &["worktree", "add", "-q", dev.to_str().unwrap(), "develop"],
+        );
+        fs::write(dev.join("DEVELOP.md"), "only on develop\n").unwrap();
+        sh(&dev, &["add", "."]);
+        sh(&dev, &["commit", "-q", "-m", "develop work"]);
+        sh(&dev, &["checkout", "-q", "--detach"]);
+        assert_eq!(
+            resolve_base(&repo, "task", Some("develop")).as_deref(),
+            Some("develop")
+        );
+        // A recorded base that is gone: back to the project folder's branch.
+        assert_eq!(
+            resolve_base(&repo, "task", Some("gone")).as_deref(),
+            Some("main")
+        );
+        assert_eq!(commits_not_in(&repo, "develop", "main"), 1);
+        assert_eq!(commits_not_in(&repo, "main", "develop"), 0);
+        let a = analyze_into(&wt, &repo, &none, Some("develop")).unwrap();
+        assert_eq!(a.base.unwrap().name, "develop");
+        assert!(local_branches(&repo).contains(&"develop".to_string()));
+    }
+
+    #[test]
+    fn a_dirty_file_in_the_base_checkout_that_landing_writes_blocks_the_merge() {
+        let (_t, repo, wt) = repo_with_task();
+        fs::write(wt.join("a.txt"), "one\ntask\nthree\n").unwrap();
+        sh(&wt, &["commit", "-q", "-am", "task"]);
+        // An unrelated dirty file in the project folder is fine.
+        fs::write(repo.join("other.txt"), "mine\n").unwrap();
+        assert_eq!(
+            analyze(&wt, &repo, &none).unwrap().merge,
+            MergeCheck::FastForward
+        );
+        // The same file landing writes: refused before anything moves.
+        fs::write(repo.join("a.txt"), "one\nmy edit\nthree\n").unwrap();
+        assert_eq!(
+            analyze(&wt, &repo, &none).unwrap().merge,
+            MergeCheck::DirtyBase {
+                files: vec!["a.txt".into()]
+            }
+        );
+        assert_eq!(
+            dirty_base_message(&["a.txt".into()], "main"),
+            "a.txt has uncommitted changes in the project folder (main)"
+        );
+        // And if it got that far, the refusal says the same, never "stash".
+        let head = sh(&wt, &["rev-parse", "HEAD"]);
+        let before = sh(&repo, &["rev-parse", "main"]);
+        let err = squash_merge(&repo, "main", &head, "Land").unwrap_err();
+        assert_eq!(
+            err,
+            "a.txt has uncommitted changes in the project folder (main)"
+        );
+        assert_eq!(sh(&repo, &["rev-parse", "main"]), before);
     }
 }

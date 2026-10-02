@@ -1,4 +1,5 @@
-import { createContext, useContext, useReducer, useEffect, useCallback, useMemo, useRef, useState, Suspense, ReactNode } from "react";
+import { useContext, useReducer, useEffect, useCallback, useMemo, useRef, useState, Suspense, ReactNode } from "react";
+import { SessionContextObject } from "./sessionContextObject";
 import { lazyView } from "../utils/lazyView";
 import { markStartupSession } from "../attention/startupSessions";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
@@ -30,6 +31,7 @@ import {
   updateSessionDescription, updateSessionGroup, updateSessionLabel,
   saveAllSnapshots,
   addWorkspacePath,
+  sessionHostStatus,
 } from "../api/sessions";
 import { deriveSessionLabelFromMessage, isDefaultSessionLabel } from "../utils/autoSessionLabel";
 import { getProjects, getSessionProjects, attachSessionProject } from "../api/projects";
@@ -37,9 +39,10 @@ import { autoAttachInsideProject } from "../utils/autoAttach";
 import { hasAddDirDrift } from "../utils/agentDrift";
 import {
   createWorktree, worktreeHasChanges, stashWorktree, getSessionWorktreeInfo,
-  attachWorktree, detachWorktree, removeWorktree, commitWorktree,
-  gitListBranchesForProject,
+  attachWorktree, detachWorktree, removeWorktree,
+  gitListBranchesForProject, keepWorktree, commitKeptWorktree, saveKeptDetachedHead, removeLeftoverWorktree,
 } from "../api/git";
+import { parseHookRefusal, plainGitError } from "../utils/gitErrors";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import {
   createSessionWorktrees, pickRestoreId, closeCommitMessage, shouldAskAboutChangesOnClose, describeBranchHolder,
@@ -51,7 +54,7 @@ import { useWorkspaceFlushOnQuit } from "./useWorkspaceFlushOnQuit";
 import { runWorktreeRecipes, type CreatedWorktree } from "./worktreeRecipes";
 // Shown only when a branch is in use elsewhere: its code loads on demand.
 const BranchConflictDialog = lazyView("BranchConflictDialog", () => import("../components/BranchConflictDialog").then((m) => m.BranchConflictDialog));
-import type { SessionWorktree } from "../types/git";
+import type { SessionWorktree, WorktreeChanges } from "../types/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
 import { createTerminal, destroy as destroyTerminal, writeScrollback, estimateInitialDimensions } from "../terminal/TerminalPool";
 import { applyTheme, applyAgentTimelineStyle } from "../utils/themeManager";
@@ -246,6 +249,84 @@ export function worktreeFailureIsFatal(args: {
   errorCount: number;
 }): boolean {
   return args.errorCount > 0 && args.succeeded === 0;
+}
+
+/** id → name of the given projects (empty when they cannot be read). */
+async function projectNamesById(ids: readonly string[]): Promise<Record<string, string>> {
+  try {
+    const all = await getProjects();
+    const out: Record<string, string> = {};
+    for (const p of all) if (ids.includes(p.id)) out[p.id] = p.name;
+    return out;
+  } catch {
+    return {};
+  }
+}
+
+// ─── Sessions that end on their own ─────────────────────────────────
+
+/** Sessions that end within this window of each other ended together. */
+export const ENDED_BURST_MS = 1200;
+
+/**
+ * What to do with sessions whose terminal ended without Hermes closing
+ * them. One program that ended while the terminal service runs (`exit` in
+ * the shell) closes as it always did. Several at once, or with the terminal
+ * service gone, is a crash: the rows stay, ended, with their output and a
+ * way to restart them — and their worktrees are not deleted behind the
+ * person's back.
+ */
+export function endedSessionsVerdict(args: { count: number; hostGone: boolean }): "close" | "keep" {
+  return args.hostGone || args.count > 1 ? "keep" : "close";
+}
+
+// ─── Close: what to ask about a session's worktree ──────────────────
+
+/** A commit hook that refused while closing, for the dialog. */
+export interface PendingHookRefusal {
+  projectName: string;
+  hook: string;
+  output: string;
+}
+
+/**
+ * The close dialog's entry for one project, or null when closing can go
+ * ahead without asking: uncommitted files, commits on a detached HEAD that
+ * no branch has, an operation in progress, edits inside a submodule, the
+ * branch HEAD is really on — and, when the check itself fails, an entry
+ * that says so (closing never deletes a worktree it could not check).
+ */
+export async function closeCheckEntry(
+  sessionId: string,
+  project: { id: string; name: string },
+  recordedBranch: string | null,
+  check: (sessionId: string, projectId: string) => Promise<WorktreeChanges>,
+): Promise<DirtyWorktreeChange | null> {
+  try {
+    const changes = await check(sessionId, project.id);
+    const head = changes.head ?? null;
+    const entry: DirtyWorktreeChange = {
+      projectId: project.id,
+      projectName: project.name,
+      branchName: recordedBranch,
+      files: changes.files,
+      actualBranch: head ? head.branch : null,
+      detached: head?.detached ?? false,
+      lostCommits: head?.lostCommits ?? 0,
+      operation: head?.operation ?? null,
+      dirtySubmodules: head?.dirtySubmodules ?? [],
+    };
+    const ask = entry.files.length > 0 || (entry.lostCommits ?? 0) > 0 || !!entry.operation || (entry.dirtySubmodules?.length ?? 0) > 0;
+    return ask ? entry : null;
+  } catch (e) {
+    return {
+      projectId: project.id,
+      projectName: project.name,
+      branchName: recordedBranch,
+      files: [],
+      checkError: plainGitError(e) || "unknown error",
+    };
+  }
 }
 
 // ─── Agent-aware close helper ────────────────────────────────────────
@@ -480,9 +561,21 @@ export function sessionReducer(state: SessionState, action: SessionAction): Sess
       workspaceDirty = true;
       const { [action.id]: _, ...rest } = state.sessions;
       const ids = Object.keys(rest);
-      // Remove panes displaying this session from layout
+      // Remove panes displaying this session from layout — except the
+      // focused one: it shows the session that becomes active instead
+      // (when no other pane shows it), so the window never falls back to
+      // the empty welcome page while the title and the list name another
+      // session as active.
       let newRoot = state.layout.root;
       if (newRoot) {
+        const panes = collectPanes(newRoot);
+        const focused = panes.find((p) => p.id === state.layout.focusedPaneId);
+        const next = state.activeSessionId && state.activeSessionId !== action.id && rest[state.activeSessionId]
+          ? state.activeSessionId
+          : (ids.length > 0 ? ids[ids.length - 1] : null);
+        if (focused && focused.sessionId === action.id && next && !panes.some((p) => p.sessionId === next)) {
+          newRoot = setPaneSession(newRoot, focused.id, next);
+        }
         newRoot = removePanesBySession(newRoot, action.id);
       }
       // Determine new focused pane
@@ -1170,7 +1263,8 @@ interface SessionContextValue {
   respawnAgent: (sessionId: string) => Promise<boolean>;
 }
 
-const SessionContext = createContext<SessionContextValue | null>(null);
+// The context object lives in its own module (see sessionContextObject.ts).
+const SessionContext = SessionContextObject as React.Context<SessionContextValue | null>;
 
 export function SessionProvider({ children }: { children: ReactNode }) {
   const [state, dispatch] = useReducer(sessionReducer, initialState);
@@ -1364,7 +1458,52 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     label: string;
     changes: DirtyWorktreeChange[];
     stashErrors?: Array<{ projectName: string; error: string }>;
+    /** The session's program was running when the dialog opened. */
+    agentWorking?: boolean;
+    /** The session was already stopped; these folders (project → path) are still to be saved. */
+    closed?: boolean;
+    kept?: Record<string, string>;
+    /** A commit hook refused the commit (shown with "Archive instead"). */
+    hookRefusal?: PendingHookRefusal | null;
   } | null>(null);
+
+  // ─── Sessions that ended without Hermes closing them ────────────────
+  const endedBurst = useRef<{ ids: Set<string>; sessions: Map<string, SessionData>; timer: ReturnType<typeof setTimeout> | null }>({
+    ids: new Set(),
+    sessions: new Map(),
+    timer: null,
+  });
+  const settleEndedBurst = useCallback(async () => {
+    const burst = endedBurst.current;
+    const ended = [...burst.ids].map((id) => burst.sessions.get(id)).filter((s): s is SessionData => !!s);
+    burst.ids.clear();
+    burst.sessions.clear();
+    burst.timer = null;
+    const live = ended.filter((s) => stateRef.current.sessions[s.id] && !closingSessionIds.current.has(s.id));
+    if (live.length === 0) return;
+    let hostGone = false;
+    try {
+      const st = await sessionHostStatus();
+      hostGone = st.supported && !st.running && live.some((s) => st.hosted_session_ids.length === 0 || !st.hosted_session_ids.includes(s.id));
+    } catch {
+      // Unknown: decide by the count alone.
+    }
+    if (endedSessionsVerdict({ count: live.length, hostGone }) === "close") {
+      for (const s of live) {
+        closingSessionIds.current.add(s.id);
+        apiCloseSession(s.id).catch(() => closingSessionIds.current.delete(s.id));
+      }
+      return;
+    }
+    // Keep them, ended, with their output; one notice for all of them.
+    for (const s of live) dispatch({ type: "SESSION_UPDATED", session: s });
+    window.dispatchEvent(new CustomEvent("hermes:sessions-ended", {
+      detail: { sessions: live.map((s) => ({ id: s.id, label: s.label })), reason: "service" },
+    }));
+  }, []);
+  // Read from the mount-once event listener below.
+  const settleEndedBurstRef = useRef(settleEndedBurst);
+  settleEndedBurstRef.current = settleEndedBurst;
 
   // Long-running threshold: 30 seconds of busy before notification on idle
   const LONG_RUNNING_THRESHOLD_MS = 30_000;
@@ -1386,11 +1525,23 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // Trigger cleanup and wait for SESSION_REMOVED instead.
         // Disconnected SSH sessions are kept in the UI for reconnection.
         if (session.phase === "destroyed") {
-          if (!closingSessionIds.current.has(session.id)) {
+          if (closingSessionIds.current.has(session.id)) return;
+          if (!stateRef.current.sessions[session.id]) {
+            // Never shown: nothing to keep.
             closingSessionIds.current.add(session.id);
             apiCloseSession(session.id).catch(() => {
               closingSessionIds.current.delete(session.id);
             });
+            return;
+          }
+          // It ended without Hermes closing it. Decide once the burst is
+          // over: several at once, or the terminal service gone, is a crash
+          // (the rows stay, ended, with their output); one program that
+          // ended on its own closes as before.
+          endedBurst.current.ids.add(session.id);
+          endedBurst.current.sessions.set(session.id, session);
+          if (!endedBurst.current.timer) {
+            endedBurst.current.timer = setTimeout(() => void settleEndedBurstRef.current(), ENDED_BURST_MS);
           }
           return;
         }
@@ -1866,15 +2017,19 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // as shared, so closing this session can never delete it.
         const askUser = isFeatureFlagEnabled("honestIsolation");
         const created: CreatedWorktree[] = [];
+        const worktreeWarnings: Array<{ projectId: string; warning: string }> = [];
         const outcome = await createSessionWorktrees(preSessionId, opts.projectIds, opts.branchSelections, {
           createWorktree: async (sessionId, projectId, branch, createNew, fromRemote, baseBranch) => {
             const r = await createWorktree(sessionId, projectId, branch, createNew, fromRemote, baseBranch);
             if (!r.isMainWorktree) created.push({ projectId, branch: r.branchName, worktreePath: r.worktreePath });
+            // Made, but a hook failed after git checked it out: say so.
+            if (r.warning) worktreeWarnings.push({ projectId, warning: r.warning });
             return r;
           },
           attachWorktree,
           removeWorktree,
           detachWorktree,
+          removeLeftover: (projectId, path) => removeLeftoverWorktree(projectId, path, null),
           resolveConflict: async (conflict) => {
             if (!askUser) return { kind: "reuse" };
             const holder = conflict.sessionId ? stateRef.current.sessions[conflict.sessionId] : undefined;
@@ -1893,8 +2048,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           return null;
         }
         worktreesSucceeded = outcome.succeeded;
-        worktreeErrors = outcome.errors;
+        // People read project names, not ids, and sentences, not libgit2 codes.
+        const names = await projectNamesById(opts.projectIds);
+        worktreeErrors = outcome.errors.map((e) => plainGitError(e, names));
         reusedCheckouts = outcome.reused;
+        if (worktreeWarnings.length > 0) {
+          window.dispatchEvent(new CustomEvent("hermes:worktree-warnings", {
+            detail: { warnings: worktreeWarnings.map((w) => `${names[w.projectId] ?? "A project"}: ${w.warning}`) },
+          }));
+        }
         for (const e of worktreeErrors) console.warn(`[SessionContext] Failed to create worktree: ${e}`);
 
         // Hard-abort when every selected worktree failed.  Returning
@@ -2130,36 +2292,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
 
         const honest = isFeatureFlagEnabled("honestIsolation");
         for (const project of projects) {
+          // Only a checkout this session owns alone is deleted on close,
+          // so only its changes need a decision. A checkout shared with
+          // another session (or, with honest isolation, the project
+          // folder) is left as it is, changes included.
+          let wtInfo: SessionWorktree | null = null;
           try {
-            // Only a checkout this session owns alone is deleted on close,
-            // so only its changes need a decision. A checkout shared with
-            // another session (or, with honest isolation, the project
-            // folder) is left as it is, changes included.
-            let wtInfo: SessionWorktree | null = null;
-            try {
-              wtInfo = await getSessionWorktreeInfo(id, project.id);
-            } catch {
-              // Worktree info not available — continue without it
-            }
-            if (!shouldAskAboutChangesOnClose(wtInfo, honest)) continue;
-            const changes = await worktreeHasChanges(id, project.id);
-            if (changes.has_changes) {
-              dirtyChanges.push({
-                projectId: project.id,
-                projectName: project.name,
-                branchName: wtInfo?.branchName ?? null,
-                files: changes.files,
-              });
-            }
+            wtInfo = await getSessionWorktreeInfo(id, project.id);
           } catch {
-            // IPC failure for this project — don't block close
+            // Worktree info not available — continue without it
           }
+          if (!shouldAskAboutChangesOnClose(wtInfo, honest)) continue;
+          // A check that fails is a question too (never a silent delete).
+          const entry = await closeCheckEntry(id, project, wtInfo?.branchName ?? null, worktreeHasChanges);
+          if (entry) dirtyChanges.push(entry);
         }
 
         if (dirtyChanges.length > 0) {
           const session = stateRef.current.sessions[id];
           const label = session?.label || id;
-          setPendingDirtyClose({ sessionId: id, label, changes: dirtyChanges });
+          setPendingDirtyClose({ sessionId: id, label, changes: dirtyChanges, agentWorking: session?.phase === "busy" });
           return;
         }
       } catch {
@@ -2180,18 +2332,26 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [closeSession, dispatch]);
 
   // ─── Dirty worktree dialog handlers ─────────────────────────────────
+  // The choice made in the Uncommitted Changes dialog is the confirmation:
+  // no second "Close session?" follows it.
+
+  /** Folders kept on disk (not deleted on close): say where they are. */
+  const announceKept = useCallback((paths: string[]) => {
+    if (paths.length === 0) return;
+    window.dispatchEvent(new CustomEvent("hermes:worktrees-kept", { detail: { paths } }));
+  }, []);
 
   const handleDirtyStashAndClose = useCallback(async () => {
     if (!pendingDirtyClose) return;
     const { sessionId, changes } = pendingDirtyClose;
     const failures: Array<{ projectName: string; error: string }> = [];
     for (const change of changes) {
+      if (change.files.length === 0) continue;
       try {
         await stashWorktree(sessionId, change.projectId, "Auto-stash before closing session");
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
         console.warn("[SessionContext] Failed to stash worktree:", e);
-        failures.push({ projectName: change.projectName, error: message });
+        failures.push({ projectName: change.projectName, error: plainGitError(e) });
       }
     }
     if (failures.length > 0) {
@@ -2200,60 +2360,138 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return;
     }
     setPendingDirtyClose(null);
-    // All stashes succeeded — proceed with close
-    if (skipCloseConfirmRef.current) {
-      closeSession(sessionId);
-    } else {
-      dispatch({ type: "REQUEST_CLOSE_SESSION", id: sessionId });
-    }
-  }, [pendingDirtyClose, closeSession, dispatch]);
+    closeSession(sessionId);
+  }, [pendingDirtyClose, closeSession]);
 
-  /** Honest isolation: commit (or archive) every dirty worktree, then close. */
-  const commitDirtyAndClose = useCallback(async (target: "session" | "archive") => {
+  /**
+   * Save the work, then close: the session's link to each worktree goes
+   * first (so stopping it leaves the folders), the session — and the agent
+   * in it — stops, and only then is each folder committed ("session" on the
+   * branch the dialog named, "archive" on a new hermes-archive/ branch,
+   * "detached" keeping a detached HEAD's commits on a branch) and removed.
+   * Nothing the agent writes after the choice is lost. What cannot be
+   * saved stays on disk and the dialog says why.
+   */
+  const saveDirtyAndClose = useCallback(async (kind: "session" | "archive" | "detached") => {
     if (!pendingDirtyClose) return;
-    const { sessionId, label, changes } = pendingDirtyClose;
+    const pending = pendingDirtyClose;
+    const { sessionId, label, changes } = pending;
+    const message = closeCommitMessage(label, kind === "archive" ? "archive" : "session");
+    const kept: Record<string, string> = { ...(pending.kept ?? {}) };
+    if (!pending.closed) {
+      const failures: Array<{ projectName: string; error: string }> = [];
+      for (const c of changes) {
+        if (kept[c.projectId]) continue;
+        try {
+          kept[c.projectId] = await keepWorktree(sessionId, c.projectId);
+        } catch (e) {
+          failures.push({ projectName: c.projectName, error: plainGitError(e) });
+        }
+      }
+      if (failures.length > 0) {
+        setPendingDirtyClose((prev) => prev ? { ...prev, kept, stashErrors: failures } : null);
+        return;
+      }
+      await closeSession(sessionId);
+    }
+
+    const remaining: Record<string, string> = {};
+    const keptForGood: string[] = [];
     const failures: Array<{ projectName: string; error: string }> = [];
-    const message = closeCommitMessage(label, target);
-    for (const change of changes) {
+    let refusal: PendingHookRefusal | null = null;
+    for (const c of changes) {
+      const path = kept[c.projectId];
+      if (!path) continue;
+      // Edits inside a submodule cannot be committed from here, and a
+      // worktree that could not be checked is never deleted.
+      if (c.checkError || (c.dirtySubmodules?.length ?? 0) > 0) {
+        keptForGood.push(path);
+        continue;
+      }
       try {
-        await commitWorktree(sessionId, change.projectId, message, target);
+        if (c.detached && ((c.lostCommits ?? 0) > 0 || c.files.length > 0)) {
+          await saveKeptDetachedHead(c.projectId, path, c.branchName, c.files.length > 0 ? message : null);
+        } else if (c.files.length > 0) {
+          await commitKeptWorktree(
+            c.projectId,
+            path,
+            message,
+            kind === "archive" ? "archive" : "session",
+            kind === "archive" ? null : (c.actualBranch ?? c.branchName),
+          );
+        }
+        // An archive leaves the files as they were (they are on the
+        // hermes-archive/ branch now): the folder may go with them.
+        await removeLeftoverWorktree(c.projectId, path, sessionId, kind === "archive" && c.files.length > 0);
       } catch (e) {
-        const text = e instanceof Error ? e.message : String(e);
-        console.warn(`[SessionContext] Failed to ${target === "archive" ? "archive" : "commit"} worktree:`, e);
-        failures.push({ projectName: change.projectName, error: text });
+        remaining[c.projectId] = path;
+        const hook = parseHookRefusal(e);
+        if (hook && !refusal) refusal = { projectName: c.projectName, ...hook };
+        else failures.push({ projectName: c.projectName, error: plainGitError(e) });
       }
     }
-    if (failures.length > 0) {
-      // Do NOT close — the changes are still on disk; show why.
-      setPendingDirtyClose((prev) => prev ? { ...prev, stashErrors: failures } : null);
+    announceKept(keptForGood);
+    if (Object.keys(remaining).length > 0) {
+      setPendingDirtyClose((prev) => prev ? {
+        ...prev,
+        closed: true,
+        kept: remaining,
+        changes: prev.changes.filter((c) => remaining[c.projectId]),
+        hookRefusal: refusal,
+        stashErrors: failures.length > 0 ? failures : undefined,
+      } : null);
       return;
     }
     setPendingDirtyClose(null);
-    if (skipCloseConfirmRef.current) {
-      closeSession(sessionId);
-    } else {
-      dispatch({ type: "REQUEST_CLOSE_SESSION", id: sessionId });
-    }
-  }, [pendingDirtyClose, closeSession, dispatch]);
+  }, [pendingDirtyClose, closeSession, announceKept]);
 
-  const handleDirtyCommitAndClose = useCallback(() => commitDirtyAndClose("session"), [commitDirtyAndClose]);
-  const handleDirtyArchiveAndClose = useCallback(() => commitDirtyAndClose("archive"), [commitDirtyAndClose]);
+  const handleDirtyCommitAndClose = useCallback(() => saveDirtyAndClose("session"), [saveDirtyAndClose]);
+  const handleDirtyArchiveAndClose = useCallback(() => saveDirtyAndClose("archive"), [saveDirtyAndClose]);
+  const handleDirtySaveDetachedAndClose = useCallback(() => saveDirtyAndClose("detached"), [saveDirtyAndClose]);
+
+  /** Keep every worktree in the dialog on disk (with its branch) and close. */
+  const handleDirtyKeepAndClose = useCallback(async () => {
+    if (!pendingDirtyClose) return;
+    const { sessionId, changes } = pendingDirtyClose;
+    const paths: string[] = Object.values(pendingDirtyClose.kept ?? {});
+    if (!pendingDirtyClose.closed) {
+      const failures: Array<{ projectName: string; error: string }> = [];
+      for (const c of changes) {
+        try {
+          paths.push(await keepWorktree(sessionId, c.projectId));
+        } catch (e) {
+          failures.push({ projectName: c.projectName, error: plainGitError(e) });
+        }
+      }
+      if (failures.length > 0) {
+        setPendingDirtyClose((prev) => prev ? { ...prev, stashErrors: failures } : null);
+        return;
+      }
+      setPendingDirtyClose(null);
+      await closeSession(sessionId);
+    } else {
+      setPendingDirtyClose(null);
+    }
+    announceKept(paths);
+  }, [pendingDirtyClose, closeSession, announceKept]);
 
   const handleDirtyCloseAnyway = useCallback(() => {
     if (!pendingDirtyClose) return;
-    const { sessionId } = pendingDirtyClose;
+    const { sessionId, closed } = pendingDirtyClose;
     setPendingDirtyClose(null);
-    // Proceed with close without stashing
-    if (skipCloseConfirmRef.current) {
-      closeSession(sessionId);
-    } else {
-      dispatch({ type: "REQUEST_CLOSE_SESSION", id: sessionId });
+    if (closed) {
+      announceKept(Object.values(pendingDirtyClose.kept ?? {}));
+      return;
     }
-  }, [pendingDirtyClose, closeSession, dispatch]);
+    // Discard: closing removes the worktree with everything in it.
+    closeSession(sessionId);
+  }, [pendingDirtyClose, closeSession, announceKept]);
 
   const handleDirtyCancelClose = useCallback(() => {
+    // After the session was stopped, its folders stay where they are.
+    if (pendingDirtyClose?.closed) announceKept(Object.values(pendingDirtyClose.kept ?? {}));
     setPendingDirtyClose(null);
-  }, []);
+  }, [pendingDirtyClose, announceKept]);
 
   const setActive = useCallback((id: string | null) => {
     dispatch({ type: "SET_ACTIVE", id });
@@ -2879,9 +3117,15 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           changes={pendingDirtyClose.changes}
           stashErrors={pendingDirtyClose.stashErrors}
           variant={isFeatureFlagEnabled("honestIsolation") ? "commit" : "stash"}
+          agentWorking={pendingDirtyClose.agentWorking}
+          closed={pendingDirtyClose.closed}
+          keptPaths={pendingDirtyClose.kept}
+          hookRefusal={pendingDirtyClose.hookRefusal ?? null}
           onStashAndClose={handleDirtyStashAndClose}
           onCommitAndClose={handleDirtyCommitAndClose}
           onArchiveAndClose={handleDirtyArchiveAndClose}
+          onSaveDetachedAndClose={handleDirtySaveDetachedAndClose}
+          onKeepAndClose={handleDirtyKeepAndClose}
           onCloseAnyway={handleDirtyCloseAnyway}
           onCancel={handleDirtyCancelClose}
         />
@@ -2906,6 +3150,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             setPendingBranchConflict(null);
             pendingBranchConflict.resolve({ kind: "new-branch", name });
           }}
+          onRemoveLeftover={pendingBranchConflict.conflict.leftover ? () => {
+            setPendingBranchConflict(null);
+            pendingBranchConflict.resolve({ kind: "remove-leftover" });
+          } : undefined}
           onCancel={() => {
             setPendingBranchConflict(null);
             pendingBranchConflict.resolve({ kind: "cancel" });
@@ -2922,7 +3170,6 @@ export function useSession() {
   if (!ctx) throw new Error("useSession must be used within SessionProvider");
   return ctx;
 }
-
 // ─── Derived hooks (memoized) ───────────────────────────────────────
 
 export function useActiveSession(): SessionData | null {

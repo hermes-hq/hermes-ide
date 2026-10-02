@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { Fragment, useState, useEffect, useCallback, useMemo, type ReactNode } from "react";
 import "../styles/components/BranchConflictDialog.css";
 import { Button, CloseButton, Input } from "./ui";
 import { branchClashMessage, findBranchClash } from "../utils/branchClash";
@@ -19,7 +19,17 @@ interface BranchConflictDialogProps {
   onCreateNewBranch: (newBranchName: string) => void;
   /** Use this existing branch instead (the name typed was one). */
   onUseExisting?: (branchName: string) => void;
+  /**
+   * Set when the checkout is a leftover of this Hermes (in its own worktree
+   * folder, no session uses it): "Remove it and retry".
+   */
+  onRemoveLeftover?: () => void;
   onCancel: () => void;
+}
+
+/** A sentence with elements (a <strong> branch) spliced in at their {placeholders}. */
+function withNodes(text: string, nodes: Record<string, ReactNode>): ReactNode[] {
+  return text.split(/\{(\w+)\}/).map((part, i) => (i % 2 === 1 ? <Fragment key={i}>{nodes[part]}</Fragment> : part));
 }
 
 /** The name offered for the new branch: `<branch>-2`, or the next one no branch has. */
@@ -35,10 +45,10 @@ export function suggestNewBranchName(inUse: string, localBranches: readonly stri
 /** Validation for the "use another branch" name. Null when the name is usable. */
 export function validateNewBranchName(name: string, inUse: string): string | null {
   const trimmed = name.trim();
-  if (!trimmed) return "Branch name cannot be empty";
-  if (/\s/.test(trimmed)) return "Branch name cannot contain spaces";
+  if (!trimmed) return translate("branchInUse.errEmpty");
+  if (/\s/.test(trimmed)) return translate("branchInUse.errSpaces");
   // Letter case alone does not make it another branch on macOS and Windows.
-  if (trimmed.toLowerCase() === inUse.toLowerCase()) return "New branch must have a different name";
+  if (trimmed.toLowerCase() === inUse.toLowerCase()) return translate("branchInUse.errSame");
   return null;
 }
 
@@ -61,8 +71,10 @@ export function BranchConflictDialog({
   onReuse,
   onCreateNewBranch,
   onUseExisting,
+  onRemoveLeftover,
   onCancel,
 }: BranchConflictDialogProps) {
+  const t = translate;
   const [newBranchName, setNewBranchName] = useState(() => suggestNewBranchName(branchName, localBranches ?? []));
   const [validationError, setValidationError] = useState<string | null>(null);
 
@@ -109,21 +121,30 @@ export function BranchConflictDialog({
       >
         <div className="branch-conflict-header">
           <span className="branch-conflict-icon">&#9888;</span>
-          <span className="branch-conflict-title" id="branch-conflict-title">Branch In Use</span>
-          <CloseButton className="branch-conflict-close" onClick={onCancel} label="Close" />
+          <span className="branch-conflict-title" id="branch-conflict-title">{t("branchInUse.title")}</span>
+          <CloseButton className="branch-conflict-close" onClick={onCancel} label={t("common.close")} />
         </div>
 
         <div className="branch-conflict-body">
           <p className="branch-conflict-message">
-            Branch <strong className="branch-conflict-branch-name">{branchName}</strong> is
-            already checked out by{" "}
-            <strong className="branch-conflict-session-name">{heldBy}</strong>.
+            {withNodes(t("branchInUse.message"), {
+              branch: <strong className="branch-conflict-branch-name">{branchName}</strong>,
+              holder: <strong className="branch-conflict-session-name">{heldBy}</strong>,
+            })}
           </p>
           <p className="branch-conflict-path" title={path}>
             <code>{path}</code>
           </p>
+          {onRemoveLeftover && (
+            <div className="branch-conflict-leftover">
+              <p className="branch-conflict-hint">{t("branchInUse.leftoverHint")}</p>
+              <Button className="branch-conflict-btn-remove-leftover" onClick={onRemoveLeftover}>
+                {t("branchInUse.removeRetry")}
+              </Button>
+            </div>
+          )}
           <p className="branch-conflict-hint">
-            Two sessions on one checkout edit the same files. Choose what this session should do:
+            {t("branchInUse.hint")}
           </p>
 
           <div className="branch-conflict-actions">
@@ -131,7 +152,7 @@ export function BranchConflictDialog({
               <Input
                 code
                 className="branch-conflict-create-input"
-                aria-label="New branch name"
+                aria-label={t("branchInUse.newName")}
                 value={newBranchName}
                 onChange={(e) => {
                   setNewBranchName(e.target.value);
@@ -146,7 +167,7 @@ export function BranchConflictDialog({
                 autoFocus
               />
               <Button variant="primary" className="branch-conflict-btn-create" onClick={handleCreate}>
-                Use new branch
+                {t("branchInUse.useNew")}
               </Button>
             </div>
 
@@ -169,10 +190,10 @@ export function BranchConflictDialog({
 
             <div className="branch-conflict-other-row">
               <Button variant="quiet" className="branch-conflict-btn-cancel" onClick={onCancel}>
-                Cancel
+                {t("common.cancel")}
               </Button>
               <Button className="branch-conflict-btn-switch" onClick={onReuse}>
-                Reuse its checkout
+                {t("branchInUse.reuse")}
               </Button>
             </div>
           </div>

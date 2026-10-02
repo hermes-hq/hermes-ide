@@ -16,6 +16,12 @@ import { GitConflictViewer } from "./GitConflictViewer";
 import type { GitToast } from "./GitPanel";
 import { GitActionButton } from "./GitActionButton";
 import { Textarea } from "./ui/Input";
+import { friendlyWorktreeLabel, isHermesWorktreePath } from "../utils/worktree";
+import { parseHookRefusal } from "../utils/gitErrors";
+import { translate } from "../i18n/registry";
+import { useOptionalSessions } from "../state/sessionContextObject";
+import { agentDisplayName, getAgent } from "../catalog/agentCatalog";
+import { Button } from "./ui";
 
 interface GitProjectSectionProps {
   sessionId: string;
@@ -50,25 +56,10 @@ function truncatePath(fullPath: string, maxLen = 45): string {
 }
 
 function isWorktreePath(path: string): boolean {
-  return path.includes("hermes-worktrees/");
+  return isHermesWorktreePath(path);
 }
 
-/**
- * Extract a user-friendly display name from a worktree path.
- * Worktree paths look like: .../hermes-worktrees/<hash>/<session>_<branch>
- * We extract the branch name (after the last underscore in the directory name).
- */
-export function friendlyWorktreeLabel(projectName: string, projectPath: string): string {
-  if (!isWorktreePath(projectPath)) return projectName;
-  const dirName = projectPath.split("/").pop() || "";
-  // The branch name is after the last underscore separator
-  const underscoreIdx = dirName.indexOf("_");
-  if (underscoreIdx >= 0) {
-    const branchPart = dirName.slice(underscoreIdx + 1);
-    if (branchPart) return `${projectName} (${branchPart})`;
-  }
-  return projectName;
-}
+export { friendlyWorktreeLabel };
 
 export function GitProjectSection({ sessionId, projectId, project, onRefresh, onDiffFile, onToast, variant = "panel", draftMessage, commitLabel }: GitProjectSectionProps) {
   const changesOnly = variant === "changes";
@@ -97,6 +88,19 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
   const [completing, setCompleting] = useState(false);
   const [conflictViewTarget, setConflictViewTarget] = useState<string | null>(null);
   const [, setResolvedStrategies] = useState<Record<string, string>>({});
+  /** "Abort the merge?" is showing. */
+  const [confirmAbort, setConfirmAbort] = useState(false);
+  // translate, not useI18n: also rendered outside the I18n provider (panel tests).
+  const t = translate;
+
+  // A task's isolated worktree, or a folder an agent works in: switching its
+  // branch moves the agent's next commits (and Land), so the switcher asks.
+  const session = useOptionalSessions()?.[sessionId];
+  const agentName = session ? agentDisplayName(session) ?? getAgent(session.ai_provider)?.name ?? null : null;
+  const agentRunning = !!session && session.phase !== "destroyed" && (!!session.detected_agent || !!session.ai_provider);
+  const confirmSwitch: "task-worktree" | "agent-folder" | null = isWorktreePath(project.project_path)
+    ? "task-worktree"
+    : agentRunning ? "agent-folder" : null;
 
   const { onContextMenu: textContextMenu } = useTextContextMenu();
 
@@ -205,8 +209,12 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
       edited.current = false;
       onToast("Committed successfully");
       onRefresh();
-    } catch (e) { setError(String(e)); }
-  }, [sessionId, projectId, commitMsg, staged.length, autoStage, onRefresh, onToast]);
+    } catch (e) {
+      // The repository's hook said no: show what it printed, as it printed it.
+      const hook = parseHookRefusal(e);
+      setError(hook ? t("dirty.hookRefused", { hook: hook.hook, output: hook.output }) : String(e));
+    }
+  }, [sessionId, projectId, commitMsg, staged.length, autoStage, onRefresh, onToast, t]);
 
   const handlePush = useCallback(async () => {
     try {
@@ -263,8 +271,15 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
     } catch (e) { setError(String(e)); }
   }, [sessionId, projectId, onRefresh, onToast]);
 
+  /** Abort asks first: it puts back the files the merge changed. */
+  const requestAbortMerge = useCallback(() => {
+    setError(null);
+    setConfirmAbort(true);
+  }, []);
+
   const handleAbortMerge = useCallback(async () => {
     try {
+      setConfirmAbort(false);
       setAborting(true);
       setError(null);
       await gitAbortMerge(sessionId, projectId);
@@ -363,6 +378,8 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
           onToast={onToast}
           onClose={() => setBranchSelectorOpen(false)}
           triggerRef={branchTriggerRef}
+          confirmSwitch={confirmSwitch}
+          agentName={agentName}
         />
       )}
 
@@ -398,9 +415,25 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                   mergeStatus={mergeStatus}
                   onResolve={handleResolveConflict}
                   onViewConflict={handleViewConflict}
-                  onAbort={handleAbortMerge}
+                  onAbort={() => void handleAbortMerge()}
                   aborting={aborting}
                 />
+              )}
+
+              {inMerge && confirmAbort && (
+                <div className="git-branch-ask git-abort-confirm" role="alertdialog" aria-labelledby={`git-abort-text-${projectId}`}>
+                  <div className="git-branch-ask-text" id={`git-abort-text-${projectId}`}>
+                    {t("merge.abortConfirm")}
+                  </div>
+                  <div className="git-branch-ask-actions">
+                    <Button size="sm" className="git-abort-cancel" onClick={() => setConfirmAbort(false)}>
+                      {t("common.cancel")}
+                    </Button>
+                    <Button size="sm" variant="danger" className="git-abort-yes" onClick={() => void handleAbortMerge()}>
+                      {t("merge.abortYes")}
+                    </Button>
+                  </div>
+                </div>
               )}
 
               {/* Staged files */}
@@ -503,7 +536,7 @@ export function GitProjectSection({ sessionId, projectId, project, onRefresh, on
                       kitClass="git-merge-abort"
                       legacyClass="git-btn git-btn-merge-abort"
                       disabled={aborting}
-                      onClick={handleAbortMerge}
+                      onClick={requestAbortMerge}
                     >
                       {aborting ? "..." : "Abort Merge"}
                     </GitActionButton>
