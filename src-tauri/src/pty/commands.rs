@@ -866,6 +866,10 @@ impl Drop for OpeningGuard<'_> {
 /// it was being opened.
 const CLOSED_WHILE_OPENING: &str = "The session was closed while it was being opened";
 
+/// Input bigger than this (a paste, not typing) is written to the terminal
+/// in the background (CHAOS-05).
+const BACKGROUND_WRITE_BYTES: usize = 64 * 1024;
+
 // Tauri command handler — params come from frontend invocation. Off the main
 // thread: starting the session host can take seconds, and on the main thread
 // that would freeze the window.
@@ -1107,6 +1111,7 @@ pub fn create_session(
         launch_helper: launch_helper.unwrap_or(false),
         launch_helper_required: launch_helper_required.unwrap_or(false),
         signal_nonce: None,
+        reported_status: None,
         task_prompt: initial_prompt
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty()),
@@ -1910,6 +1915,19 @@ pub fn create_session(
         // after the replay. Hermes never types into a terminal on its own.
         let _ = transport.resize(pty_rows, pty_cols.saturating_sub(1).max(1));
         let _ = transport.resize(pty_rows, pty_cols);
+        // LEAD-01: the agent kept running and kept reporting into its spool
+        // while the app was away. Read it again from the start (its status,
+        // identity and usage come back) and keep listening, so what it asks
+        // next reaches the badge, the inbox and the notifications.
+        let reattach = crate::pty::launch::launch_dir(&app)
+            .ok()
+            .and_then(|dir| crate::pty::launch::reattach_watch(&dir.join(&session_id)));
+        if let Some(watch) = reattach {
+            if let Ok(mut s) = session_arc.lock() {
+                s.signal_nonce = Some(watch.nonce.clone());
+            }
+            crate::pty::launch::watch_signals(app.clone(), Arc::clone(&session_arc), watch);
+        }
         if let Some(code) = ended_before_attach {
             // The program ended while the app was away: a fact worth
             // reporting through the 2.0 event contract.
@@ -2080,6 +2098,31 @@ pub fn write_to_session(
         a.mark_input_sent();
     }
 
+    // CHAOS-05: a big paste takes as long as the program needs to read it.
+    // Written here, it would hold the session list (and the window, whose
+    // thread runs this command) until then. It is written in the
+    // background instead; a failure is reported on `pty-write-failed-<id>`.
+    if bytes.len() > BACKGROUND_WRITE_BYTES {
+        let writer = Arc::clone(&session.writer);
+        drop(mgr);
+        let id = session_id.clone();
+        thread::spawn(move || {
+            let written = writer.lock().map_err(|e| e.to_string()).and_then(|mut w| {
+                w.write_all(&bytes)
+                    .and_then(|_| w.flush())
+                    .map_err(|e| e.to_string())
+            });
+            if let Err(e) = written {
+                log::warn!(
+                    "[write_to_session] {id}: a paste of {} bytes failed: {e}",
+                    bytes.len()
+                );
+                let _ = app.emit(&format!("pty-write-failed-{id}"), e);
+            }
+        });
+        return Ok(());
+    }
+
     {
         let mut w = session
             .writer
@@ -2241,7 +2284,7 @@ fn probe_foreground(
 
 /// Whether the shell is at its prompt, from the process table (steps 2 and 3
 /// above). Slow on Windows; never call it holding the PTY manager lock.
-fn shell_at_prompt_by_process_table(shell_pid: u32) -> bool {
+pub(crate) fn shell_at_prompt_by_process_table(shell_pid: u32) -> bool {
     // ── Linux: read tpgid from /proc/{pid}/stat ──
     #[cfg(target_os = "linux")]
     {
@@ -3367,17 +3410,96 @@ fn available_shells() -> Vec<ShellInfo> {
                 path: "cmd.exe".to_string(),
             });
         }
-        // Git Bash
-        let git_bash = "C:\\Program Files\\Git\\bin\\bash.exe";
-        if std::path::Path::new(git_bash).exists() {
+        // Git Bash, wherever Git for Windows is installed (XP-15).
+        let where_bash = std::process::Command::new("where")
+            .arg("bash")
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).to_string())
+            .unwrap_or_default();
+        let install_path = std::process::Command::new("reg")
+            .args(["query", r"HKLM\SOFTWARE\GitForWindows", "/v", "InstallPath"])
+            .output()
+            .ok()
+            .and_then(|o| reg_install_path(&String::from_utf8_lossy(&o.stdout)));
+        if let Some(path) = git_bash_candidates(&where_bash, install_path.as_deref())
+            .into_iter()
+            .find(|p| std::path::Path::new(p).exists())
+        {
             shells.push(ShellInfo {
                 name: "Git Bash".to_string(),
-                path: git_bash.to_string(),
+                path,
             });
         }
     }
 
     shells
+}
+
+/// Where Git Bash may be, best first: the Git for Windows install folder
+/// from the registry, every `bash.exe` on PATH that is not the WSL launcher
+/// in System32, then the default install folders.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn git_bash_candidates(where_output: &str, install_path: Option<&str>) -> Vec<String> {
+    let mut out: Vec<String> = Vec::new();
+    if let Some(dir) = install_path {
+        out.push(format!(
+            "{}\\bin\\bash.exe",
+            dir.trim_end_matches(['\\', '/'])
+        ));
+    }
+    for line in where_output
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+    {
+        let lower = line.to_ascii_lowercase();
+        if lower.ends_with("bash.exe")
+            && !lower.contains("\\system32\\")
+            && !lower.contains("\\windowsapps\\")
+        {
+            out.push(line.to_string());
+        }
+    }
+    out.push(r"C:\Program Files\Git\bin\bash.exe".to_string());
+    out.push(r"C:\Program Files (x86)\Git\bin\bash.exe".to_string());
+    let mut seen = std::collections::HashSet::new();
+    out.retain(|p| seen.insert(p.to_ascii_lowercase()));
+    out
+}
+
+/// The `InstallPath` value in `reg query` output.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn reg_install_path(output: &str) -> Option<String> {
+    output.lines().find_map(|line| {
+        let rest = line.trim().strip_prefix("InstallPath")?;
+        let value = rest.trim_start().strip_prefix("REG_SZ")?.trim();
+        (!value.is_empty()).then(|| value.to_string())
+    })
+}
+
+/// The kind of shell a shell setting names, from its file name, any case
+/// (`C:\Windows\...\PowerShell.exe`, `CMD.EXE`), never from the folders
+/// around it (XP-15).
+fn shell_type_of(shell: &str) -> &'static str {
+    let name = shell
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(shell)
+        .to_ascii_lowercase();
+    let stem = name.strip_suffix(".exe").unwrap_or(&name);
+    if stem.contains("zsh") {
+        "zsh"
+    } else if stem.contains("bash") {
+        "bash"
+    } else if stem.contains("fish") {
+        "fish"
+    } else if stem.contains("pwsh") || stem.contains("powershell") {
+        "powershell"
+    } else if stem == "cmd" {
+        "cmd"
+    } else {
+        "unknown"
+    }
 }
 
 #[tauri::command]
@@ -3429,19 +3551,7 @@ fn build_shell_environment(
         };
     }
 
-    let shell_type = if shell.contains("zsh") {
-        "zsh"
-    } else if shell.contains("bash") {
-        "bash"
-    } else if shell.contains("fish") {
-        "fish"
-    } else if shell.contains("pwsh") || shell.contains("powershell") {
-        "powershell"
-    } else if shell.contains("cmd") {
-        "cmd"
-    } else {
-        "unknown"
-    };
+    let shell_type = shell_type_of(shell);
 
     let mut plugins = Vec::new();
     let mut has_oh_my_zsh = false;
@@ -4028,6 +4138,49 @@ pub fn ssh_get_remote_git_info(
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod shell_kind_tests {
+    use super::{git_bash_candidates, reg_install_path, shell_type_of};
+
+    #[test]
+    fn the_shell_kind_comes_from_the_file_name_in_any_case() {
+        assert_eq!(shell_type_of("/bin/zsh"), "zsh");
+        assert_eq!(shell_type_of("bash"), "bash");
+        assert_eq!(
+            shell_type_of(r"C:\Windows\System32\WindowsPowerShell\v1.0\PowerShell.exe"),
+            "powershell"
+        );
+        assert_eq!(
+            shell_type_of(r"C:\Program Files\PowerShell\7\PWSH.EXE"),
+            "powershell"
+        );
+        assert_eq!(shell_type_of(r"C:\WINDOWS\system32\CMD.EXE"), "cmd");
+        assert_eq!(shell_type_of(r"C:\Program Files\Git\bin\bash.exe"), "bash");
+        // A folder name never decides it.
+        assert_eq!(shell_type_of("/opt/zsh-tools/bin/fish"), "fish");
+        assert_eq!(shell_type_of(r"C:\cmdtools\nu.exe"), "unknown");
+    }
+
+    #[test]
+    fn git_bash_is_found_where_git_for_windows_put_it() {
+        let reg = "\r\nHKEY_LOCAL_MACHINE\\SOFTWARE\\GitForWindows\r\n    InstallPath    REG_SZ    D:\\Tools\\Git\r\n";
+        let install = reg_install_path(reg);
+        assert_eq!(install.as_deref(), Some(r"D:\Tools\Git"));
+        let where_out = "C:\\Windows\\System32\\bash.exe\r\nD:\\Tools\\Git\\usr\\bin\\bash.exe\r\n";
+        let found = git_bash_candidates(where_out, install.as_deref());
+        assert_eq!(found[0], r"D:\Tools\Git\bin\bash.exe");
+        assert_eq!(found[1], r"D:\Tools\Git\usr\bin\bash.exe");
+        assert!(
+            !found
+                .iter()
+                .any(|p| p.to_ascii_lowercase().contains("system32")),
+            "the WSL launcher is not Git Bash"
+        );
+        assert!(found.contains(&r"C:\Program Files\Git\bin\bash.exe".to_string()));
+        assert_eq!(reg_install_path("ERROR: not found"), None);
+    }
+}
 
 #[cfg(test)]
 mod tests {

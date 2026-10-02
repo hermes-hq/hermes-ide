@@ -46,13 +46,33 @@
 }
 
 .quit-dialog-session {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
   padding: 6px 10px;
   font-size: var(--text-md);
   color: var(--text-1);
   border-bottom: 1px solid var(--border);
+}
+
+.quit-dialog-session-label {
+  flex: 1;
+  min-width: 0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.quit-dialog-session-state {
+  flex-shrink: 0;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+.quit-dialog-queued {
+  font-size: var(--text-md);
+  color: var(--text-2);
+  margin: calc(-1 * var(--space-2)) 0 var(--space-4);
 }
 
 .quit-dialog-session:last-child {

@@ -276,9 +276,34 @@ fn hook_path(p: &Path) -> String {
 
 /// `hi signal --agent <id> [--event <name>]` as one shell command line, for
 /// hook formats that only take a command string (Gemini, Antigravity,
-/// goose). The quoted path works in sh, bash, PowerShell and cmd.
-fn signal_command(hi: &Path, agent_id: &str, event: Option<&str>) -> String {
-    let mut cmd = format!("\"{}\" signal --agent {agent_id}", hook_path(hi));
+/// goose), in the syntax of the shell the agent runs it with here.
+fn signal_command(agent: &Agent, hi: &Path, event: Option<&str>) -> String {
+    signal_command_in(
+        cfg!(windows),
+        agent.terminal.signals.hook_shell.as_deref(),
+        hi,
+        &agent.id,
+        event,
+    )
+}
+
+/// The quoted path runs as a program in sh, bash and cmd. PowerShell reads
+/// a quoted string as a value, not a command, so where the agent runs its
+/// hooks with PowerShell (Gemini on Windows: `-Command`) the line starts
+/// with the call operator (XP-04).
+fn signal_command_in(
+    windows: bool,
+    hook_shell: Option<&str>,
+    hi: &Path,
+    agent_id: &str,
+    event: Option<&str>,
+) -> String {
+    let call = if windows && hook_shell == Some("powershell") {
+        "& "
+    } else {
+        ""
+    };
+    let mut cmd = format!("{call}\"{}\" signal --agent {agent_id}", hook_path(hi));
     if let Some(event) = event {
         cmd.push_str(" --event ");
         cmd.push_str(event);
@@ -462,7 +487,7 @@ pub fn settings_file_json(agent: &Agent, hi: &Path, status_line: bool) -> String
     if status_line && limits_via_status_line(agent) {
         settings["statusLine"] = serde_json::json!({
             "type": "command",
-            "command": signal_command(hi, &agent.id, Some("StatusLine")),
+            "command": signal_command(agent, hi, Some("StatusLine")),
         });
     }
     serde_json::to_string_pretty(&settings).unwrap_or_default()
@@ -513,7 +538,7 @@ pub fn env_file_json(agent: &Agent, hi: &Path, env: &BTreeMap<String, String>) -
             serde_json::json!([{ "hooks": [{
                 "name": format!("hermes-{}", event.to_lowercase()),
                 "type": "command",
-                "command": signal_command(hi, &agent.id, Some(event)),
+                "command": signal_command(agent, hi, Some(event)),
                 "env": hook_env,
                 "timeout": 5000
             }]}]),
@@ -557,7 +582,7 @@ pub fn plugin_hooks_json(agent: &Agent, hi: &Path, env: &BTreeMap<String, String
 /// through a shell); the values are TOML basic strings.
 pub fn toml_hook_flags(agent: &Agent, hi: &Path) -> Vec<String> {
     let toml = |s: &str| serde_json::to_string(s).unwrap_or_default();
-    let command = signal_command(hi, &agent.id, None);
+    let command = signal_command(agent, hi, None);
     let mut flags = Vec::new();
     for (event, matchers) in catalog_hooks(agent) {
         // Codex caps its session-end hooks at 3 seconds.
@@ -584,7 +609,7 @@ pub fn worktree_hooks_json(agent: &Agent, hi: &Path, existing: Option<&str>) -> 
     let command = |event: &str| {
         serde_json::json!({
             "type": "command",
-            "command": signal_command(hi, &agent.id, Some(event)),
+            "command": signal_command(agent, hi, Some(event)),
             "timeout": 5
         })
     };
@@ -1138,6 +1163,65 @@ pub fn add_git_excludes(cwd: &Path, patterns: &[String]) -> std::io::Result<()> 
     Ok(())
 }
 
+/// Where a session's context copy lives inside its checkout, git-ignored.
+const CONTEXT_COPY_DIR: &str = ".hermes/context";
+
+/// PLN-12: the session's context file, copied into the git checkout the
+/// agent works in (`.hermes/context/<session>.md`, excluded from git), so
+/// the agent reads it without asking for a file outside its folder. In a
+/// linked worktree the copy starts by naming that worktree, its branch and
+/// the main checkout the agent must leave alone (the context lists the
+/// project's main folder). None outside git, or when the copy fails: the
+/// original file is used.
+fn context_in_worktree(cwd: &Path, context: &Path, session_id: &str) -> Option<PathBuf> {
+    let git = |args: &[&str]| -> Option<String> {
+        let out = crate::git::cli::git_command()
+            .arg("-C")
+            .arg(cwd)
+            .args(args)
+            .output()
+            .ok()?;
+        out.status
+            .success()
+            .then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
+            .filter(|s| !s.is_empty())
+    };
+    let top = PathBuf::from(git(&["rev-parse", "--show-toplevel"])?);
+    let body = std::fs::read_to_string(context).ok()?;
+    let common = git(&["rev-parse", "--path-format=absolute", "--git-common-dir"]);
+    let main = common
+        .as_deref()
+        .map(Path::new)
+        .and_then(Path::parent)
+        .map(Path::to_path_buf);
+    let same = |a: &Path, b: &Path| {
+        std::fs::canonicalize(a)
+            .ok()
+            .zip(std::fs::canonicalize(b).ok())
+            .is_some_and(|(a, b)| a == b)
+    };
+    let header = match main {
+        Some(main) if !same(&main, &top) => {
+            let branch =
+                git(&["rev-parse", "--abbrev-ref", "HEAD"]).unwrap_or_else(|| "HEAD".into());
+            format!(
+                "You work in {} (branch {branch}); do not edit {}.\n\n",
+                top.display(),
+                main.display()
+            )
+        }
+        _ => String::new(),
+    };
+    let dir = top.join(CONTEXT_COPY_DIR);
+    std::fs::create_dir_all(&dir).ok()?;
+    let file = dir.join(format!("{session_id}.md"));
+    std::fs::write(&file, format!("{header}{body}")).ok()?;
+    if let Err(e) = add_git_excludes(&top, &[format!("/{CONTEXT_COPY_DIR}/")]) {
+        log::warn!("[LAUNCH] could not exclude the context copy from git: {e}");
+    }
+    Some(file)
+}
+
 // ─── Locations ───────────────────────────────────────────────────────
 
 fn hi_file_name() -> &'static str {
@@ -1335,6 +1419,10 @@ pub(crate) struct SignalWatch {
     /// How sure a hook signal from this agent is.
     pub confidence: crate::contract::Confidence,
     pub stream: Option<StreamSpec>,
+    /// The agent was already running when this watch started (the session
+    /// host kept it while the app was away): the spool is read from its
+    /// start to rebuild what the agent reported, without acting on it again.
+    pub replay: bool,
 }
 
 fn confidence_of(name: &str) -> crate::contract::Confidence {
@@ -1427,7 +1515,14 @@ pub(crate) fn prepare_helper_launch(
     let context_path = if s.has_initial_context {
         crate::project::attunement::session_context_path(app, &s.id)
             .ok()
-            .map(|p| p.to_string_lossy().to_string())
+            .map(|p| {
+                // PLN-12: a copy inside the folder the agent works in, so
+                // reading it asks no permission, naming that folder.
+                context_in_worktree(Path::new(&s.working_directory), &p, &s.id)
+                    .unwrap_or(p)
+                    .to_string_lossy()
+                    .to_string()
+            })
     } else {
         None
     };
@@ -1545,7 +1640,37 @@ pub(crate) fn prepare_helper_launch(
             agent: plan.spec.agent.clone(),
             confidence: confidence_of(&plan.confidence),
             stream: plan.stream,
+            replay: false,
         },
+    })
+}
+
+/// The spool watch of an agent the session host kept running while the app
+/// was away (LEAD-01): its launch file names the agent and the nonce its
+/// hooks sign with, and its spool has everything it reported. None when the
+/// session had no agent launch (a plain shell) or its folder is gone.
+pub(crate) fn reattach_watch(session_dir: &Path) -> Option<SignalWatch> {
+    let text = std::fs::read_to_string(session_dir.join(LAUNCH_FILE)).ok()?;
+    let spec: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let agent = spec.get("agent")?.as_str()?.to_string();
+    let nonce = spec
+        .get("env")?
+        .get("HERMES_SIGNAL_NONCE")?
+        .as_str()
+        .filter(|n| !n.is_empty())?
+        .to_string();
+    let confidence = crate::agent_catalog::agent(&agent)
+        .map(|a| confidence_of(&a.terminal.signals.confidence))
+        .unwrap_or(crate::contract::Confidence::Guessed);
+    Some(SignalWatch {
+        session_dir: session_dir.to_path_buf(),
+        // It started long ago: silence now is no startup prompt.
+        expects_start_signal: false,
+        nonce,
+        agent,
+        confidence,
+        stream: None,
+        replay: true,
     })
 }
 
@@ -2176,10 +2301,73 @@ impl Identity {
     }
 }
 
+/// ACC-10: the model the person switched to inside the agent (`/model`).
+/// The first model the agent reports is the one it started with (in its
+/// own spelling of what was asked for); a later, different report is a
+/// switch, and a restart resumes with that model instead of the launch's.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct ModelSwitch {
+    first: Option<String>,
+    current: Option<String>,
+    switched: Option<String>,
+}
+
+impl ModelSwitch {
+    pub fn observe(&mut self, event: &crate::contract::SessionEvent) {
+        let crate::contract::SessionEvent::Identity {
+            model: Some(model), ..
+        } = event
+        else {
+            return;
+        };
+        if self.first.is_none() {
+            self.first = Some(model.clone());
+        } else if self.current.as_deref() != Some(model.as_str()) {
+            self.switched = Some(model.clone());
+        }
+        self.current = Some(model.clone());
+    }
+
+    /// The model switched to since the last take, if any.
+    pub fn take(&mut self) -> Option<String> {
+        self.switched.take()
+    }
+}
+
 /// A finished turn: the launch was taken, so a refusal can no longer come.
 /// A hook that says a tool ran (`PostToolUse`, with or without its tool).
 fn ran_a_tool(event: &str) -> bool {
     event == "PostToolUse" || event.starts_with("PostToolUse:")
+}
+
+/// The turn number of a turn event, None for any other event.
+fn turn_number(event: &crate::contract::SessionEvent) -> Option<u32> {
+    use crate::contract::SessionEvent;
+    match event {
+        SessionEvent::TurnStart { n, .. }
+        | SessionEvent::TurnEnd { n, .. }
+        | SessionEvent::TurnFailed { n, .. }
+        | SessionEvent::TurnInterrupted { n, .. } => Some(n.get()),
+        _ => None,
+    }
+}
+
+/// A replayed spool's events without the turns that ended in it (their
+/// start and their end); everything else, the running turn's start
+/// included, keeps its place.
+fn drop_ended_turns(
+    events: Vec<crate::contract::SessionEvent>,
+) -> Vec<crate::contract::SessionEvent> {
+    use crate::contract::SessionEvent;
+    let ended: std::collections::HashSet<u32> = events
+        .iter()
+        .filter(|e| !matches!(e, SessionEvent::TurnStart { .. }))
+        .filter_map(turn_number)
+        .collect();
+    events
+        .into_iter()
+        .filter(|e| turn_number(e).is_none_or(|n| !ended.contains(&n)))
+        .collect()
 }
 
 fn ends_launch_watch(event: &crate::contract::SessionEvent) -> bool {
@@ -2199,6 +2387,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
         agent,
         confidence,
         stream,
+        replay,
     } = watch;
     let session_id = session.lock().map(|s| s.id.clone()).unwrap_or_default();
     if let Some(stream) = stream {
@@ -2239,15 +2428,35 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
         // complete, so a later report of the model alone (a status line, an
         // Antigravity hook) never hides the conversation id or the mode.
         let mut identity = Identity::default();
+        // ACC-10: a model switched to inside the agent.
+        let mut model_switch = ModelSwitch::default();
         let reports_in_rollout = crate::agent_catalog::agent(&agent)
             .and_then(|a| a.capabilities.as_ref())
             .is_some_and(|c| c.model_report == "rollout");
+        // PLN-02: the turns the agent's reports mean.
+        let mut turns = crate::contract::signal::TurnTracker::default();
+        // LEAD-01: a reattached agent's spool is read from its start first,
+        // to rebuild its status, identity and usage; what it asked for then
+        // is not acted on again (no refusal watch, no check results).
+        let mut replaying = replay;
+        if replay {
+            log::info!(
+                "[LAUNCH] {session_id}: reattached; reading its signals again from the start"
+            );
+        }
         loop {
-            std::thread::sleep(SPOOL_POLL);
+            if !replaying {
+                std::thread::sleep(SPOOL_POLL);
+            }
             let lines = reader.poll();
             let mut changed = false;
             let mut stop = false;
             let mut guess_waiting = false;
+            // What the agent last said about its status (CHAOS-11).
+            let mut reported: Option<crate::contract::AgentStatusKind> = None;
+            // This poll's session events, in the order the agent reported
+            // them (sent below, after a replay's ended turns are dropped).
+            let mut out: Vec<crate::contract::SessionEvent> = Vec::new();
             // The events first (they do not need the session lock), so the
             // store is right before the session list is.
             for line in &lines {
@@ -2258,7 +2467,8 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 // told as a `limit` event and a `limited` status; its plain
                 // meaning (an error for the rate-limited stop, an attention
                 // for a quota notice) is not sent as well.
-                if record.nonce == nonce
+                if !replaying
+                    && record.nonce == nonce
                     && crate::agent_caps::watch::PROMPT_SENT_EVENTS.contains(&record.event.as_str())
                 {
                     // The CLI sent the person's message: a resume's replay
@@ -2279,8 +2489,18 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     && crate::limits::classify(&record) == crate::limits::LimitSignal::Limited;
                 if !is_limit {
                     let mut named_model = false;
-                    for event in map_signal_record(&record, &nonce, confidence, &source) {
+                    let mapped = map_signal_record(&record, &nonce, confidence, &source);
+                    for event in turns.frame(mapped) {
                         let event = identity.merge(event, &mut named_model);
+                        match &event {
+                            crate::contract::SessionEvent::Status { status, .. } => {
+                                reported = Some(status.kind);
+                            }
+                            crate::contract::SessionEvent::Exit { .. } => {
+                                reported = Some(crate::contract::AgentStatusKind::Exited);
+                            }
+                            _ => {}
+                        }
                         if ends_launch_watch(&event) {
                             // A finished turn: the CLI took the launch (a
                             // model it refused before works now).
@@ -2288,11 +2508,13 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                                 crate::agent_caps::commands::launch_taken(&app, &agent, &launch);
                             }
                         }
-                        crate::contract::emit_session_event(&app, &session_id, event);
+                        model_switch.observe(&event);
+                        out.push(event);
                     }
                     if record.nonce == nonce && !named_model {
                         if let Some(event) = identity.model_report(&record, &source) {
-                            crate::contract::emit_session_event(&app, &session_id, event);
+                            model_switch.observe(&event);
+                            out.push(event);
                         }
                     }
                     // An agent that reports its model in a rollout file
@@ -2313,12 +2535,22 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                         if let Some(event) = model.and_then(|m| {
                             identity.with_model(m, record.ts.saturating_mul(1000), &source)
                         }) {
-                            crate::contract::emit_session_event(&app, &session_id, event);
+                            model_switch.observe(&event);
+                            out.push(event);
                         }
                     }
                 }
+                if is_limit {
+                    // A usage limit stopped the turn; the `limited` status
+                    // that follows is what the session shows.
+                    if let Some(event) =
+                        turns.fail_running(record.at_ms(), Some(source.clone()), String::new())
+                    {
+                        out.push(event);
+                    }
+                }
                 for event in limit_events {
-                    crate::contract::emit_session_event(&app, &session_id, event);
+                    out.push(event);
                 }
                 if record.nonce == nonce {
                     let tool = record
@@ -2335,18 +2567,23 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     let delta = subagent_delta(&record);
                     if delta != 0 {
                         subagents = (subagents + delta).max(0);
-                        crate::contract::emit_session_event(
-                            &app,
-                            &session_id,
-                            crate::contract::SessionEvent::Subagents {
-                                at: record.at_ms(),
-                                source: Some(source.clone()),
-                                tags: None,
-                                running: subagents as u32,
-                            },
-                        );
+                        out.push(crate::contract::SessionEvent::Subagents {
+                            at: record.at_ms(),
+                            source: Some(source.clone()),
+                            tags: None,
+                            running: subagents as u32,
+                        });
                     }
                 }
+            }
+            // Turns that ended while the app was away were never Hermes's
+            // to record (the turn ledger would snapshot them again); the
+            // one still running stays, where it started.
+            if replaying {
+                out = drop_ended_turns(out);
+            }
+            for event in out {
+                crate::contract::emit_session_event(&app, &session_id, event);
             }
             let mut checks: Vec<serde_json::Value> = Vec::new();
             if let Ok(mut s) = session.lock() {
@@ -2356,9 +2593,19 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 ) {
                     stop = true;
                 }
+                if reported.is_some() {
+                    s.reported_status = reported;
+                }
+                if let Some(model) = model_switch.take() {
+                    // The restart resumes with the model the person chose
+                    // inside the agent, not the launch's (ACC-10).
+                    log::info!("[LAUNCH] {} switched to model {model}", s.id);
+                    s.agent_launch.model_id = Some(model);
+                    changed = true;
+                }
                 for line in &lines {
                     if let Some(event) = parse_spool_line(line, &nonce) {
-                        if matches!(event, SpoolEvent::ResumeFallback { .. }) {
+                        if !replaying && matches!(event, SpoolEvent::ResumeFallback { .. }) {
                             guess.new_attempt(Instant::now());
                             // The fresh start replays nothing.
                             crate::agent_caps::watch::fresh_start(&session_id);
@@ -2369,7 +2616,9 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                             end_output_watch(&session_id);
                         }
                         if let SpoolEvent::Check(report) = &event {
-                            checks.push(report.clone());
+                            if !replaying {
+                                checks.push(report.clone());
+                            }
                         }
                         if let SpoolEvent::Exited { .. } = &event {
                             crate::agent_caps::watch::end_soon(&session_id);
@@ -2430,6 +2679,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     STARTUP_PROMPT_GUESS_AFTER
                 );
             }
+            replaying = false;
             if stop {
                 end_output_watch(&session_id);
                 // The helper said the agent is gone (or the session is):
@@ -2537,6 +2787,197 @@ mod tests {
     }
 
     use super::*;
+
+    #[test]
+    fn a_replay_keeps_the_running_turn_where_it_started_and_drops_ended_ones() {
+        use crate::contract::signal::{map_signal_record, parse_signal_line, TurnTracker};
+        use crate::contract::{AgentStatusKind, Confidence, SessionEvent};
+        let line = |ts: i64, event: &str| {
+            format!(
+                r#"{{"v":1,"ts":{ts},"session":"s","agent":"claude","nonce":"n","event":"{event}","payload":{{}}}}"#
+            )
+        };
+        let mut turns = TurnTracker::default();
+        let mut out = Vec::new();
+        for (ts, event) in [
+            (1, "UserPromptSubmit"),
+            (2, "Stop"),
+            (3, "UserPromptSubmit"),
+            (4, "PermissionRequest"),
+        ] {
+            let record = parse_signal_line(&line(ts, event)).unwrap();
+            out.extend(turns.frame(map_signal_record(
+                &record,
+                "n",
+                Confidence::Exact,
+                "hook:claude",
+            )));
+        }
+        let kept = drop_ended_turns(out);
+        let shape: Vec<String> = kept
+            .iter()
+            .map(|e| match e {
+                SessionEvent::Status { status, .. } => format!("{:?}", status.kind),
+                SessionEvent::TurnStart { n, .. } => format!("start{n}"),
+                other => format!("{other:?}").chars().take(10).collect(),
+            })
+            .collect();
+        assert_eq!(
+            shape,
+            [
+                "Working",
+                "DoneUnread",
+                "start2",
+                "Working",
+                "NeedsApproval"
+            ]
+        );
+        // The last word is still the agent's own: it waits on the person.
+        assert!(matches!(
+            kept.last(),
+            Some(SessionEvent::Status { status, .. }) if status.kind == AgentStatusKind::NeedsApproval
+        ));
+    }
+
+    #[test]
+    fn a_model_switched_inside_the_agent_is_what_a_restart_resumes_with() {
+        // ACC-10: the first report is the model it started with (its own
+        // spelling of the alias it was given); a later one is a switch.
+        let identity = |model: Option<&str>| crate::contract::SessionEvent::Identity {
+            at: 1,
+            source: None,
+            tags: None,
+            vendor_session_id: Some("conv-1".into()),
+            model: model.map(str::to_string),
+            permission_mode: None,
+        };
+        let mut sw = ModelSwitch::default();
+        sw.observe(&identity(Some("claude-opus-4-1")));
+        assert_eq!(sw.take(), None, "the start is no switch");
+        sw.observe(&identity(Some("claude-opus-4-1")));
+        sw.observe(&identity(None));
+        assert_eq!(sw.take(), None, "the same model again is no switch");
+        sw.observe(&identity(Some("claude-sonnet-4-5")));
+        assert_eq!(sw.take().as_deref(), Some("claude-sonnet-4-5"));
+        assert_eq!(sw.take(), None, "taken once");
+        sw.observe(&identity(Some("claude-opus-4-1")));
+        assert_eq!(
+            sw.take().as_deref(),
+            Some("claude-opus-4-1"),
+            "switching back counts too"
+        );
+    }
+
+    #[test]
+    fn a_reattached_session_finds_its_agent_and_nonce_in_its_launch_file() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("hermes-1");
+        let hi = Path::new("/app/hi");
+        let plan = plan_launch(&input("claude", None, hi, &dir)).unwrap();
+        write_plan(&dir, &plan).unwrap();
+        let watch = reattach_watch(&dir).expect("a watch for the kept agent");
+        assert_eq!(watch.nonce, plan.nonce);
+        assert_eq!(watch.agent, "claude");
+        assert_eq!(watch.confidence, crate::contract::Confidence::Exact);
+        assert!(watch.replay, "the spool is read again from its start");
+        assert!(
+            !watch.expects_start_signal,
+            "silence after a reattach is no startup prompt"
+        );
+        assert_eq!(watch.session_dir, dir);
+        // A plain shell (no launch file) or a broken one: nothing to watch.
+        assert!(reattach_watch(&tmp.path().join("absent")).is_none());
+        std::fs::write(dir.join(LAUNCH_FILE), "{").unwrap();
+        assert!(reattach_watch(&dir).is_none());
+    }
+
+    #[test]
+    fn the_context_copy_lives_in_the_worktree_and_names_it() {
+        let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("demo-repo");
+        let wt = tmp.path().join("wt");
+        std::fs::create_dir_all(&main).unwrap();
+        let git = |dir: &Path, args: &[&str]| {
+            let out = std::process::Command::new("git")
+                .arg("-C")
+                .arg(dir)
+                .args([
+                    "-c",
+                    "user.name=Hermes Test",
+                    "-c",
+                    "user.email=test@example.com",
+                    "-c",
+                    "commit.gpgsign=false",
+                ])
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "{args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8_lossy(&out.stdout).to_string()
+        };
+        git(&main, &["init", "-q", "-b", "main"]);
+        git(&main, &["commit", "-q", "--allow-empty", "-m", "init"]);
+        git(
+            &main,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "-b",
+                "task-1",
+                wt.to_str().unwrap(),
+            ],
+        );
+        let context = tmp.path().join("ctx.md");
+        std::fs::write(&context, "Project folder: demo-repo\n").unwrap();
+
+        let copy = context_in_worktree(&wt, &context, "s1").expect("a copy in the worktree");
+        let wt_real = wt.canonicalize().unwrap();
+        assert!(
+            copy.canonicalize().unwrap().starts_with(&wt_real),
+            "{copy:?}"
+        );
+        let text = std::fs::read_to_string(&copy).unwrap();
+        assert!(text.starts_with("You work in "), "{text}");
+        assert!(text.contains("(branch task-1)"), "{text}");
+        assert!(text.contains("do not edit "), "{text}");
+        assert!(text.ends_with("Project folder: demo-repo\n"));
+        // Git does not see it.
+        assert_eq!(git(&wt, &["status", "--porcelain"]).trim(), "");
+
+        // In the main checkout itself: a copy, without the worktree line.
+        let copy = context_in_worktree(&main, &context, "s2").unwrap();
+        assert_eq!(
+            std::fs::read_to_string(copy).unwrap(),
+            "Project folder: demo-repo\n"
+        );
+        assert_eq!(git(&main, &["status", "--porcelain"]).trim(), "");
+        // Outside git: none (the original file is used).
+        let plain = tmp.path().join("plain");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert!(context_in_worktree(&plain, &context, "s3").is_none());
+    }
+
+    #[test]
+    fn a_spool_read_from_its_start_gives_every_line_once() {
+        use std::io::Write;
+        let tmp = tempfile::tempdir().unwrap();
+        let file = tmp.path().join(SIGNALS_FILE);
+        std::fs::write(&file, "one\ntwo\npart").unwrap();
+        let mut reader = SpoolReader::new(file.clone());
+        assert_eq!(reader.poll(), ["one", "two"]);
+        let mut f = std::fs::OpenOptions::new()
+            .append(true)
+            .open(&file)
+            .unwrap();
+        f.write_all(b"ial\nthree\n").unwrap();
+        assert_eq!(reader.poll(), ["partial", "three"]);
+        assert!(reader.poll().is_empty());
+    }
 
     fn input<'a>(
         provider: &'a str,
@@ -2923,6 +3364,37 @@ mod tests {
             })
         );
         assert_eq!(plan.confidence, "exact");
+    }
+
+    #[test]
+    fn a_hook_command_is_valid_in_the_shell_the_agent_runs_it_with() {
+        // XP-04: Gemini runs hook strings with PowerShell -Command on
+        // Windows, where a quoted path alone is a string, not a command.
+        let hi = Path::new(r"C:\Program Files\Hermes\hi.exe");
+        assert_eq!(
+            signal_command_in(true, Some("powershell"), hi, "gemini", Some("BeforeAgent")),
+            r#"& "C:/Program Files/Hermes/hi.exe" signal --agent gemini --event BeforeAgent"#
+        );
+        // sh, bash and cmd run the quoted path as it is.
+        assert_eq!(
+            signal_command_in(
+                false,
+                Some("powershell"),
+                Path::new("/app/hi"),
+                "gemini",
+                None
+            ),
+            r#""/app/hi" signal --agent gemini"#
+        );
+        assert_eq!(
+            signal_command_in(true, None, hi, "goose", Some("Stop")),
+            r#""C:/Program Files/Hermes/hi.exe" signal --agent goose --event Stop"#
+        );
+        let gemini = crate::agent_catalog::agent("gemini").unwrap();
+        assert_eq!(
+            gemini.terminal.signals.hook_shell.as_deref(),
+            Some("powershell")
+        );
     }
 
     #[test]
@@ -4275,6 +4747,7 @@ mod tests {
             launch_helper: true,
             launch_helper_required: true,
             signal_nonce: None,
+            reported_status: None,
             task_prompt: None,
             seed_prompt: None,
             parent_session_id: None,

@@ -616,9 +616,16 @@ function runHook(hook, payload) {
 	return new Promise((resolve) => {
 		const timeoutMs = Math.max(1, Number(hook.timeout) || 5) * 1000;
 		const exec = Array.isArray(hook.args);
+		const opts = { stdio: ["pipe", "pipe", "pipe"], env: process.env, cwd: process.cwd() };
+		// Gemini on Windows runs a hook's command string with PowerShell
+		// (`powershell -Command`, or pwsh), not cmd.exe: do the same, so a
+		// command that only works in cmd fails here as it would there.
+		const powershell = !exec && FAKE_AGENT === "gemini" && process.platform === "win32";
 		const child = exec
-			? spawn(hook.command, hook.args, { shell: false, stdio: ["pipe", "pipe", "pipe"], env: process.env, cwd: process.cwd() })
-			: spawn(hook.command, { shell: true, stdio: ["pipe", "pipe", "pipe"], env: process.env, cwd: process.cwd() });
+			? spawn(hook.command, hook.args, { ...opts, shell: false })
+			: powershell
+				? spawn("powershell.exe", ["-NoProfile", "-NonInteractive", "-Command", hook.command], { ...opts, shell: false })
+				: spawn(hook.command, { ...opts, shell: true });
 		const started = Date.now();
 		let stdout = "";
 		let stderr = "";

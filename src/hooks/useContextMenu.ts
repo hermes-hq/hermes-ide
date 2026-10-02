@@ -1,6 +1,24 @@
 import { useCallback, useRef } from "react";
 import { showContextMenu, separator, menuItem, subMenu, type ContextMenuItem } from "../api/menu";
 import { ensureListener, registerContextMenuHandler, clearContextMenuHandler } from "./nativeMenuBridge";
+import { chordFor } from "../utils/keymap";
+import { PLATFORM, type Platform } from "../utils/platform";
+
+/**
+ * The menu accelerator of an app action on a platform, from the one keymap
+ * (keymap.json) the menu bar and the keyboard use, so a right-click menu
+ * never shows a chord that does something else there (XP-07: on Windows
+ * and Linux Ctrl+D ends the shell; Split Right is Ctrl+Shift+D).
+ */
+export function acceleratorFor(action: string, platform: Platform = PLATFORM): string | undefined {
+  const chord = chordFor(action, platform);
+  if (!chord) return undefined;
+  return chord
+    .replace("{mod}", "CmdOrCtrl+")
+    .replace("{ctrl}", "Ctrl+")
+    .replace("{alt}", "Alt+")
+    .replace("{shift}", "Shift+");
+}
 
 // Re-export types for convenience
 export type { ContextMenuItem } from "../api/menu";
@@ -38,19 +56,22 @@ export function useContextMenu(onAction: (actionId: string) => void): {
 
 // ─── Builder Functions ──────────────────────────────────────────────
 
-export function buildTerminalMenuItems(hasSelection: boolean): ContextMenuItem[] {
+export function buildTerminalMenuItems(hasSelection: boolean, platform: Platform = PLATFORM): ContextMenuItem[] {
+  const mac = platform === "mac";
   return [
-    menuItem("terminal.copy", "Copy", { enabled: hasSelection, accelerator: "CmdOrCtrl+C" }),
-    menuItem("terminal.paste", "Paste", { accelerator: "CmdOrCtrl+V" }),
+    // A terminal on Windows/Linux copies and pastes with Ctrl+Shift+C/V
+    // (Ctrl+C interrupts, Ctrl+V is a control character).
+    menuItem("terminal.copy", "Copy", { enabled: hasSelection, accelerator: mac ? "CmdOrCtrl+C" : "Ctrl+Shift+C" }),
+    menuItem("terminal.paste", "Paste", { accelerator: mac ? "CmdOrCtrl+V" : "Ctrl+Shift+V" }),
     separator(),
     menuItem("terminal.select-all", "Select All"),
-    menuItem("terminal.clear", "Clear Terminal", { accelerator: "CmdOrCtrl+L" }),
+    menuItem("terminal.clear", "Clear Terminal", mac ? { accelerator: "CmdOrCtrl+L" } : {}),
     menuItem("terminal.reset", "Reset Terminal"),
     separator(),
-    menuItem("terminal.split-right", "Split Right", { accelerator: "CmdOrCtrl+D" }),
-    menuItem("terminal.split-down", "Split Down", { accelerator: "CmdOrCtrl+Shift+D" }),
+    menuItem("terminal.split-right", "Split Right", { accelerator: acceleratorFor("view.split-horizontal", platform) }),
+    menuItem("terminal.split-down", "Split Down", { accelerator: acceleratorFor("view.split-vertical", platform) }),
     separator(),
-    menuItem("terminal.search", "Find...", { accelerator: "CmdOrCtrl+Shift+F" }),
+    menuItem("terminal.search", "Find...", { accelerator: acceleratorFor("view.search-panel", platform) }),
   ];
 }
 
@@ -225,10 +246,11 @@ export function buildPaneHeaderMenuItems(
   hasSiblings: boolean,
   /** Optional session info — if present, enables "Convert to terminal/agent". */
   session?: { mode: "terminal" | "agent"; ai_provider: string | null },
+  platform: Platform = PLATFORM,
 ): ContextMenuItem[] {
   const items: ContextMenuItem[] = [
-    menuItem("pane.split-right", "Split Right", { accelerator: "CmdOrCtrl+D" }),
-    menuItem("pane.split-down", "Split Down", { accelerator: "CmdOrCtrl+Shift+D" }),
+    menuItem("pane.split-right", "Split Right", { accelerator: acceleratorFor("view.split-horizontal", platform) }),
+    menuItem("pane.split-down", "Split Down", { accelerator: acceleratorFor("view.split-vertical", platform) }),
   ];
 
   // Mode conversion is offered when:
@@ -247,7 +269,7 @@ export function buildPaneHeaderMenuItems(
   }
 
   items.push(separator());
-  items.push(menuItem("pane.close", "Close Pane", { enabled: hasSiblings, accelerator: "CmdOrCtrl+W" }));
+  items.push(menuItem("pane.close", "Close Pane", { enabled: hasSiblings, accelerator: acceleratorFor("file.close-pane", platform) }));
   items.push(menuItem("pane.close-others", "Close Other Panes", { enabled: hasSiblings }));
   return items;
 }
@@ -264,11 +286,12 @@ export function buildTextInputMenuItems(hasSelection: boolean): ContextMenuItem[
 
 export function buildEmptyAreaMenuItems(
   region: "sidebar" | "file-explorer" | "git-section",
+  platform: Platform = PLATFORM,
 ): ContextMenuItem[] {
   switch (region) {
     case "sidebar":
       return [
-        menuItem("empty.new-session", "New Session", { accelerator: "CmdOrCtrl+N" }),
+        menuItem("empty.new-session", "New Session", { accelerator: acceleratorFor("file.new-session", platform) }),
       ];
     case "file-explorer":
       return [

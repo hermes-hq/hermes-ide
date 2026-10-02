@@ -1599,3 +1599,46 @@ features:
       REAL-STATUS-3:
         text: "Antigravity: working, done, a question and exited as exact within 2 s; its approval, which it never reports, as a guess within 3.5 s"
         scenarios: ["REAL-status-agy.mjs@darwin,linux"]
+  QA-HOST:
+    name: "QA sweep: session host, terminal keys and clipboard, quit, Agent view"
+    # Regressions found by the 2.0 QA personas (lead, chaos, cross-platform,
+    # planner). Partial: each listed scenario must be green where it runs;
+    # the ones that need the session host or a POSIX shell name their OSes.
+    status: partial
+    criteria:
+      QA-HOST-1:
+        text: "A session the host kept running (Keep running, or the app killed) reads its agent's reports again: its status, a new permission request, the badge and the morning view are right after the relaunch"
+        scenarios: ["QA-host-reattached-agent-reports.mjs@darwin,linux", "QA-host-morning-view-keep-running.mjs@darwin,linux", "QA-host-app-kill-reattach.mjs@darwin,linux"]
+      QA-HOST-2:
+        text: "A hook agent's prompt starts a turn and its Stop ends it (StopFailure fails it), as turn events in the session-event store"
+        scenarios: [QA-host-hook-turns.mjs]
+      QA-HOST-3:
+        text: "Quitting asks about a quiet running command (Keep running keeps it) and, without the session host, about every working session: Quitting stops them, Stop and quit or Cancel"
+        scenarios: ["QA-host-quit-quiet-command.mjs@darwin,linux", QA-host-quit-no-host.mjs]
+      QA-HOST-4:
+        text: "Windows/Linux terminal keys: Ctrl+1..9 switch sessions, Alt+Arrow and Ctrl+Alt+Arrow move between panes, Ctrl+Shift+C/V and right-click Paste copy and paste, Ctrl+C with a selection copies on Windows"
+        scenarios: [QA-host-pc-terminal-keys.mjs]
+      QA-HOST-5:
+        text: "Right-click menus show the chords that work on Windows/Linux; Ctrl+Shift+Z stays Redo in text fields"
+        scenarios: [QA-host-pc-menus-and-redo.mjs]
+      QA-HOST-6:
+        text: "OSC 9;9 sets the session's folder and is never a notification"
+        scenarios: ["QA-host-osc-9-9-cwd.mjs@darwin,linux"]
+      QA-HOST-7:
+        text: "A cd in zsh or bash moves the session's folder"
+        scenarios: ["QA-host-cd-tracked.mjs@darwin,linux"]
+      QA-HOST-8:
+        text: "A paste over 4 MB reaches a hosted terminal's program whole"
+        scenarios: ["QA-host-big-paste.mjs@darwin,linux"]
+      QA-HOST-9:
+        text: "A font size of 0 in the settings never freezes the window; the restored history keeps typed commands on one line; after a clean quit the database file alone holds the data"
+        scenarios: [QA-host-font-size-zero.mjs, QA-host-restored-scrollback.mjs, QA-host-data-in-db-file.mjs]
+      QA-HOST-10:
+        text: "A hung Agent-view agent can be force-stopped; a crash stays marked in the conversation and the next turn's timer starts at 0"
+        scenarios: [QA-host-stop-hung-agent.mjs, QA-host-agent-crash-marker.mjs]
+      QA-HOST-11:
+        text: "The pane header never contradicts the status; the task's context file is inside the agent's folder and ignored by git"
+        scenarios: [QA-host-pane-header-status.mjs, QA-host-context-in-worktree.mjs]
+      QA-HOST-12:
+        text: "Quitting with Stop ends every program the session host runs for the app, also one a crash left unlisted"
+        scenarios: ["QA-host-ghost-stopped-on-quit.mjs@darwin,linux"]

@@ -1161,6 +1161,58 @@ pub async fn interrupt_agent(
     Ok(())
 }
 
+/// CHAOS-10: stop an agent that does not answer the polite interrupt (a
+/// wedged tool, a stalled network call). Its process gets SIGINT, and
+/// SIGKILL when it is still there two seconds later (Windows: it is ended).
+/// The child waiter then reports the exit like any other, and the next
+/// message resumes the conversation in a new process.
+#[tauri::command]
+pub async fn force_stop_agent(
+    state: State<'_, AgentState>,
+    session_id: String,
+) -> Result<(), String> {
+    let handle = state.handle();
+    let pid = handle
+        .lock()
+        .await
+        .get(&session_id)
+        .and_then(|e| e.pid)
+        .ok_or_else(|| format!("Agent session '{}' has no live process", session_id))?;
+    signal_agent_pid(pid, false);
+    for _ in 0..20 {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        if !handle.lock().await.contains_key(&session_id) {
+            return Ok(());
+        }
+    }
+    log::warn!("agent[{session_id}] ignored SIGINT; killing it");
+    signal_agent_pid(pid, true);
+    Ok(())
+}
+
+fn signal_agent_pid(pid: u32, kill: bool) {
+    #[cfg(unix)]
+    {
+        let Ok(pid) = i32::try_from(pid) else {
+            return;
+        };
+        let signal = if kill { libc::SIGKILL } else { libc::SIGINT };
+        // Safety: FFI with a validated pid and a known signal constant.
+        unsafe {
+            libc::kill(pid, signal);
+        }
+    }
+    #[cfg(windows)]
+    {
+        // No SIGINT for a process without a shared console: end it (with
+        // the processes it started), as interrupt_agent does.
+        let _ = kill;
+        let _ = std::process::Command::new("taskkill")
+            .args(["/PID", &pid.to_string(), "/T", "/F"])
+            .output();
+    }
+}
+
 /// Graceful shutdown: drop stdin (signals EOF), wait briefly, then kill.
 /// Removes the entry from state so the session id can be reused.
 #[tauri::command]

@@ -228,7 +228,8 @@
             "exited": ["SessionEnd"]
           },
           "confidence": "exact",
-          "note": "The lowest-precedence settings layer; hook arrays merge with the user's own."
+          "hook_shell": "powershell",
+          "note": "The lowest-precedence settings layer; hook arrays merge with the user's own. On Windows Gemini runs hook commands with PowerShell -Command."
         },
         "permission_flags": {
           "default": [],

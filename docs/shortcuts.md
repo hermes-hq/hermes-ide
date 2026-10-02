@@ -44,7 +44,7 @@ their definitions so it can never drift from what the app actually does.
 | Keyboard Shortcuts | ⌘/ | Ctrl+/ |  |
 | Split Right | ⌘D | Ctrl+Shift+D | Windows / Linux: also Ctrl+D when no terminal has focus |
 | Split Down | ⌘⇧D | Ctrl+Shift+S |  |
-| Flow Mode | ⌘⇧Z | Ctrl+Shift+Z |  |
+| Flow Mode | ⌘⌥Z | Ctrl+Shift+Y |  |
 | Search Panel | ⌘⇧F | Ctrl+Shift+F |  |
 | Toggle Fullscreen | — | F11 | Windows / Linux only |
 | Command Palette (alternate) | ⌘⇧P | Ctrl+Shift+P |  |
@@ -54,7 +54,7 @@ their definitions so it can never drift from what the app actually does.
 
 | Action | macOS | Windows / Linux | Notes |
 |---|---|---|---|
-| Copy Context | ⌘⇧C | Ctrl+Shift+C |  |
+| Copy Context | ⌘⇧C | Ctrl+Shift+X |  |
 | Focus Composer | ⌘⇧J | Ctrl+Shift+J | Agent sessions only |
 | Switch to Session 1–9 | ⌘1-9 | Ctrl+1-9 |  |
 | Jump to Next Waiting Agent | ⌘I | Ctrl+Shift+I | Oldest first, repeat to cycle |
@@ -64,5 +64,5 @@ their definitions so it can never drift from what the app actually does.
 
 | Action | macOS | Windows / Linux | Notes |
 |---|---|---|---|
-| Focus Next Pane | ⌘⌥→ | Ctrl+Alt+→ | also ⌘⌥↓ / Ctrl+Alt+↓ |
-| Focus Previous Pane | ⌘⌥← | Ctrl+Alt+← | also ⌘⌥↑ / Ctrl+Alt+↑ |
+| Focus Next Pane | ⌘⌥→ | Alt+→ | also ⌘⌥↓ / Ctrl+Alt+↓ |
+| Focus Previous Pane | ⌘⌥← | Alt+← | also ⌘⌥↑ / Ctrl+Alt+↑ |

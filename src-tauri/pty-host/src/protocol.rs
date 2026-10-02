@@ -54,6 +54,11 @@ pub struct SessionInfo {
     /// news for a later client, and its id can be spawned again.
     #[serde(default)]
     pub killed: bool,
+    /// A program other than the session's own (a command the shell runs,
+    /// an agent) has the terminal's foreground: quitting would end it.
+    /// None when the host cannot tell (an older host, or no process groups).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub foreground_busy: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

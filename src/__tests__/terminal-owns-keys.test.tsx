@@ -114,9 +114,9 @@ describe("keymap: Windows/Linux", () => {
     const azertyW = { ...key("w", CTRL_SHIFT), code: "KeyZ" };
     expect(pcLetterChord(azertyW)).toBe("{ctrl}{shift}W");
     expect(matchAppChord(azertyW, "linux", true)).toBe("file.close-pane");
-    // And the key printed Z (code KeyW) is Flow Mode, not Close Pane.
-    const azertyZ = { ...key("z", CTRL_SHIFT), code: "KeyW" };
-    expect(matchAppChord(azertyZ, "linux", true)).toBe("view.flow-mode");
+    // And a key printed D on the physical W key is Split Right, not Close Pane.
+    const printedD = { ...key("d", CTRL_SHIFT), code: "KeyW" };
+    expect(matchAppChord(printedD, "linux", true)).toBe("view.split-horizontal");
     // Dvorak: plain Ctrl+E typed on the physical D key stays terminal input.
     const dvorakCtrlE = { ...key("e", CTRL), code: "KeyD" };
     expect(matchAppChord(dvorakCtrlE, "win", true)).toBeNull();

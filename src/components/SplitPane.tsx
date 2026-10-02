@@ -18,7 +18,8 @@ import { ContainedErrorBoundary } from "./ContainedErrorBoundary";
 import { translate } from "../i18n/registry";
 import { CrashProbe } from "./CrashProbe";
 import { DoneWhenChip } from "./DoneWhenChip";
-import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths, writeTextToTerminal, clearTerminal } from "../terminal/TerminalPool";
+import { focusTerminal, terminalHasSelection, terminalGetSelection, insertFilePaths, writeTextToTerminal, clearTerminal, pasteIntoSession } from "../terminal/TerminalPool";
+import { AgentStatusTag } from "./AgentStatusTag";
 import { copyImageToClipboard } from "../api/clipboard";
 import { SplitDirection, collectPanes } from "../state/layoutTypes";
 import { useContextMenu, buildTerminalMenuItems, buildPaneHeaderMenuItems } from "../hooks/useContextMenu";
@@ -279,7 +280,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
         if (sel) navigator.clipboard.writeText(sel).catch(console.error);
         break;
       }
-      case "terminal.paste": document.execCommand("paste"); break;
+      // The app reads the clipboard: the web view's own paste hangs (macOS)
+      // or does nothing (WebView2, WebKitGTK) (XP-11).
+      case "terminal.paste": pasteIntoSession(sessionId); break;
       case "terminal.select-all": /* handled by terminal */ break;
       case "terminal.clear": clearTerminal(sessionId); break;
       // Same flow as the menu bar / Cmd+D: pick a new session for the new pane.
@@ -340,7 +343,10 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
       <div className="split-pane-header" onContextMenu={(e) => showPaneMenu(e, buildPaneHeaderMenuItems(paneId, hasSiblings, { mode: session.mode, ai_provider: session.ai_provider }))}>
         <div className="split-pane-label">
           <span>{session.label}</span>
-          <span className="split-pane-phase">{session.phase}</span>
+          {/* The status people read everywhere else (the sidebar, the
+              strip), never the backend's raw phase (LEAD-05); with the
+              strip on, it already says it right below. */}
+          {!statusStripOn && <AgentStatusTag sessionId={sessionId} />}
           {session.mode !== "agent" && <AgentSetupChips session={session} />}
           {/* Done-When checks (F27), with the launch helper that runs them. */}
           {session.mode !== "agent" && isFeatureFlagEnabled("launchHelper") && <DoneWhenChip sessionId={sessionId} />}

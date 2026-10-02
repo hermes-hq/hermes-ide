@@ -6,6 +6,13 @@ import { listen, UnlistenFn } from "@tauri-apps/api/event";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { isMac, PLATFORM } from "../utils/platform";
 import { isAppChordInTerminal } from "../utils/keymap";
+import { invoke } from "@tauri-apps/api/core";
+import {
+  ctrlCCopiesSelection,
+  isAppShortcutInTerminal,
+  parseFontSize,
+  terminalClipboardAction,
+} from "./terminalKeys";
 import { isHermesWorktreePath } from "../utils/worktree";
 import { resizeSession, isShellForeground } from "../api/sessions";
 import { noteSessionOutput } from "../agent/status/resumeOnOutput";
@@ -79,7 +86,7 @@ export function setCurrentSettings(settings: Record<string, string>): void {
  * race where the shell misses the initial resize.
  */
 export function estimateInitialDimensions(): { rows: number; cols: number } {
-  const fontSize = parseInt(currentSettings.font_size || "14", 10);
+  const fontSize = parseFontSize(currentSettings.font_size);
   const lineHeight = 1.2;
   // Approximate cell dimensions (monospace font)
   const cellWidth = fontSize * 0.6;
@@ -94,7 +101,9 @@ export function estimateInitialDimensions(): { rows: number; cols: number } {
   const cols = Math.max(10, Math.floor(availableWidth / cellWidth));
   const rows = Math.max(2, Math.floor(availableHeight / cellHeight));
 
-  return { rows, cols };
+  // A size the terminal can be made at (never Infinity or NaN).
+  if (!Number.isFinite(cols) || !Number.isFinite(rows)) return { rows: 24, cols: 80 };
+  return { rows: Math.min(rows, 500), cols: Math.min(cols, 1000) };
 }
 
 // ─── Terminal Lifecycle ──────────────────────────────────────────────
@@ -112,7 +121,7 @@ export async function createTerminal(
 
   const themeName = currentSettings.theme || "frosted-dark";
   const theme = THEMES[themeName] || THEMES["frosted-dark"];
-  const fontSize = parseInt(currentSettings.font_size || "14", 10);
+  const fontSize = parseFontSize(currentSettings.font_size);
   const fontFamily = FONT_FAMILIES[currentSettings.font_family || "default"] || FONT_FAMILIES.default;
   const scrollback = parseInt(currentSettings.scrollback || "10000", 10);
 
@@ -247,10 +256,21 @@ export async function createTerminal(
       return false;
     }
 
+    // Windows/Linux copy and paste (Ctrl+Shift+C / Ctrl+Shift+V, and on
+    // Windows Ctrl+C with text selected): see terminalKeys.ts.
+    const clip = terminalClipboardAction(_event, PLATFORM, terminal.hasSelection(), ctrlCCopiesSelection(currentSettings, PLATFORM));
+    if (clip) {
+      _event.preventDefault();
+      if (clip === "copy") copyTerminalSelection(terminal, _event.shiftKey);
+      else pasteIntoTerminal(terminal);
+      return false;
+    }
+
     // Windows/Linux: app chords (Ctrl+Shift+letter, see utils/keymap.ts)
-    // are not terminal input — let them reach the app's key listener.
-    // Bare Ctrl+letter is never one of them, so it always reaches the shell.
-    if (isAppChordInTerminal(_event, PLATFORM)) return false;
+    // and the app's own shortcuts (Ctrl+1..9, Alt+Arrow) are not terminal
+    // input — let them reach the app's key listener. Bare Ctrl+letter is
+    // never one of them, so it always reaches the shell.
+    if (isAppChordInTerminal(_event, PLATFORM) || isAppShortcutInTerminal(_event, PLATFORM)) return false;
 
     // macOS: Cmd+Left/Right → Home/End (beginning/end of line)
     // xterm.js doesn't map these like native macOS terminals do.
@@ -303,6 +323,11 @@ export async function createTerminal(
         (e.key === "c" || e.key === "C" || e.code === "KeyC")) {
       e.preventDefault();
       e.stopPropagation();
+      // Windows: with text selected, Ctrl+C copies it (XP-03).
+      if (terminalClipboardAction(e, PLATFORM, terminal.hasSelection(), ctrlCCopiesSelection(currentSettings, PLATFORM)) === "copy") {
+        copyTerminalSelection(terminal, false);
+        return;
+      }
       handleTerminalInput(sessionId, "\x03");
     }
   }, true); // capture phase
@@ -905,6 +930,37 @@ export function getCursorPosition(sessionId: string): { x: number; y: number } |
  *    continuation lines. We detect these by checking if the previous line
  *    was nearly full-width and the current line starts with small indent.
  */
+/**
+ * Copy the terminal's selection (cleaned like a native copy). `keep` leaves
+ * it selected (Ctrl+Shift+C); Ctrl+C on Windows clears it, as Windows
+ * Terminal does, so the next Ctrl+C interrupts again.
+ */
+export function copyTerminalSelection(terminal: Terminal, keep: boolean): void {
+  const raw = terminal.getSelection();
+  if (!raw) return;
+  const text = cleanSelection(terminal, raw);
+  navigator.clipboard.writeText(text).catch((err) => console.warn("[TerminalPool] copy failed:", err));
+  if (!keep) terminal.clearSelection();
+}
+
+/** The clipboard's text, read by the app (the web view's own paste is
+ *  blocked or hangs in some web views). */
+export function readClipboardText(): Promise<string> {
+  return invoke<string>("read_clipboard_text");
+}
+
+/**
+ * Paste the clipboard into a terminal as a paste (bracketed when the
+ * program asked for it), never as typed keys.
+ */
+export function pasteIntoTerminal(terminal: Terminal): void {
+  readClipboardText()
+    .then((text) => {
+      if (text) terminal.paste(text);
+    })
+    .catch((err) => console.warn("[TerminalPool] paste failed:", err));
+}
+
 export function cleanSelection(terminal: Terminal, raw: string): string {
   const sel = terminal.getSelectionPosition?.();
   // Fallback: if we can't read the selection position, just trim trailing spaces

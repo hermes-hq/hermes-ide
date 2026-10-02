@@ -80,7 +80,7 @@ export function CommandPalette({
     })),
     { id: "workspace", label: t("app.folders"), category: t("app.app"), action: () => { onOpenWorkspace(); onClose(); } },
     ...(onOpenCostDashboard ? [{ id: "cost-dashboard", label: t("palette.costDashboard"), category: t("app.app"), shortcut: fmt("{mod}$"), action: () => { onOpenCostDashboard(); onClose(); } }] : []),
-    ...(onToggleFlowMode ? [{ id: "flow-mode", label: t("palette.toggleFlowMode"), category: t("app.view"), shortcut: fmt("{mod}{shift}Z"), action: () => { onToggleFlowMode(); onClose(); } }] : []),
+    ...(onToggleFlowMode ? [{ id: "flow-mode", label: t("palette.toggleFlowMode"), category: t("app.view"), shortcut: shortcutLabel("view.flow-mode"), action: () => { onToggleFlowMode(); onClose(); } }] : []),
     ...(onTileWorkingAgents ? [{ id: "tile-working-agents", label: t("fleet.tileWorkingAgents"), category: t("app.view"), action: () => { onTileWorkingAgents(); onClose(); } }] : []),
     ...(onAttachProject ? [{ id: "attach-project", label: t("palette.addFolder"), category: t("app.folders"), action: () => { onAttachProject(); onClose(); } }] : []),
     ...(onScanCwd ? [{ id: "scan-cwd", label: t("palette.scanCurrentDirectory"), category: t("app.folders"), action: () => { onScanCwd(); onClose(); } }] : []),

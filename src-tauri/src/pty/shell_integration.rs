@@ -80,6 +80,25 @@ export HERMES_TERMINAL=1
 if [ -n "$HERMES_BIN_DIR" ]; then
   case ":$PATH:" in *":$HERMES_BIN_DIR:"*) ;; *) export PATH="$HERMES_BIN_DIR:$PATH" ;; esac
 fi
+
+# Tell Hermes the working folder after every cd and at every prompt
+# (OSC 7, percent-encoded), so the status bar, worktree attach and
+# restore follow a cd.
+_hermes_report_cwd() {
+  emulate -L zsh
+  local LC_ALL=C p="$PWD" out="" c hex i
+  for (( i = 1; i <= ${#p}; i++ )); do
+    c="${p[i]}"
+    case "$c" in
+      [-/._~A-Za-z0-9]) out+="$c" ;;
+      *) printf -v hex '%%%02X' "'$c"; out+="$hex" ;;
+    esac
+  done
+  printf '\e]7;file://%s%s\a' "${HOST}" "$out"
+}
+autoload -Uz add-zsh-hook
+add-zsh-hook chpwd _hermes_report_cwd
+add-zsh-hook precmd _hermes_report_cwd
 "#;
 
 /// Appended to the zsh .zshrc when Hermes shows its own inline suggestions:
@@ -156,6 +175,29 @@ export HERMES_TERMINAL=1
 # Keep Hermes's helper (hi) reachable even when a profile rewrote PATH.
 if [ -n "$HERMES_BIN_DIR" ]; then
   case ":$PATH:" in *":$HERMES_BIN_DIR:"*) ;; *) export PATH="$HERMES_BIN_DIR:$PATH" ;; esac
+fi
+
+# Tell Hermes the working folder at every prompt (OSC 7, percent-encoded),
+# so the status bar, worktree attach and restore follow a cd.
+_hermes_report_cwd() {
+  local LC_ALL=C p="$PWD" out="" c i n
+  for (( i = 0; i < ${#p}; i++ )); do
+    c="${p:i:1}"
+    case "$c" in
+      [-/._~A-Za-z0-9]) out+="$c" ;;
+      # Bytes over 127 read as negative in bash 3: keep the low byte.
+      *) printf -v n '%d' "'$c"; printf -v c '%%%02X' $(( n & 255 )); out+="$c" ;;
+    esac
+  done
+  printf '\e]7;file://%s%s\a' "${HOSTNAME}" "$out"
+}
+if [[ "$(declare -p PROMPT_COMMAND 2>/dev/null)" == "declare -a"* ]]; then
+  PROMPT_COMMAND+=(_hermes_report_cwd)
+else
+  case ";${PROMPT_COMMAND:-};" in
+    *";_hermes_report_cwd;"*) ;;
+    *) PROMPT_COMMAND="_hermes_report_cwd${PROMPT_COMMAND:+;$PROMPT_COMMAND}" ;;
+  esac
 fi
 
 # Force terminal size re-read (fixes SIGWINCH race during startup)
@@ -607,6 +649,70 @@ mod tests {
             cleanup_stale_in(&tmp.path().join("absent"), 1, &[], |_| false),
             0
         );
+    }
+
+    /// The `_hermes_report_cwd` function of an init script, and the line
+    /// that hooks it in.
+    fn report_cwd_function(script: &str) -> String {
+        let start = script
+            .find("_hermes_report_cwd() {")
+            .expect("the script reports its folder");
+        let end = start + script[start..].find("\n}\n").expect("the function ends") + 3;
+        script[start..end].to_string()
+    }
+
+    /// Runs the function in `shell` inside `dir`; None when that shell is
+    /// not installed here.
+    #[cfg(unix)]
+    fn run_report(shell: &str, args: &[&str], script: &str, dir: &Path) -> Option<String> {
+        let body = format!("{}\n_hermes_report_cwd\n", report_cwd_function(script));
+        let out = std::process::Command::new(shell)
+            .args(args)
+            .arg("-c")
+            .arg(body)
+            .current_dir(dir)
+            .env("HOST", "demo-host")
+            .env("HOSTNAME", "demo-host")
+            .output()
+            .ok()?;
+        assert!(
+            out.status.success(),
+            "{shell}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        Some(String::from_utf8_lossy(&out.stdout).to_string())
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zsh_and_bash_report_the_folder_after_a_cd_percent_encoded() {
+        // CHAOS-06: a `cd` in a plain terminal used to go unnoticed.
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("a dir").join("ü%x");
+        std::fs::create_dir_all(&dir).unwrap();
+        let dir = dir.canonicalize().unwrap();
+        for (shell, args, script) in [
+            ("zsh", vec!["-f"], ZSH_ZSHRC),
+            ("bash", vec!["--norc", "--noprofile"], BASH_INIT),
+        ] {
+            let Some(out) = run_report(shell, &args, script, &dir) else {
+                continue;
+            };
+            let uri = out
+                .strip_prefix("\u{1b}]7;")
+                .and_then(|s| s.strip_suffix('\u{7}'))
+                .unwrap_or_else(|| panic!("{shell} printed {out:?}"));
+            assert!(uri.starts_with("file://demo-host/"), "{shell}: {uri}");
+            assert!(uri.ends_with("/a%20dir/%C3%BC%25x"), "{shell}: {uri}");
+            assert_eq!(
+                crate::pty::analyzer::osc7_path(uri).as_deref(),
+                dir.to_str(),
+                "{shell}: Hermes reads back the folder"
+            );
+        }
+        assert!(ZSH_ZSHRC.contains("add-zsh-hook chpwd _hermes_report_cwd"));
+        assert!(ZSH_ZSHRC.contains("add-zsh-hook precmd _hermes_report_cwd"));
+        assert!(BASH_INIT.contains("PROMPT_COMMAND=\"_hermes_report_cwd"));
     }
 
     #[test]

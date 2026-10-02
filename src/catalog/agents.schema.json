@@ -181,6 +181,12 @@
             "toml_config"
           ]
         },
+        "hook_shell": {
+          "description": "The shell the agent runs a hook's command string with on Windows (Gemini: PowerShell, -Command). Hermes writes the command in that shell's syntax: PowerShell needs the call operator (& \"<path>\" ...) to run a quoted program path.",
+          "enum": [
+            "powershell"
+          ]
+        },
         "hook_trust": {
           "description": "How Hermes has the agent run exactly its own per-launch hooks without a review prompt (app_server_hooks_list: the hashes the agent's app server reports, passed as the launch's hook state). Never a blanket bypass: hooks anyone else configured keep their review.",
           "enum": [

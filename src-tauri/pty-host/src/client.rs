@@ -1,7 +1,9 @@
 //! The app's side of the host protocol: a control connection for requests
 //! and, after `attach`, the live byte channel of one session.
 
-use crate::protocol::{read_frame, write_frame, Frame, Msg, SessionInfo, PROTOCOL_VERSION};
+use crate::protocol::{
+    read_frame, write_frame, Frame, Msg, SessionInfo, DATA_CHUNK_BYTES, PROTOCOL_VERSION,
+};
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -292,9 +294,13 @@ impl Write for FrameWriter {
         if buf.is_empty() {
             return Ok(0);
         }
+        // One frame holds at most DATA_CHUNK_BYTES: a big paste goes as
+        // several frames (`write_all` loops), never as one the host refuses
+        // for being over MAX_FRAME_BYTES (CHAOS-05).
+        let n = buf.len().min(DATA_CHUNK_BYTES);
         let mut stream = self.out.lock().unwrap_or_else(|e| e.into_inner());
-        write_frame(&mut *stream, &Frame::Data(buf.to_vec()))?;
-        Ok(buf.len())
+        write_frame(&mut *stream, &Frame::Data(buf[..n].to_vec()))?;
+        Ok(n)
     }
 
     fn flush(&mut self) -> io::Result<()> {

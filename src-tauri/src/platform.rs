@@ -38,9 +38,12 @@ pub fn reveal_in_file_manager(path: &str) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        // Call explorer.exe directly (never via cmd /C) to prevent command injection.
+        use std::os::windows::process::CommandExt;
+        // explorer.exe directly (never through a shell): `&` or `%` in the
+        // path are just characters (XP-14). The path is quoted as one
+        // argument after `/select,`, which explorer only parses unquoted.
         let mut child = std::process::Command::new("explorer")
-            .arg(format!("/select,{}", path))
+            .raw_arg(explorer_arg(path, true))
             .spawn()
             .map_err(|e| format!("Failed to open Explorer: {}", e))?;
         std::thread::spawn(move || {
@@ -80,15 +83,11 @@ pub fn open_file(path: &str) -> Result<(), String> {
 
     #[cfg(target_os = "windows")]
     {
-        // Validate path does not contain shell metacharacters that could be
-        // exploited if a cmd shell is ever involved upstream.
-        const SHELL_META: &[char] = &['&', '|', '>', '<', '^', '%'];
-        if path.chars().any(|c| SHELL_META.contains(&c)) {
-            return Err("Path contains invalid characters".to_string());
-        }
-        // Use explorer.exe directly (never via cmd /C) to prevent command injection.
+        use std::os::windows::process::CommandExt;
+        // explorer.exe runs without a shell, so `&` and `%` in a path are
+        // safe (XP-14: such paths used to be refused). Quoted, one argument.
         let mut child = std::process::Command::new("explorer")
-            .arg(path)
+            .raw_arg(explorer_arg(path, false))
             .spawn()
             .map_err(|e| format!("Failed to open file: {}", e))?;
         std::thread::spawn(move || {
@@ -97,6 +96,36 @@ pub fn open_file(path: &str) -> Result<(), String> {
     }
 
     Ok(())
+}
+
+/// The argument explorer.exe gets for `path`: the path quoted (a Windows
+/// path cannot contain `"`), after `/select,` to reveal it.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn explorer_arg(path: &str, select: bool) -> String {
+    let quoted = format!("\"{}\"", path.replace('"', ""));
+    if select {
+        format!("/select,{quoted}")
+    } else {
+        quoted
+    }
+}
+
+/// The clipboard's text, for a terminal paste (XP-11): the web views'
+/// own paste either hangs (macOS) or does nothing (WebView2, WebKitGTK).
+/// Empty when the clipboard holds no text. Test builds can be handed the
+/// clipboard in `HERMES_E2E_CLIPBOARD`, so a test never reads the real one.
+#[tauri::command]
+pub fn read_clipboard_text() -> Result<String, String> {
+    #[cfg(feature = "e2e")]
+    if let Ok(text) = std::env::var("HERMES_E2E_CLIPBOARD") {
+        return Ok(text);
+    }
+    let mut clipboard = arboard::Clipboard::new().map_err(|e| e.to_string())?;
+    match clipboard.get_text() {
+        Ok(text) => Ok(text),
+        Err(arboard::Error::ContentNotAvailable) => Ok(String::new()),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// Check if a command exists on the system PATH.
@@ -307,6 +336,20 @@ fn find_binary_in_well_known_dirs(name: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explorer_gets_the_path_quoted_as_one_argument_whatever_it_contains() {
+        assert_eq!(
+            explorer_arg(r"C:\Work\R&D %TEMP%\notes.txt", false),
+            r#""C:\Work\R&D %TEMP%\notes.txt""#
+        );
+        assert_eq!(
+            explorer_arg(r"C:\Work\a,b & c", true),
+            r#"/select,"C:\Work\a,b & c""#
+        );
+        // A quote cannot be in a Windows path; one never ends the argument.
+        assert_eq!(explorer_arg(r#"C:\x" & calc"#, false), r#""C:\x & calc""#);
+    }
 
     #[test]
     fn command_exists_finds_system_commands() {

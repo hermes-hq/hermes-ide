@@ -2625,6 +2625,30 @@ html[data-theme="newsprint"] .agent-md-h2 {
   background: transparent;
 }
 
+/* Where the agent stopped unexpectedly (CHAOS-20): stays in the history
+ * after the agent is back, same quiet marginalia as the exit notice. */
+.agent-crash-marker {
+  margin: var(--space-1) 0 var(--space-3);
+  padding: var(--space-1-5) 0 var(--space-1-5) var(--space-3);
+  border-left: var(--space-0-5) solid var(--tool-error);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--ink-secondary);
+}
+
+/* A turn that ignored ◼ Stop (CHAOS-10): the word, then Force stop. */
+.agent-session-hung {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-left: var(--space-2);
+  font-family: var(--font-ui);
+  font-size: var(--text-sm);
+  line-height: var(--leading-none);
+  color: var(--ink-secondary);
+}
+
 /* Slash-command receipt card — replaces the "(no content)" placeholder
  * Claude emits for /compact, /clear, /init, /review.  Brass checkmark
  * + one-line label + one-line description, sized like a quiet status
