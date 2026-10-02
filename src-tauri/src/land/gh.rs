@@ -558,8 +558,8 @@ mod tests {
             Some("gitlab.example.com")
         );
         assert_eq!(
-            remote_host("https://user:tok@GHE.Corp.example/a").as_deref(),
-            Some("ghe.corp.example")
+            remote_host("https://user:tok@GHE.Example.com/a").as_deref(),
+            Some("ghe.example.com")
         );
         assert_eq!(remote_host("/srv/git/repo.git"), None);
         assert_eq!(remote_host("file:///srv/git/repo.git"), None);
