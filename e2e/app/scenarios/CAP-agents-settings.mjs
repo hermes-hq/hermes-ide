@@ -141,7 +141,15 @@ try {
   assert(existsSync(profile) && statSync(profile).isDirectory(), "the profile folder was created, in the test's profile root");
   if (platform() !== "win32") assert((statSync(profile).mode & 0o777) === 0o700, "private to the user (0700)");
   assert(login.argv.join(" ") === "auth login" && login.profileEnv === "CLAUDE_CONFIG_DIR", "a terminal ran `claude auth login` with CLAUDE_CONFIG_DIR set to it");
-  const idsAfter = await bridge.terminalIds();
+  // The page sets up the new terminal (its renderer) right now: about 0.1 s
+  // on a Mac, several seconds on a slow Linux runner with software graphics,
+  // where a single eval then timed out ("the page itself was busy"). Wait
+  // for the page to answer again instead of failing on the first eval.
+  const idsAfter = await bridge.waitFor(
+    "the sign-in terminal, once the page answers again",
+    `const ids = window.__HERMES_E2E__.terminalIds(); return ids.some((id) => !${JSON.stringify(idsBefore)}.includes(id)) ? ids : null;`,
+    { timeoutMs: 30_000 },
+  );
   assert(idsAfter.some((id) => !idsBefore.includes(id)), "in a terminal session of its own");
   await bridge.screenshot(join(evidenceDir, "02-sign-in-terminal.png"));
   await openAgentsSettings(bridge);
