@@ -356,6 +356,19 @@ impl QuitProbe {
     }
 }
 
+/// Working before the terminal is asked: an agent in the session or its
+/// hooks say so, or it waits on the person. Output on screen alone is not:
+/// a shell that just printed (its banner, a finished `ls`) is busy on screen
+/// until its prompt shows or it goes quiet, and nothing would be stopped;
+/// whether a program holds the terminal is the terminal's to say.
+fn known_working(phase: &SessionPhase, has_agent: bool, agent_busy: bool) -> bool {
+    matches!(
+        phase,
+        SessionPhase::NeedsInput | SessionPhase::LaunchingAgent
+    ) || has_agent
+        || agent_busy
+}
+
 fn quit_candidates(mgr: &PtyManager, hosted_only: bool) -> Vec<QuitCandidate> {
     mgr.sessions
         .values()
@@ -369,11 +382,11 @@ fn quit_candidates(mgr: &PtyManager, hosted_only: bool) -> Vec<QuitCandidate> {
             if !live {
                 return None;
             }
-            let known = matches!(
-                s.phase,
-                SessionPhase::Busy | SessionPhase::NeedsInput | SessionPhase::LaunchingAgent
-            ) || s.detected_agent.is_some()
-                || reported_busy(s.reported_status);
+            let known = known_working(
+                &s.phase,
+                s.detected_agent.is_some(),
+                reported_busy(s.reported_status),
+            );
             let shell_pid = ps.transport.pid();
             let shell_owns = if known {
                 None
@@ -393,8 +406,8 @@ fn quit_candidates(mgr: &PtyManager, hosted_only: bool) -> Vec<QuitCandidate> {
         .collect()
 }
 
-/// Sessions whose program quitting would end (CHAOS-11, XP-05): busy on
-/// screen, an agent in it or reporting work, or a command holding the
+/// Sessions whose program quitting would end (CHAOS-11, XP-05): waiting on
+/// the person, an agent in it or reporting work, or a command holding the
 /// terminal however quiet it is (`sleep`, a silent script, an idle REPL):
 /// the terminal's foreground process group is not the shell's, or, where
 /// the terminal cannot say, the shell has a child process. With
@@ -1038,6 +1051,19 @@ mod tests {
             shell_owns: None,
         };
         assert!(!no_pid.working(None, never));
+    }
+
+    #[test]
+    fn output_on_screen_alone_leaves_a_plain_shell_to_the_terminal() {
+        // A shell that just printed its banner is busy on screen: the
+        // terminal decides whether a program holds it.
+        assert!(!known_working(&SessionPhase::Busy, false, false));
+        assert!(!known_working(&SessionPhase::Idle, false, false));
+        // An agent at work, or one that said so, is known.
+        assert!(known_working(&SessionPhase::Busy, true, false));
+        assert!(known_working(&SessionPhase::Idle, false, true));
+        assert!(known_working(&SessionPhase::NeedsInput, false, false));
+        assert!(known_working(&SessionPhase::LaunchingAgent, false, false));
     }
 
     #[test]

@@ -567,15 +567,24 @@ pub(crate) fn save_workspace_state(app: &tauri::AppHandle) {
     }
     do_save_workspace(app);
 
+    fold_database_log(app);
     if let Some(state) = app.try_state::<AppState>() {
-        // Everything saved goes into the database file itself (CHAOS-14).
+        // Remove the startup marker to signal a clean shutdown
+        let _ = std::fs::remove_file(&state.startup_marker_path);
+    }
+}
+
+/// Everything saved goes into the database file itself (CHAOS-14). Runs on
+/// the first save at quit and again at the very end: a quit answered in the
+/// keep-or-stop dialog saves first, and the frontend's own save and the
+/// stopped sessions write after that.
+fn fold_database_log(app: &tauri::AppHandle) {
+    if let Some(state) = app.try_state::<AppState>() {
         if let Ok(db) = state.db.lock() {
             if let Err(e) = db.checkpoint_wal() {
                 log::warn!("[hermes] could not fold the database log on quit: {e}");
             }
         }
-        // Remove the startup marker to signal a clean shutdown
-        let _ = std::fs::remove_file(&state.startup_marker_path);
     }
 }
 
@@ -1158,6 +1167,7 @@ pub fn run() {
             tauri::RunEvent::Exit => {
                 log::info!("[hermes] Exit — saving workspace");
                 save_workspace_state(app);
+                fold_database_log(app);
                 // Let the machine sleep again (F12 keep-awake).
                 attention::shutdown();
             }
