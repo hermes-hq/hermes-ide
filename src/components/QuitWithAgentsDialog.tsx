@@ -3,6 +3,7 @@ import "../styles/components/QuitWithAgentsDialog.css";
 import { useI18n } from "../i18n/I18nProvider";
 import { getSessionStatus } from "../agent/status/attentionStore";
 import { statusLabel } from "../agent/status/presentation";
+import type { AgentStatusKind } from "../agent/contract/status";
 import { Button } from "./ui";
 
 /** A session the quit would interrupt: its id and the label people know it by. */
@@ -28,26 +29,59 @@ interface QuitWithAgentsDialogProps {
   queuedCount?: number;
 }
 
-/** Title, body and row words for what is running (CHAOS-19, XP-05). */
-export function quitDialogCopy(sessions: readonly WorkingSession[]): {
+/** What a row says a session is doing, as the title and body count it. */
+export type QuitRowState = "working" | "waiting" | "open" | "program";
+
+/** The kinds that mean the agent is waiting for the person. */
+const WAITING_KINDS: ReadonlySet<AgentStatusKind> = new Set<AgentStatusKind>(["needs_approval", "needs_answer", "plan_ready", "startup_prompt", "gate"]);
+
+/** What a row of the dialog shows: a program, or the agent's status in three words. */
+export function quitRowState(session: WorkingSession, kind: AgentStatusKind): QuitRowState {
+  if (session.agent === false) return "program";
+  if (kind === "working" || kind === "starting") return "working";
+  return WAITING_KINDS.has(kind) ? "waiting" : "open";
+}
+
+/**
+ * Title, body and row words for what is running (CHAOS-19, XP-05). The
+ * title and the body say what the rows show: how many agents work, how
+ * many wait for the person, how many are open but not working, and how
+ * many programs run. `kindOf`: each session's status.
+ */
+export function quitDialogCopy(
+  sessions: readonly WorkingSession[],
+  kindOf: (sessionId: string) => AgentStatusKind = (id) => getSessionStatus(id).kind,
+): {
   titleKey: string;
-  bodyKey: string;
+  /** The body's sentences, in order: [key, count]. */
+  body: [string, number][];
   canKeep: boolean;
 } {
-  const agents = sessions.filter((s) => s.agent !== false).length;
-  const programs = sessions.length - agents;
+  const counts: Record<QuitRowState, number> = { working: 0, waiting: 0, open: 0, program: 0 };
+  for (const s of sessions) counts[quitRowState(s, s.agent === false ? "idle" : kindOf(s.id))]++;
+  const agents = counts.working + counts.waiting + counts.open;
+  const programs = counts.program;
   const canKeep = sessions.some((s) => s.hosted !== false);
   const titleKey =
     programs === 0
-      ? "quit.keep.title"
+      ? counts.working === agents
+        ? "quit.keep.title"
+        : counts.waiting === agents
+          ? "quit.keep.titleWaiting"
+          : "quit.keep.titleOpen"
       : agents === 0
         ? programs === 1
           ? "quit.keep.titleProgramOne"
           : "quit.keep.titleProgramMany"
         : "quit.keep.titleMixed";
+  const body: [string, number][] = [];
+  for (const state of ["working", "waiting", "open", "program"] as const) {
+    const n = counts[state];
+    if (n > 0) body.push([`quit.summary.${state}${n === 1 ? "One" : "Many"}`, n]);
+  }
   const one = sessions.length === 1;
-  const bodyKey = canKeep ? (one ? "quit.keep.bodyOne" : "quit.keep.bodyMany") : one ? "quit.stop.bodyOne" : "quit.stop.bodyMany";
-  return { titleKey, bodyKey, canKeep };
+  body.push([canKeep ? (one ? "quit.keep.actionOne" : "quit.keep.actionMany") : one ? "quit.stop.actionOne" : "quit.stop.actionMany", sessions.length]);
+  return { titleKey, body, canKeep };
 }
 
 /**
@@ -61,7 +95,7 @@ export function quitDialogCopy(sessions: readonly WorkingSession[]): {
  */
 export function QuitWithAgentsDialog({ sessions, onKeep, onStop, onCancel, queuedCount = 0 }: QuitWithAgentsDialogProps) {
   const { t } = useI18n();
-  const { titleKey, bodyKey, canKeep } = quitDialogCopy(sessions);
+  const { titleKey, body, canKeep } = quitDialogCopy(sessions);
   // Only queued tasks: nothing to keep running or stop, the quit only says what happens to them.
   const queueOnly = sessions.length === 0;
 
@@ -92,7 +126,7 @@ export function QuitWithAgentsDialog({ sessions, onKeep, onStop, onCancel, queue
     <div className="quit-dialog-backdrop" onClick={onCancel} data-testid="quit-with-agents-dialog" data-can-keep={canKeep ? "true" : "false"}>
       <div className="quit-dialog" role="dialog" aria-modal="true" aria-labelledby="quit-dialog-title" onClick={(e) => e.stopPropagation()}>
         <div className="quit-dialog-title" id="quit-dialog-title">{queueOnly ? t("quit.queue.title") : t(titleKey)}</div>
-        {!queueOnly && <div className="quit-dialog-body">{t(bodyKey, { count: sessions.length })}</div>}
+        {!queueOnly && <div className="quit-dialog-body">{body.map(([key, count]) => t(key, { count })).join(" ")}</div>}
         {!queueOnly && (
           <ul className="quit-dialog-sessions">
             {sessions.map((s) => (

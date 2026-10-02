@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // QA-host-quit-no-host (XP-05) — without the session host (Windows, or the
 // flag off), quitting with a busy terminal used to end it without a word:
-// the question was asked only for hosted sessions. EXPECT: "1 session is
-// still working. Quitting stops them/it." with Stop and quit and Cancel and
+// the question was asked only for hosted sessions. EXPECT: "1 program is
+// running. Quitting stops it." with Stop and quit and Cancel and
 // no Keep running; Cancel keeps the app open; Stop and quit ends it.
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -30,7 +30,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   log(`  quit question: ${question ?? "(none)"}`);
   assert(!!question, "quitting with a busy terminal asks first");
   await bridge.screenshot(join(evidenceDir, "01-question.png"));
-  assert(/1 session is still working\. Quitting stops it\./.test(question), "it says quitting stops it");
+  assert(/1 program is running\. Quitting stops it\./.test(question), "it says quitting stops it");
   assert(!(await bridge.exists(".quit-dialog-btn-keep")), "it offers no Keep running without the session host");
 
   await bridge.click('[data-testid="quit-with-agents-dialog"] .quit-dialog-btn');
