@@ -456,6 +456,22 @@ impl TurnLedger {
         session_id: &str,
         cwd: &Path,
     ) -> Result<SnapshotOutcome, String> {
+        self.ensure_baseline_at(db, session_id, cwd, None)
+    }
+
+    /// `ensure_baseline` for a turn that started at `turn_started_at` (ms).
+    /// The start is reported after the fact (the agent's hook, then the
+    /// app), so an agent can already be at work when it arrives: when a file
+    /// that moved since the last snapshot was written at or after the start,
+    /// the baseline is left as it was, so the turn's own edits stay the
+    /// turn's.
+    pub fn ensure_baseline_at(
+        &self,
+        db: &Mutex<Database>,
+        session_id: &str,
+        cwd: &Path,
+        turn_started_at: Option<i64>,
+    ) -> Result<SnapshotOutcome, String> {
         if !self.active(db) {
             return Ok(SnapshotOutcome::Disabled);
         }
@@ -481,6 +497,11 @@ impl TurnLedger {
         };
         if state.last_tree.as_deref() == Some(tree.as_str()) {
             return Ok(SnapshotOutcome::NoChange);
+        }
+        if let (Some(at), Some(last)) = (turn_started_at, state.last_tree.as_deref()) {
+            if written_since(&repo, last, &tree, at) {
+                return Ok(SnapshotOutcome::NoChange);
+            }
         }
         let Some(parent) = state.last_commit.clone() else {
             // No turn recorded yet: the repository stays untouched.
@@ -1019,6 +1040,25 @@ fn spawn_in_order(
     }
 }
 
+/// How long before a turn's reported start a write still counts as the
+/// turn's (file times are coarse on some file systems).
+const TURN_START_SLACK_MS: i64 = 1_000;
+
+/// Whether a path that differs between `from` and `to` was written at or
+/// after `at` (ms since the epoch, less the slack).
+fn written_since(repo: &Repo, from: &str, to: &str, at: i64) -> bool {
+    let Ok(paths) = repo.paths_between(from, to) else {
+        return false;
+    };
+    paths.iter().any(|p| {
+        std::fs::metadata(repo.root.join(p))
+            .and_then(|m| m.modified())
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .is_some_and(|d| d.as_millis() as i64 >= at - TURN_START_SLACK_MS)
+    })
+}
+
 /// A session got its terminal: take its baseline in the background.
 pub fn on_session_started(app: &AppHandle, session_id: &str, cwd: &str) {
     let Some(ledger) = app.try_state::<TurnLedger>() else {
@@ -1062,7 +1102,7 @@ pub fn on_turn_started(app: &AppHandle, session_id: &str, at: i64, exact: bool) 
         session_id,
         "turn-start",
         move |_, state, ledger| {
-            if let Err(e) = ledger.ensure_baseline(&state.db, &sid, &cwd) {
+            if let Err(e) = ledger.ensure_baseline_at(&state.db, &sid, &cwd, Some(at)) {
                 log::warn!("[turn-ledger] baseline at turn start for {sid}: {e}");
             }
         },
@@ -1187,7 +1227,7 @@ pub fn on_phase_change(
                 session_id,
                 "turn-start-guess",
                 move |_, state, ledger| {
-                    if let Err(e) = ledger.ensure_baseline(&state.db, &sid, &cwd) {
+                    if let Err(e) = ledger.ensure_baseline_at(&state.db, &sid, &cwd, Some(at)) {
                         log::warn!("[turn-ledger] baseline at a guessed turn start for {sid}: {e}");
                     }
                 },
@@ -1567,6 +1607,35 @@ mod tests {
         );
         let diff = l.turn_diff(&db, "s1", 1, Some(t.root())).unwrap().unwrap();
         assert!(!diff.patch.contains("README.md"), "{}", diff.patch);
+    }
+
+    #[test]
+    fn a_turn_start_reported_after_the_agent_began_keeps_its_edits() {
+        let t = TestRepo::new();
+        let (_d, db) = open_db();
+        let db = Mutex::new(db);
+        let l = ledger();
+        l.ensure_baseline(&db, "s1", t.root()).unwrap();
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        // The turn started a minute ago; its start reaches the ledger only
+        // after the agent wrote this file.
+        write(t.root(), "src/app.txt", "by the agent\n");
+        l.ensure_baseline_at(&db, "s1", t.root(), Some(now - 60_000))
+            .unwrap();
+        let turn = recorded(l.record_turn(&db, "s1", t.root(), None, 9).unwrap());
+        assert_eq!(turn.diffstat.files, 1, "{:?}", turn.diffstat);
+        // An edit older than the start is still the person's.
+        write(t.root(), "notes.txt", "mine\n");
+        l.ensure_baseline_at(&db, "s1", t.root(), Some(now + 60_000))
+            .unwrap();
+        write(t.root(), "src/app.txt", "by the agent, turn 2\n");
+        let two = recorded(l.record_turn(&db, "s1", t.root(), None, 10).unwrap());
+        let diff = l.turn_diff(&db, "s1", 2, Some(t.root())).unwrap().unwrap();
+        assert!(!diff.patch.contains("notes.txt"), "{}", diff.patch);
+        assert_eq!(two.diffstat.files, 1, "{:?}", two.diffstat);
     }
 
     #[test]
