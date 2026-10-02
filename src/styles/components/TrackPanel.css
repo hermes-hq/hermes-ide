@@ -9,7 +9,8 @@
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   font-size: var(--text-sm);
   color: var(--text-1);
   outline: none;
@@ -160,6 +161,10 @@
   flex-direction: column;
   gap: 3px;
   border-top: 1px solid var(--border);
+  /* A long list scrolls here, so the actions below stay in reach. */
+  flex: 0 1 auto;
+  min-height: 64px;
+  overflow-y: auto;
 }
 
 .track-question {
