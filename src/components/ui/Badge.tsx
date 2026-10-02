@@ -29,11 +29,13 @@ export interface CounterProps {
    * digits themselves are hidden from them when this is given.
    */
   label?: string;
+  /** Shown in place of the number, e.g. "!" for something that is not a count. */
+  text?: string;
   className?: string;
 }
 
-export function Counter({ value, max = 99, tone = "neutral", label, className }: CounterProps) {
-  const text = value > max ? `${max}+` : String(value);
+export function Counter({ value, max = 99, tone = "neutral", label, text: shown, className }: CounterProps) {
+  const text = shown ?? (value > max ? `${max}+` : String(value));
   return (
     <span className={cx("h-counter", `h-counter--${tone}`, className)} data-tone={tone}>
       <span aria-hidden={label ? true : undefined}>{text}</span>

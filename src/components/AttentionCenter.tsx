@@ -275,14 +275,20 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
   }, [items]);
 
   // Waiting away messages go out when Hermes loses the focus or their delay
-  // has passed.
+  // has passed. A key or a click in Hermes shows someone is there: the delay
+  // starts again.
   useEffect(() => {
     const tick = () => notifierRef.current?.tick();
+    const active = () => notifierRef.current?.activity();
     const off = subscribeWindowFocus(tick);
     const timer = setInterval(tick, AWAY_TICK_MS);
+    window.addEventListener("keydown", active, true);
+    window.addEventListener("pointerdown", active, true);
     return () => {
       off();
       clearInterval(timer);
+      window.removeEventListener("keydown", active, true);
+      window.removeEventListener("pointerdown", active, true);
     };
   }, []);
 
@@ -310,8 +316,8 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
   // ── the OS side: badge and keep-awake ──────────────────────────────
   useEffect(() => {
     pushCapped(attentionDebug.badge, count);
-    setAttentionBadge(count).catch((e) => console.warn("[attention] badge:", e));
-  }, [count]);
+    setAttentionBadge(count, notices).catch((e) => console.warn("[attention] badge:", e));
+  }, [count, notices]);
   useEffect(
     () => () => {
       setAttentionBadge(0).catch(() => {});
@@ -359,7 +365,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
     return () => document.removeEventListener("focusin", onFocusIn);
   }, []);
 
-  const openInbox = useCallback((asMorning = false) => {
+  const openInbox = useCallback((asMorning = false, selectId?: string) => {
     const active = document.activeElement;
     const outside = active instanceof HTMLElement && active !== document.body && !rootRef.current?.contains(active);
     returnFocusRef.current = outside ? active : lastOutsideFocusRef.current;
@@ -367,7 +373,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
     setMorning(asMorning);
     setPeek(false);
     const g = groupInbox(items);
-    setSelectedId(inboxRows(items)[0]?.id ?? null);
+    setSelectedId(selectId ?? inboxRows(items)[0]?.id ?? null);
     announce(t("attention.announceOpen", { blocked: blockedCount(items, getMutes(), Date.now()), ready: g.ready.length }));
   }, [items, announce, t]);
 
@@ -384,6 +390,14 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
   const jumpNext = useCallback(() => {
     const target = nextBlockedSession(items, getMutes(), Date.now(), latest.current.activeSessionId);
     if (!target) {
+      // No agent, but Hermes itself needs you (the disk is nearly full, an
+      // away message failed): open the inbox on that notice.
+      const notice = groupInbox(items).notices[0];
+      if (notice) {
+        if (!open) openInbox(false, notice.id);
+        else setSelectedId(notice.id);
+        return;
+      }
       // Said on screen too, where "2 of 3" would be: a shortcut that does
       // nothing visible reads as broken.
       setPosition({ n: 0, total: 0, at: Date.now() });
@@ -398,7 +412,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
       setPosition({ n, total: order.length, at: Date.now() });
       announce(t("attention.position", { n, total: order.length }));
     }
-  }, [items, open, closeInbox, jump, announce, t]);
+  }, [items, open, openInbox, closeInbox, jump, announce, t]);
 
   // The "2 of 3" note goes after a moment.
   useEffect(() => {
@@ -683,7 +697,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
       <Button
         variant="quiet"
         size="sm"
-        className={`attention-badge${count > 0 ? " attention-badge-hot" : ""}`}
+        className={`attention-badge${count > 0 || notices > 0 ? " attention-badge-hot" : ""}`}
         aria-haspopup="dialog"
         aria-expanded={open}
         aria-label={badgeLabel}
@@ -703,8 +717,14 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
           </svg>
         }
       >
-        {/* Brass only when something is blocked on you; a quiet zero otherwise. */}
-        <Counter className="attention-badge-count" value={count} tone={count > 0 ? "attention" : "neutral"} />
+        {/* Brass only when something is waiting on you: the agents blocked on
+            you, or "!" when only Hermes notices are open; a quiet zero otherwise. */}
+        <Counter
+          className="attention-badge-count"
+          value={count}
+          text={count === 0 && notices > 0 ? "!" : undefined}
+          tone={count > 0 || notices > 0 ? "attention" : "neutral"}
+        />
       </Button>
       <div className="attention-live" role="status" aria-live="polite" aria-atomic="true">
         {announcement}
@@ -743,7 +763,8 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
             {groups.blocked.length > 0 && (
               <div role="group" aria-labelledby="attention-group-blocked" className="attention-group" data-section="blocked">
                 <div id="attention-group-blocked" role="presentation" className="attention-group-title">
-                  {t("attention.blockedSection")} ({sessionCount(groups.blocked)})
+                  {/* Agents, not rows: one agent can have several requests open. */}
+                  {t(sessionCount(groups.blocked) === 1 ? "attention.blockedSectionAgentsOne" : "attention.blockedSectionAgents", { count: sessionCount(groups.blocked) })}
                 </div>
                 {groups.blocked.map(renderOption)}
               </div>

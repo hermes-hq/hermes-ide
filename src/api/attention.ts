@@ -10,10 +10,12 @@ export const AWAY_NOTIFY_URL_KEY = "away_notify_url";
 
 /**
  * Show the Blocked on you count on the app icon: the dock badge on macOS, a
- * taskbar overlay on Windows, the window's urgency hint on Linux. 0 clears it.
+ * taskbar overlay on Windows, the window's urgency hint on Linux. `count` is
+ * agents blocked on you; with none, open Hermes notices show "!". Both 0
+ * clear it.
  */
-export function setAttentionBadge(count: number): Promise<string> {
-  return invoke<string>("set_attention_badge", { count });
+export function setAttentionBadge(count: number, notices = 0): Promise<string> {
+  return invoke<string>("set_attention_badge", { count, notices });
 }
 
 /** Keep the machine from sleeping while an agent works; false lets it sleep again. */

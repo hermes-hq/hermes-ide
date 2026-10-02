@@ -11,11 +11,17 @@ use tauri::{AppHandle, State};
 
 use crate::AppState;
 
-/// Show the Blocked on you count on the app icon. Returns how this platform
-/// shows it ("dock-badge", "taskbar-overlay", "urgency-hint").
+/// Show the Blocked on you count on the app icon: `count` agents blocked on
+/// you, and `notices` Hermes notices (a "!" when they are all there is).
+/// Returns how this platform shows it ("dock-badge", "taskbar-overlay",
+/// "urgency-hint").
 #[tauri::command]
-pub fn set_attention_badge(app: AppHandle, count: u32) -> Result<String, String> {
-    badge::apply(&app, count).map(str::to_string)
+pub fn set_attention_badge(
+    app: AppHandle,
+    count: u32,
+    notices: Option<u32>,
+) -> Result<String, String> {
+    badge::apply(&app, count, notices.unwrap_or(0)).map(str::to_string)
 }
 
 /// Keep the machine awake (`true`) or let it sleep again (`false`).
@@ -60,7 +66,7 @@ pub async fn attention_state_for_test(app: AppHandle) -> Result<serde_json::Valu
     .map_err(|e| e.to_string())?;
     let os = rx.await.map_err(|e| e.to_string())?;
     Ok(serde_json::json!({
-        "badge": { "count": badge::last_count(), "mechanism": badge::mechanism(), "os": os },
+        "badge": { "count": badge::last_count(), "label": badge::last_label(), "mechanism": badge::mechanism(), "os": os },
         "keepAwake": keep_awake::status(),
     }))
 }
