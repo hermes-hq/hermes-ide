@@ -237,6 +237,21 @@
 .task-launcher-launched { color: var(--text-1); font-size: var(--text-xs); }
 .task-launcher-queued { color: var(--warning-ink); }
 
+/* What stops Launch and Launch itself: with every option open the sheet
+ * scrolls, and both stay in view at its bottom. */
+.task-launcher-dock {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  position: sticky;
+  bottom: calc(var(--space-1) * -3.5);
+  padding-bottom: calc(var(--space-1) * 3.5);
+  margin-bottom: calc(var(--space-1) * -3.5);
+  background: var(--bg-1);
+}
+.task-launcher-dock .task-launcher-rows { max-height: 30vh; overflow-y: auto; }
+.task-launcher-inline .task-launcher-dock { position: static; margin-bottom: 0; padding-bottom: 0; background: none; }
+
 .task-launcher-footer {
   display: flex;
   align-items: center;
@@ -244,14 +259,21 @@
   gap: var(--space-2);
   border-top: var(--control-border-width) solid var(--border);
   padding-top: calc(var(--space-1) * 2.5);
-  /* With every option open the sheet scrolls; Launch stays in reach. */
-  position: sticky;
-  bottom: calc(var(--space-1) * -3.5);
-  padding-bottom: calc(var(--space-1) * 3.5);
-  margin-bottom: calc(var(--space-1) * -3.5);
-  background: var(--bg-1);
 }
-.task-launcher-inline .task-launcher-footer { border-top: none; padding-top: 0; position: static; margin-bottom: 0; padding-bottom: 0; background: none; }
+.task-launcher-inline .task-launcher-footer { border-top: none; padding-top: 0; }
+
+/* "Hermes will run": the command, then the note the launch adds after the task. */
+.task-launcher-preview-line { display: flex; align-items: baseline; gap: var(--space-2); min-width: 0; }
+.task-launcher-preview-line .task-launcher-command { flex: 1; min-width: 0; }
+.task-launcher-context-note { flex: none; color: var(--text-2); font-size: var(--text-xs); white-space: nowrap; }
+
+/* A preset name that cannot be used, said next to the form. */
+.task-launcher-preset-error { flex-basis: 100%; color: var(--danger-fg); font-size: var(--text-xs); }
+
+/* The typed path, read as a folder ("~/code/app" → its full path). */
+.task-launcher-repo-field,
+.task-launcher-model-field { display: block; }
+.task-launcher-repo-state { overflow-wrap: anywhere; }
 
 .task-launcher-actions { display: flex; align-items: center; gap: var(--space-2); }
 

@@ -65,7 +65,12 @@ describe("branch and label from the task", () => {
   it("takes the first words as a branch-safe slug", () => {
     expect(taskSlug("Fix the flaky login test on CI please")).toBe("fix-the-flaky-login-test-on");
     expect(taskBranch("Add dark mode")).toBe("hermes/add-dark-mode");
-    expect(taskBranch("Ünïcode café — naïve")).toBe("hermes/unicode-cafe-naive");
+    expect(taskBranch("Ïnïcode café — naïve")).toBe("hermes/inicode-cafe-naive");
+    // German umlauts and ß are spelled out, not dropped (QAGIT-21b).
+    expect(taskBranch("Größe prüfen für Überschrift")).toBe("hermes/groesse-pruefen-fuer-ueberschrift");
+    // Nothing to name it after: hermes/task-<id> with the sheet's id.
+    expect(taskBranch("🚀🚀", "a1b2c3")).toBe("hermes/task-a1b2c3");
+    expect(taskBranch("修复登录", "a1b2c3")).toBe("hermes/task-a1b2c3");
     expect(taskBranch("   ")).toBe("hermes/task");
     expect(taskBranch("!!! ???")).toBe("hermes/task");
   });

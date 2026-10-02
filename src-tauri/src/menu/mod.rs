@@ -335,8 +335,16 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
         .accelerator(app_accel("session.copy-context")?)
         .build(app)?;
 
+    // Ends the session in view (the pane's ⌘W only closes the pane), through
+    // the same checks as the sidebar's close button.
+    let close_session = MenuItemBuilder::with_id("session.close-session", "Close Session")
+        .accelerator(app_accel("session.close-session")?)
+        .build(app)?;
+
     let session_menu = SubmenuBuilder::new(app, "Session")
         .item(&copy_context)
+        .separator()
+        .item(&close_session)
         .build()?;
 
     // ── Window menu ──
@@ -665,6 +673,7 @@ mod tests {
         "view.flow-mode",
         "view.search-panel",
         "session.copy-context",
+        "session.close-session",
     ];
 
     fn is_bare_ctrl_letter(accel: &str) -> bool {

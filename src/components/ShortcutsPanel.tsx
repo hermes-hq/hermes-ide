@@ -22,13 +22,14 @@ interface ShortcutsPanelProps {
 
 export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
   const { t } = useI18n();
-  // The keyboard is the panel's while it is open; Esc closes it.
+  // The keyboard is the panel's while it is open (not the terminal behind
+  // it); Esc closes it.
   const panelRef = useRef<HTMLDivElement>(null);
   useFocusTrap(panelRef, { onEscape: onClose });
 
   return (
     <div className="shortcuts-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label={t("shortcuts.title")}>
-      <div ref={panelRef} className="shortcuts-panel" onClick={(e) => e.stopPropagation()}>
+      <div ref={panelRef} className="shortcuts-panel" tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         <div className="shortcuts-header">
           <span className="shortcuts-title">{t("shortcuts.title")}</span>
           <CloseButton className="shortcuts-close" onClick={onClose} label={t("common.close")} />

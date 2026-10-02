@@ -19,6 +19,7 @@ import { lastReportedStatus } from "../agent/status/deriveStatus";
 import { raiseInboxItem } from "../agent/contract/inbox";
 import { listAllWorktrees } from "../api/git";
 import type { CreateSessionOpts, SessionData } from "../types/session";
+import type { QueuedLaunch } from "../launcher/launchTask";
 import { getFleetCaps, loadFleetCaps, subscribeFleetCaps, type FleetCaps } from "./fleetSettings";
 import { formatUsd, type CapTrip } from "./spend";
 import { createSpendCapWatcher } from "./spendCapWatcher";
@@ -87,8 +88,8 @@ export interface FleetControlsOptions {
   /** The `fleetControls` flag: when off, nothing here runs. */
   readonly enabled: boolean;
   readonly sessions: readonly SessionData[];
-  /** Start a queued task exactly as the New Session wizard would have. */
-  readonly startTask: (opts: CreateSessionOpts) => Promise<{ id: string } | null>;
+  /** Start a queued task exactly as the New Session wizard (or the ⌘N launcher, `task.launch`) would have. */
+  readonly startTask: (opts: CreateSessionOpts, task: QueuedTask) => Promise<{ id: string } | null>;
   readonly t: Translate;
 }
 
@@ -98,7 +99,7 @@ export interface FleetControls {
    * it when a cap is set and no slot is free (or others already wait).
    * True when it was queued.
    */
-  readonly queueIfFull: (opts: CreateSessionOpts, label: string) => boolean;
+  readonly queueIfFull: (opts: CreateSessionOpts, label: string, launch?: QueuedLaunch) => boolean;
 }
 
 export function useFleetControls({ enabled, sessions, startTask, t }: FleetControlsOptions): FleetControls {
@@ -136,7 +137,7 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
     inFlightRef.current++;
     // The new session holds its slot from the moment it exists (see
     // STARTUP_GRACE_MS); until then it is counted as starting.
-    startTask(task.opts)
+    startTask(task.opts, task)
       .then((session) => {
         if (session) pendingIdsRef.current.add(session.id);
       })
@@ -174,13 +175,13 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
     return () => registerTaskStarter(null);
   }, [enabled, launch]);
 
-  const queueIfFull = useCallback((opts: CreateSessionOpts, label: string): boolean => {
+  const queueIfFull = useCallback((opts: CreateSessionOpts, label: string, launch?: QueuedLaunch): boolean => {
     if (!enabled || !opts.aiProvider) return false;
     const caps = getFleetCaps();
     if (!queueEnabled(caps)) return false;
     const waiting = listQueuedTasks().length > 0;
     if (!waiting && hasFreeSlot(computeOccupancy(sessionsRef.current, Date.now()), caps, starting())) return false;
-    enqueueTask(opts, label);
+    enqueueTask(opts, label, launch);
     return true;
   }, [enabled, starting]);
 

@@ -29,25 +29,52 @@ import {
   type TaskLaunchRecord,
 } from "./taskLauncher";
 
+/**
+ * One agent of a launch that waits in the task queue: everything its start
+ * needs to finish the launch exactly as an immediate one would (the
+ * feature.md, the checks, the launch record, the pairing with the other
+ * agent of the same launch). Plain data: the queue keeps it across a quit.
+ */
+export interface QueuedLaunch {
+  req: TaskLaunchRequest;
+  agentIndex: number;
+  projectId: string;
+  /** Shared by the agents of one launch (pairs their records). */
+  launchId: string;
+  /** The first prompt the agent starts with (the track's, for a Full track). */
+  firstPrompt: string;
+}
+
 export interface LaunchTaskDeps {
   /** The project id for a repository's main checkout, creating the project if needed. */
   projectFor(repoRoot: string): Promise<string>;
   createSession(opts: CreateSessionOpts): Promise<SessionData | null>;
   /**
    * With a running-agents cap and no free slot, the session waits in the
-   * task queue instead of starting (N22). True when it was queued.
+   * task queue instead of starting (N22). True when it was queued; `launch`
+   * is what finishes the launch once it starts (finishQueuedLaunch).
    */
-  queue?(opts: CreateSessionOpts, label: string): boolean;
+  queue?(opts: CreateSessionOpts, label: string, launch: QueuedLaunch): boolean;
   /** Show a new session: the first in the focused pane, a second one split beside the first. */
   place(sessionId: string, index: number, firstSessionId: string | null): void;
+  /** The session's linked worktree, or null when it runs in the repository's own checkout. */
   worktreePath(sessionId: string, projectId: string): Promise<string | null>;
   writeFeatureFile(checkout: string, slug: string, contents: string): Promise<string>;
+  /**
+   * The task's checks, kept in the worktree's git folder (never in the
+   * repository), where `hi check` finds them for that worktree only.
+   */
+  writeDoneWhen?(checkout: string, commands: string[]): Promise<string>;
   /** The first prompt of a Full-track task (taskTrackPrompt). */
   trackPrompt?(repoRoot: string, slug: string, task: string): Promise<string>;
   copyText(text: string): Promise<void>;
   readRecords(): Promise<string>;
   writeRecords(raw: string): Promise<void>;
   now(): number;
+  /** Tells the person something went wrong after the launch itself succeeded. */
+  notify?(message: string): void;
+  /** An id for this launch (records of its agents share it). */
+  newLaunchId?(): string;
 }
 
 export interface LaunchTaskResult {
@@ -58,6 +85,8 @@ export interface LaunchTaskResult {
   /** Agents that got the task on the clipboard instead of on their launch line. */
   copiedFor: string[];
   featureFiles: string[];
+  /** This launch's id (its queued agents carry it). */
+  launchId?: string;
 }
 
 /** A path with its trailing separators removed (and, on Windows, case and slashes folded). */
@@ -67,6 +96,99 @@ export function normalizeRepoPath(path: string, windows = false): string {
   return p || path.trim();
 }
 
+/** The create_session options of one agent of a launch. */
+function sessionOpts(launch: QueuedLaunch): CreateSessionOpts {
+  const { req, agentIndex, projectId, firstPrompt } = launch;
+  const agent = req.agents[agentIndex];
+  const custom = getAgent(agent.id)?.custom === true;
+  return {
+    label: taskLabel(req.task),
+    aiProvider: agent.id,
+    mode: agent.mode,
+    projectIds: [projectId],
+    workingDirectory: req.repoRoot,
+    // A new worktree on a new branch, a worktree of an existing branch, or
+    // (no selection) the repository's own checkout.
+    branchSelections: agent.worktree
+      ? { [projectId]: { branch: agent.branch, createNew: agent.createBranch, ...(agent.createBranch && agent.baseBranch ? { baseBranch: agent.baseBranch } : {}) } }
+      : undefined,
+    initialPrompt: firstPrompt,
+    permissionMode: agent.launch.permissionMode,
+    customPrefix: agent.launch.customPrefix || undefined,
+    customSuffix: agent.launch.customSuffix || undefined,
+    channels: agent.launch.channels.length > 0 ? agent.launch.channels : undefined,
+    agentName: custom ? taskLabel(agent.launch.agentCommand ?? "", 24) || undefined : undefined,
+    agentCommand: custom ? agent.launch.agentCommand : undefined,
+    agentLaunch: agent.launch.agentLaunch,
+  };
+}
+
+/**
+ * What a started agent session of a launch still needs: the Full track's
+ * feature.md (in its worktree, or in the repository's own checkout when it
+ * runs there), the task's checks next to its worktree, and its record.
+ */
+async function finishAgent(launch: QueuedLaunch, sessionId: string, deps: LaunchTaskDeps, result: LaunchTaskResult): Promise<TaskLaunchRecord> {
+  const { req, agentIndex, projectId } = launch;
+  const agent = req.agents[agentIndex];
+  const task = req.task.trim();
+  let worktree: string | null = null;
+  try {
+    worktree = await deps.worktreePath(sessionId, projectId);
+  } catch (err) {
+    console.warn("[launchTask] could not read the session's worktree:", err);
+  }
+  if (req.track === "Full") {
+    const slug = taskSlug(task) || "task";
+    // A session on the current checkout has no worktree: the feature lives in the repository's own folder.
+    const checkout = worktree ?? (agent.worktree ? null : req.repoRoot);
+    try {
+      if (!checkout) throw new Error(translate("launcher.featureNoCheckout"));
+      result.featureFiles.push(await deps.writeFeatureFile(checkout, slug, featureMarkdown({ slug, task, doneWhen: req.doneWhen })));
+    } catch (err) {
+      console.warn("[launchTask] could not write feature.md:", err);
+      deps.notify?.(translate("launcher.featureTrackFailed", { reason: err instanceof Error ? err.message : String(err) }));
+    }
+  }
+  const checks = req.doneWhen.map((c) => c.trim()).filter(Boolean);
+  if (worktree && checks.length > 0 && deps.writeDoneWhen) {
+    try {
+      await deps.writeDoneWhen(worktree, checks);
+    } catch (err) {
+      console.warn("[launchTask] could not keep the task's checks:", err);
+    }
+  }
+  if (agent.mode === "terminal" && !agentTakesFirstPrompt(agent.id)) result.copiedFor.push(agent.id);
+  return {
+    sessionId,
+    task,
+    agentId: agent.id,
+    mode: agent.mode,
+    repo: req.repoRoot,
+    branch: agent.branch,
+    track: req.track,
+    doneWhen: [...req.doneWhen],
+    pairedWith: null,
+    createdAt: deps.now(),
+    launchId: launch.launchId,
+  };
+}
+
+async function saveRecords(records: readonly TaskLaunchRecord[], deps: LaunchTaskDeps): Promise<void> {
+  if (records.length === 0) return;
+  try {
+    const existing = parseTaskLaunches(await deps.readRecords());
+    await deps.writeRecords(JSON.stringify(appendTaskLaunches(existing, records)));
+  } catch (err) {
+    console.warn("[launchTask] could not record the launch:", err);
+  }
+}
+
+function newLaunchId(deps: LaunchTaskDeps): string {
+  if (deps.newLaunchId) return deps.newLaunchId();
+  return `launch-${deps.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): Promise<LaunchTaskResult> {
   const result: LaunchTaskResult = { ok: false, sessionIds: [], queued: 0, copiedFor: [], featureFiles: [] };
   const task = req.task.trim();
@@ -74,7 +196,6 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
 
   const projectId = await deps.projectFor(req.repoRoot);
   const label = taskLabel(task);
-  const records: TaskLaunchRecord[] = [];
   const slug = taskSlug(task) || "task";
   // A Full track drives the agent phase by phase from its first prompt. When
   // the prompt cannot be built the launch still goes, with the bare task.
@@ -86,30 +207,15 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
       console.warn("[launchTask] could not build the feature track's first prompt:", err);
     }
   }
+  const launchId = newLaunchId(deps);
+  result.launchId = launchId;
+  const plan = (agentIndex: number): QueuedLaunch => ({ req: { ...req, task }, agentIndex, projectId, launchId, firstPrompt });
 
-  for (const [i, agent] of req.agents.entries()) {
-    const custom = getAgent(agent.id)?.custom === true;
-    const opts: CreateSessionOpts = {
-      label,
-      aiProvider: agent.id,
-      mode: agent.mode,
-      projectIds: [projectId],
-      workingDirectory: req.repoRoot,
-      // A new worktree on a new branch, a worktree of an existing branch, or
-      // (no selection) the repository's own checkout.
-      branchSelections: agent.worktree
-        ? { [projectId]: { branch: agent.branch, createNew: agent.createBranch, ...(agent.createBranch && agent.baseBranch ? { baseBranch: agent.baseBranch } : {}) } }
-        : undefined,
-      initialPrompt: firstPrompt,
-      permissionMode: agent.launch.permissionMode,
-      customPrefix: agent.launch.customPrefix || undefined,
-      customSuffix: agent.launch.customSuffix || undefined,
-      channels: agent.launch.channels.length > 0 ? agent.launch.channels : undefined,
-      agentName: custom ? taskLabel(agent.launch.agentCommand ?? "", 24) || undefined : undefined,
-      agentCommand: custom ? agent.launch.agentCommand : undefined,
-      agentLaunch: agent.launch.agentLaunch,
-    };
-    if (deps.queue?.(opts, label)) {
+  const started: { sessionId: string; launch: QueuedLaunch }[] = [];
+  for (const i of req.agents.keys()) {
+    const launch = plan(i);
+    const opts = sessionOpts(launch);
+    if (deps.queue?.(opts, label, launch)) {
       result.queued++;
       continue;
     }
@@ -122,50 +228,38 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
     }
     deps.place(session.id, i, result.sessionIds[0] ?? null);
     result.sessionIds.push(session.id);
-    records.push({
-      sessionId: session.id,
-      task,
-      agentId: agent.id,
-      mode: agent.mode,
-      repo: req.repoRoot,
-      branch: agent.branch,
-      track: req.track,
-      doneWhen: [...req.doneWhen],
-      pairedWith: null,
-      createdAt: deps.now(),
-    });
-    if (agent.mode === "terminal" && !agentTakesFirstPrompt(agent.id)) result.copiedFor.push(agent.id);
+    started.push({ sessionId: session.id, launch });
   }
   result.ok = result.sessionIds.length > 0 || result.queued > 0;
 
-  if (records.length === 2) {
-    records[0].pairedWith = records[1].sessionId;
-    records[1].pairedWith = records[0].sessionId;
-  }
+  const records: TaskLaunchRecord[] = [];
+  for (const s of started) records.push(await finishAgent(s.launch, s.sessionId, deps, result));
 
   if (result.copiedFor.length > 0) {
     await deps.copyText(firstPrompt).catch((err) => console.warn("[launchTask] could not copy the task:", err));
   }
-
-  if (req.track === "Full") {
-    const contents = featureMarkdown({ slug, task, doneWhen: req.doneWhen });
-    for (const id of result.sessionIds) {
-      try {
-        const checkout = await deps.worktreePath(id, projectId);
-        if (checkout) result.featureFiles.push(await deps.writeFeatureFile(checkout, slug, contents));
-      } catch (err) {
-        console.warn("[launchTask] could not write feature.md:", err);
-      }
-    }
-  }
-
-  try {
-    const existing = parseTaskLaunches(await deps.readRecords());
-    await deps.writeRecords(JSON.stringify(appendTaskLaunches(existing, records)));
-  } catch (err) {
-    console.warn("[launchTask] could not record the launch:", err);
-  }
+  await saveRecords(records, deps);
   return result;
+}
+
+/**
+ * A queued agent of a launch has started (its session was created when a
+ * slot freed, or by "Start now"): the rest of its launch, as launchTask does
+ * it for an agent that starts at once.
+ */
+export async function finishQueuedLaunch(launch: QueuedLaunch, sessionId: string, deps: LaunchTaskDeps): Promise<LaunchTaskResult> {
+  const result: LaunchTaskResult = { ok: true, sessionIds: [sessionId], queued: 0, copiedFor: [], featureFiles: [], launchId: launch.launchId };
+  const record = await finishAgent(launch, sessionId, deps, result);
+  if (result.copiedFor.length > 0) {
+    await deps.copyText(launch.firstPrompt).catch((err) => console.warn("[launchTask] could not copy the task:", err));
+  }
+  await saveRecords([record], deps);
+  return result;
+}
+
+/** The create_session options a queued launch starts with. */
+export function queuedLaunchOpts(launch: QueuedLaunch): CreateSessionOpts {
+  return sessionOpts(launch);
 }
 
 // ─── A task the agent's launch could not carry ─────────────────────────

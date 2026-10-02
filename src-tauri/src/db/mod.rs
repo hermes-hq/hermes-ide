@@ -2016,6 +2016,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "session_mode_by_provider",
     // Task launcher (F15): what each launched task was (task, track, done-when), per session
     "task_launches",
+    // Task queue (N22): the tasks waiting for a free slot, kept while Hermes is closed
+    "task_queue",
     // Keyboard shortcuts
     "command_palette_shortcut",
     // Plugin updates
@@ -3012,6 +3014,8 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "worktree_recipe_trust",
     // Task launcher records — per session, with task text and branch names
     "task_launches",
+    // Tasks waiting in the queue (N22) — task text and paths, per install
+    "task_queue",
 ];
 
 /// Validate a settings file path for export or import.

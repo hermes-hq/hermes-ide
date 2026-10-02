@@ -76,6 +76,9 @@ pub fn capabilities(
             return Ok(c);
         }
     }
+    // Taken before the accounts are read: a probe that an account change
+    // overtakes is returned but not cached (see discover::store_cached).
+    let generation = discover::generation(agent_id);
     let stored = with_db(app, |c| store::list_accounts(c, agent_id))?;
     let mut refused: HashMap<String, Vec<discover::Refusal>> = HashMap::new();
     for acc in
@@ -101,7 +104,7 @@ pub fn capabilities(
         &|acc| refused.get(acc).cloned().unwrap_or_default(),
         host.as_ref(),
     );
-    discover::store_cached(&caps, key);
+    discover::store_cached(&caps, key, generation);
     Ok(caps)
 }
 

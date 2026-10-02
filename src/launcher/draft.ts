@@ -6,6 +6,7 @@
 // closing) brings the same draft back. Only a launch or "Start over" forgets
 // it. Kept in memory for the app session only.
 
+import { comboKey } from "../agent/capabilities/choice";
 import type { LaunchChoice } from "../agent/capabilities/types";
 import type { SessionMode } from "../types/session";
 
@@ -50,6 +51,23 @@ export interface PendingSuggestion {
 }
 
 let pendingSuggestion: PendingSuggestion | null = null;
+
+// Combinations "Save as preset?" was offered for in this app session: asked
+// once per session. Only "No, don't ask again" makes it never come back.
+const offered = new Set<string>();
+
+export function wasOfferedThisSession(choice: LaunchChoice): boolean {
+  return offered.has(comboKey(choice));
+}
+
+export function markOfferedThisSession(choice: LaunchChoice): void {
+  offered.add(comboKey(choice));
+}
+
+/** Test-only: forget the offers of this session. */
+export function __resetOffersForTest(): void {
+  offered.clear();
+}
 
 export function setPendingSuggestion(next: PendingSuggestion | null): void {
   pendingSuggestion = next;

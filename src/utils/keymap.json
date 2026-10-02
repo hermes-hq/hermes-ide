@@ -19,6 +19,7 @@
     { "action": "view.flow-mode", "mac": "{mod}{alt}Z", "pc": "{ctrl}{shift}Y" },
     { "action": "view.cost-dashboard", "mac": "{mod}$", "pc": "{ctrl}$" },
     { "action": "view.shortcuts", "mac": "{mod}/", "pc": "{ctrl}/" },
-    { "action": "session.copy-context", "mac": "{mod}{shift}C", "pc": "{ctrl}{shift}X" }
+    { "action": "session.copy-context", "mac": "{mod}{shift}C", "pc": "{ctrl}{shift}X" },
+    { "action": "session.close-session", "mac": "{mod}{shift}W", "pc": "{ctrl}{shift}Q" }
   ]
 }

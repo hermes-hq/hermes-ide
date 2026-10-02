@@ -381,8 +381,8 @@ try {
   await openLauncher(bridge);
   await breakLauncher(bridge);
   await surface(app, "launcher", ".task-launcher-sheet", { startSel: ".task-launcher-task" });
+  // A new worktree is the starting choice: its menu shows the branch and base fields.
   await openChip(bridge, "where");
-  await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first('.task-launcher-menu [data-where="new-worktree"]'), "new worktree"));`);
   await bridge.waitFor("the where menu's fields", `return !!e2e.first(".task-launcher-menu .task-launcher-branch") && !!e2e.first(".task-launcher-menu .task-launcher-base");`);
   await surface(app, "launcher-where", ".task-launcher-sheet", { startSel: ".task-launcher-menu .task-launcher-branch" });
   // The base branch list, open: the control set's listbox, not the OS one.

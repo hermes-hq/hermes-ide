@@ -266,6 +266,19 @@ fn clean_name(name: &str) -> Result<String, String> {
     Ok(name.chars().take(60).collect())
 }
 
+/// A name another preset already has (letter case ignored): presets are
+/// picked by name, so two never share one.
+fn refuse_taken_name(conn: &Connection, name: &str, except_id: Option<&str>) -> Result<(), String> {
+    let want = name.to_lowercase();
+    match list_presets(conn)?
+        .into_iter()
+        .find(|p| Some(p.id.as_str()) != except_id && p.name.trim().to_lowercase() == want)
+    {
+        Some(p) => Err(format!("You already have a preset called \"{}\"", p.name)),
+        None => Ok(()),
+    }
+}
+
 pub fn save_preset(
     conn: &Connection,
     name: &str,
@@ -273,6 +286,7 @@ pub fn save_preset(
     now_ms: i64,
 ) -> Result<StoredPreset, String> {
     let name = clean_name(name)?;
+    refuse_taken_name(conn, &name, None)?;
     let id = uuid::Uuid::new_v4().simple().to_string();
     let position: i64 = conn
         .query_row(
@@ -301,6 +315,7 @@ pub fn rename_preset(
     now_ms: i64,
 ) -> Result<StoredPreset, String> {
     let name = clean_name(name)?;
+    refuse_taken_name(conn, &name, Some(id))?;
     let n = conn
         .execute(
             "UPDATE launch_presets SET name = ?2, updated_at = ?3 WHERE id = ?1",
@@ -525,6 +540,27 @@ mod tests {
         assert!(delete_preset(&conn, &a.id).unwrap());
         assert!(!delete_preset(&conn, &a.id).unwrap());
         assert_eq!(list_presets(&conn).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn two_presets_never_share_a_name_whatever_its_letter_case() {
+        let conn = db();
+        let a = save_preset(&conn, "Plan first", &choice(), 1).unwrap();
+        let b = save_preset(&conn, "Quick fix", &choice(), 2).unwrap();
+        assert_eq!(
+            save_preset(&conn, " PLAN FIRST ", &choice(), 3).unwrap_err(),
+            "You already have a preset called \"Plan first\""
+        );
+        assert_eq!(
+            rename_preset(&conn, &b.id, "plan first", 4).unwrap_err(),
+            "You already have a preset called \"Plan first\""
+        );
+        // Its own name, in another case, is fine.
+        assert_eq!(
+            rename_preset(&conn, &a.id, "PLAN FIRST", 5).unwrap().name,
+            "PLAN FIRST"
+        );
+        assert_eq!(list_presets(&conn).unwrap().len(), 2);
     }
 
     #[test]

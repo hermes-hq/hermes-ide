@@ -26,6 +26,7 @@ const h = vi.hoisted(() => ({
   projects: [] as { id: string; name: string; path: string; path_exists: boolean }[],
   flags: { taskLauncher: true } as Record<string, boolean>,
   cap: null as unknown as FakeCapabilityCommands,
+  missing: false,
 }));
 
 vi.mock("@tauri-apps/api/core", () => ({
@@ -35,9 +36,11 @@ vi.mock("@tauri-apps/api/core", () => ({
       return h.doctor;
     }
     if (cmd === "task_repo_probe") {
-      const path = String(args.path);
+      // As the backend reads a typed path: trimmed, "~" as the home folder.
+      const raw = String(args.path).trim();
+      const path = raw.startsWith("~/") ? `/fixture-home/${raw.slice(2)}` : raw;
       const isRepo = path.endsWith("/repo");
-      return { git_root: isRepo ? path : null, branch_exists: false, local_branches: [], worktree_toml: null };
+      return { git_root: isRepo ? path : null, branch_exists: false, local_branches: [], worktree_toml: null, exists: !h.missing, is_dir: !h.missing, has_commits: true, resolved: path };
     }
     if (cmd === "git_disk_status") return { free_bytes: 100 * 1024 ** 3, required_bytes: 10 * 1024 ** 3, below_threshold: false };
     // The launcher's capability commands (in-memory, the backend's rules).
@@ -57,6 +60,7 @@ vi.mock("../api/settings", () => ({
 }));
 vi.mock("../api/projects", () => ({
   getProjectsOrdered: vi.fn(async () => h.projects),
+  createProject: vi.fn(async (path: string) => ({ id: "new", name: "repo", path })),
 }));
 vi.mock("../api/sessions", () => ({ checkAiProviders: vi.fn(async () => ({})) }));
 vi.mock("../featureFlags", async (orig) => {
@@ -81,10 +85,14 @@ beforeEach(() => {
   h.settings = new Map();
   h.projects = [];
   h.flags = { taskLauncher: true };
+  h.missing = false;
   h.cap = fakeCapabilityCommands(() => h.doctor);
   __resetDoctorForTest();
 });
 afterEach(() => cleanup());
+
+// The welcome steps wait for the doctor and the debounced path check each time.
+vi.setConfig({ testTimeout: 20_000 });
 
 const settle = () =>
   act(async () => {
@@ -227,8 +235,89 @@ describe("SetupWizard", () => {
     await settle();
     fireEvent.change(document.querySelector(".setup-repo-input")!, { target: { value: "/fixture-home/plain" } });
     await settle();
-    expect(screen.getByText("Not a git repository")).toBeInTheDocument();
+    expect(screen.getByText("This folder isn't a git repository. Pick the folder that contains .git, or run git init there.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    // Said where a screen reader hears it, and tied to Continue.
+    expect(document.getElementById("setup-repo-state")?.getAttribute("role")).toBe("status");
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveAccessibleDescription(/isn't a git repository/);
+    // Nothing at the path: said so, not "not a repository" (NEWCOMER-07).
+    h.missing = true;
+    fireEvent.change(document.querySelector(".setup-repo-input")!, { target: { value: "/fixture-home/projcets/demo" } });
+    await settle();
+    expect(screen.getByText("No folder at this path")).toBeInTheDocument();
+    h.missing = false;
+    // A repository: its root is shown, and Enter in the field moves on (NEWCOMER-09).
+    fireEvent.change(document.querySelector(".setup-repo-input")!, { target: { value: "~/repo" } });
+    await settle();
+    expect(screen.getByText("Git repository: /fixture-home/repo")).toBeInTheDocument();
+    expect(screen.getByText("→ /fixture-home/repo")).toBeInTheDocument();
+    fireEvent.keyDown(document.querySelector(".setup-repo-input")!, { key: "Enter" });
+    await settle();
+    expect(stepTitle()).toBe("First task");
+  });
+
+  it("keeps the first task across Back, and asks before Finish throws it away (NEWCOMER-03, -05)", async () => {
+    h.doctor = [row("claude", "Claude Code")];
+    h.projects = [{ id: "p1", name: "repo", path: "/fixture-home/repo", path_exists: true }];
+    const { onLaunch, onDone } = await openWizard();
+    acceptPolicy();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await settle();
+    fireEvent.click(screen.getByRole("radio", { name: /repo/ }));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await settle();
+    // Nothing typed: Finish is the one primary.
+    expect(screen.getByRole("button", { name: "Finish" })).toHaveClass("h-btn--primary");
+    fireEvent.change(screen.getByPlaceholderText(/Describe the task/), { target: { value: "Add a contributing guide" } });
+    await settle();
+    // A task typed: Start task is the primary, Finish becomes Skip for now.
+    expect(screen.getByRole("button", { name: "Start task ⏎" })).toHaveClass("h-btn--primary");
+    expect(screen.getByRole("button", { name: "Skip for now" })).not.toHaveClass("h-btn--primary");
+    fireEvent.click(screen.getByRole("button", { name: "Back" }));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await settle();
+    expect((screen.getByPlaceholderText(/Describe the task/) as HTMLTextAreaElement).value).toBe("Add a contributing guide");
+    // Skip for now asks first; Keep as draft keeps it for ⌘N and finishes.
+    fireEvent.click(screen.getByRole("button", { name: "Skip for now" }));
+    expect(screen.getByText("Start “Add a contributing guide” now?")).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "Keep as draft" }));
+    await waitFor(() => expect(onDone).toHaveBeenCalled());
+    expect(onLaunch).not.toHaveBeenCalled();
+    const { takeLauncherDraft } = await import("../launcher/draft");
+    expect(takeLauncherDraft()).toMatchObject({ task: "Add a contributing guide", repoPath: "/fixture-home/repo" });
+  });
+
+  it("Start task ⏎ launches the typed task (NEWCOMER-03)", async () => {
+    h.doctor = [row("claude", "Claude Code")];
+    h.projects = [{ id: "p1", name: "repo", path: "/fixture-home/repo", path_exists: true }];
+    const { onLaunch } = await openWizard();
+    acceptPolicy();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await settle();
+    fireEvent.click(screen.getByRole("radio", { name: /repo/ }));
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Continue" }));
+    await settle();
+    fireEvent.change(screen.getByPlaceholderText(/Describe the task/), { target: { value: "Add a README" } });
+    await settle();
+    fireEvent.click(screen.getByRole("button", { name: "Start task ⏎" }));
+    await waitFor(() => expect(onLaunch).toHaveBeenCalled());
+    expect(onLaunch.mock.calls[0][0]).toMatchObject({ task: "Add a README", repoRoot: "/fixture-home/repo" });
+  });
+
+  it("the menu bar does nothing behind it but Help, and says why (NEWCOMER-02)", async () => {
+    const { registerMenuBarHandler, triggerMenuBarActionFromKeyboard, cleanupListener } = await import("../hooks/nativeMenuBridge");
+    const ran: string[] = [];
+    registerMenuBarHandler((a) => ran.push(a));
+    await openWizard();
+    act(() => triggerMenuBarActionFromKeyboard("file.new-session-tab"));
+    expect(ran).toEqual([]);
+    expect(screen.getByText("Finish setup first")).toBeInTheDocument();
+    act(() => triggerMenuBarActionFromKeyboard("help.website"));
+    expect(ran).toEqual(["help.website"]);
+    cleanupListener();
   });
 
   it("asks for the Privacy Policy first: Continue waits until it is accepted, and says why", async () => {

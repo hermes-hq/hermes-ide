@@ -41,8 +41,41 @@ function isEcho(id: string, source: ActionSource): boolean {
   return false;
 }
 
+// While the first-run welcome is unfinished it owns the window: the menu
+// bar and the app chords do nothing behind it (no shell before the Privacy
+// Policy is accepted, no sheet opening under it), except the Help menu.
+// Quit and Hide never reach this bridge (the OS and the backend handle them).
+type MenuGate = (actionId: string) => boolean;
+let menuGate: MenuGate | null = null;
+
+/** Help stays usable behind the welcome. */
+export function allowedBehindWelcome(actionId: string): boolean {
+  return actionId.startsWith("help.");
+}
+
+/**
+ * Installs the gate: `allow(actionId)` false drops the action (the gate is
+ * told, so it can show why). Returns how to remove it.
+ */
+export function setMenuGate(allow: MenuGate): () => void {
+  menuGate = allow;
+  return () => {
+    if (menuGate === allow) menuGate = null;
+  };
+}
+
+/** True while a gate is installed (the welcome is open): the app's own key handlers stand back too. */
+export function isMenuGated(): boolean {
+  return menuGate !== null;
+}
+
+function gated(actionId: string): boolean {
+  return !!menuGate && !menuGate(actionId);
+}
+
 function onMenuAction(payload: { action: string }) {
   if (isEcho(payload.action, "native")) return;
+  if (!contextMenuHandler && gated(payload.action)) return;
   // Context menu handler takes priority (it's the most recently opened)
   if (contextMenuHandler) {
     const handler = contextMenuHandler;
@@ -86,6 +119,7 @@ export function triggerMenuBarAction(actionId: string): void {
 /** Run a menu bar action for a key chord pressed in the webview. */
 export function triggerMenuBarActionFromKeyboard(actionId: string): void {
   if (isEcho(actionId, "keyboard")) return;
+  if (gated(actionId)) return;
   lastAction = { id: actionId, at: Date.now(), source: "keyboard" };
   menuBarHandler?.(actionId);
 }
@@ -105,4 +139,5 @@ export function cleanupListener(): void {
   menuBarHandler = null;
   contextMenuHandler = null;
   lastAction = null;
+  menuGate = null;
 }

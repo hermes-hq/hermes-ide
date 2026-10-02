@@ -65,7 +65,7 @@ import { TaskLauncher, type TaskLaunchRequest, type TaskLaunchResult } from "../
 import { I18nProvider } from "../i18n/I18nProvider";
 import { __resetDoctorForTest } from "../launcher/doctorStore";
 import { fakeCapabilityCommands } from "./fakes/capabilityCommands";
-import { clearLauncherDraft, setPendingSuggestion } from "../launcher/draft";
+import { __resetOffersForTest, clearLauncherDraft, setPendingSuggestion } from "../launcher/draft";
 import { isMac } from "../utils/platform";
 import type { AgentCapabilities } from "../agent/capabilities/types";
 
@@ -96,6 +96,7 @@ beforeEach(() => {
   h.cap = fakeCapabilityCommands(() => h.doctor);
   clearLauncherDraft();
   setPendingSuggestion(null);
+  __resetOffersForTest();
   vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback) => {
     cb(0);
     return 0;
@@ -152,6 +153,12 @@ function choose(selector: string, value: string) {
 }
 async function expand() {
   fireEvent.click(document.querySelector(".task-launcher-expand") as HTMLElement);
+  await settle();
+}
+/** Types a branch name of the person's own (the where menu's field). */
+async function typeBranch(name: string) {
+  if (!document.querySelector(".task-launcher-branch")) fireEvent.click(chip("where"));
+  fireEvent.change(document.querySelector(".task-launcher-branch") as HTMLInputElement, { target: { value: name } });
   await settle();
 }
 /** Closes an open chip menu (Esc on it), leaving the sheet open. */
@@ -327,9 +334,10 @@ describe("TaskLauncher: the chips", () => {
     // Its last approval was Skip all: never brought back by itself.
     expect(chip("approval")).not.toHaveTextContent("Skip all");
     expect(document.querySelector(".task-launcher-danger-dropped")).not.toBeNull();
-    // The agent menu is still open.
-    fireEvent.click(document.querySelector('.task-launcher-menu [data-agent-id="gemini"]') as HTMLElement);
-    await settle();
+    // A pick closes the menu and gives the task field the keyboard (SOLO-10).
+    expect(document.querySelector(".task-launcher-menu")).toBeNull();
+    expect(document.activeElement).toBe(task());
+    await pick("agent", '[data-agent-id="gemini"]');
     expect(chip("model")).toHaveTextContent("model: default");
   });
 
@@ -341,6 +349,9 @@ describe("TaskLauncher: the chips", () => {
     fireEvent.click(skip);
     await settle();
     expect(chip("approval")).toHaveClass("danger");
+    // The pick closed the menu; open again to read the note.
+    expect(document.querySelector(".task-launcher-menu")).toBeNull();
+    fireEvent.click(chip("approval"));
     expect(document.querySelector(".task-launcher-approval-note")).toHaveClass("danger");
     expect(document.querySelector(".task-launcher-approval-note")?.textContent).toMatch(/Never asks, for anything\. Only in a throwaway worktree/);
     expect(document.querySelector(".task-launcher-approval code")?.textContent).toBe("--permission-mode bypassPermissions");
@@ -388,12 +399,12 @@ describe("TaskLauncher: the chips", () => {
 
     cleanup();
     const third = await open();
-    // The usual is now the current checkout (the latest of two tied launches).
-    expect(chip("where")).toHaveTextContent("current checkout · main");
+    // The usual is the current checkout (the latest of two tied launches),
+    // but a new task is never put on it without asking: a new worktree (QAGIT-16).
+    expect(chip("where")).toHaveTextContent("new worktree");
+    expect(chip("where")).not.toHaveClass("danger");
     await typeTask("Fix the badge");
     fireEvent.click(chip("where"));
-    fireEvent.click(document.querySelector('.task-launcher-menu [data-where="new-worktree"]') as HTMLElement);
-    await settle();
     choose(".task-launcher-menu .task-launcher-base", "develop");
     await settle();
     expect(preview()).toContain("in worktree hermes/fix-the-badge from develop");
@@ -430,9 +441,18 @@ describe("TaskLauncher: the chips", () => {
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Enter" });
     await settle();
     expect(chip("approval")).toHaveTextContent("Plan first");
+    // A pick closes the menu; the task field has the keyboard, so the next Enter launches (SOLO-10).
+    expect(document.querySelector(".task-launcher-menu")).toBeNull();
+    expect(document.activeElement).toBe(task());
+    // Esc without a pick closes the menu and goes back to its chip.
+    chip("model").focus();
+    fireEvent.keyDown(chip("model"), { key: "Enter" });
+    await settle();
+    expect(document.querySelector('.task-launcher-menu[data-menu="model"]')).not.toBeNull();
     fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
     await settle();
     expect(document.querySelector(".task-launcher-menu")).toBeNull();
+    expect(document.activeElement).toBe(chip("model"));
     expect(onClose).not.toHaveBeenCalled();
     fireEvent.keyDown(task(), { key: "Escape" });
     expect(onClose).toHaveBeenCalledWith({ keepDraft: true });
@@ -713,8 +733,8 @@ describe("TaskLauncher: presets", () => {
       await settle();
     }
     expect(document.querySelector(".task-launcher-suggest")?.textContent).toContain("You launched this combination 3 times");
-    // Recorded as offered the moment it is shown.
-    expect(h.cap.dismissed).toHaveLength(1);
+    // Not asked again in this session; only "No, don't ask again" stops it for good (SOLO-18).
+    expect(h.cap.dismissed).toHaveLength(0);
     fireEvent.keyDown(task(), { key: "Escape" });
     expect(first.onClose).toHaveBeenCalledWith({ keepDraft: true });
     cleanup();
@@ -776,7 +796,8 @@ describe("TaskLauncher: rows that stop Launch", () => {
     expect(launchButton()).toBeDisabled();
     fireEvent.keyDown(task(), { key: "Enter" });
     fireEvent.click(screen.getByRole("button", { name: "Sign in" }));
-    expect(onSignIn).toHaveBeenCalledWith("claude");
+    // The CLI's own default profile (no added account).
+    expect(onSignIn).toHaveBeenCalledWith("claude", null);
     expect(onLaunch).not.toHaveBeenCalled();
   });
 
@@ -803,21 +824,38 @@ describe("TaskLauncher: rows that stop Launch", () => {
     expect(launchButton()).toBeDisabled();
   });
 
-  it("an existing branch blocks until the suggested free one is used", async () => {
+  it("the same task again gets the next free branch by itself (SOLO-09)", async () => {
+    h.probe.set(REPO, { ...(h.probe.get(REPO) as RepoProbe), local_branches: ["main", "hermes/fix-it", "hermes/fix-it-2"] });
+    const { onLaunch } = await open();
+    await typeTask("Fix it");
+    expect(blocks()).toEqual([]);
+    expect(chip("where")).toHaveTextContent("new worktree · hermes/fix-it-3");
+    await launchWithEnter();
+    expect(onLaunch.mock.calls[0][0].agents[0].branch).toBe("hermes/fix-it-3");
+  });
+
+  it("a typed branch that exists blocks until the suggested free one is used", async () => {
     h.probe.set(REPO, { ...(h.probe.get(REPO) as RepoProbe), local_branches: ["main", "hermes/fix-it"] });
     await open();
     await typeTask("Fix it");
+    await typeBranch("hermes/fix-it");
     expect(blocks()).toEqual(["branch-exists"]);
     fireEvent.click(screen.getByRole("button", { name: "Use hermes/fix-it-2" }));
     await settle();
     expect(blocks()).toEqual([]);
     expect(launchButton()).toBeEnabled();
+    // The row went away with the focused button: the keyboard is back in the task field (SOLO-02).
+    expect(document.activeElement).toBe(task());
   });
 
   it("a branch that differs from an existing one only in letter case blocks, names it, and can be used on purpose", async () => {
     h.probe.set(REPO, { ...(h.probe.get(REPO) as RepoProbe), local_branches: ["main", "Hermes/Fix-It"] });
     await open();
     await typeTask("Fix it");
+    // Made up by the launcher, the name steps around it…
+    expect(blocks()).toEqual([]);
+    // …typed by the person, it is said.
+    await typeBranch("hermes/fix-it");
     expect(blocks()).toEqual(["branch-exists"]);
     expect(document.querySelector('.task-launcher-block[data-kind="branch-exists"]')).toHaveTextContent(
       "Branch Hermes/Fix-It already exists; hermes/fix-it differs only in letter case",
@@ -892,9 +930,7 @@ describe("TaskLauncher: what the agents offer comes from the capability commands
     expect(blocks()).toEqual([]);
     await pick("agent", '[data-agent-id="codex"]');
     expect(blocks()).toEqual(["caps-error"]);
-    // The agent menu is still open.
-    fireEvent.click(document.querySelector('.task-launcher-menu [data-agent-id="claude"]') as HTMLElement);
-    await settle();
+    await pick("agent", '[data-agent-id="claude"]');
     expect(blocks()).toEqual([]);
     await launchWithEnter();
     expect(onLaunch).toHaveBeenCalledTimes(1);
@@ -942,6 +978,7 @@ describe("TaskLauncher: a base branch the repository does not have", () => {
     choose(".task-launcher-menu .task-launcher-base", "develop");
     await settle();
     expect(selected()).toEqual([]);
+    fireEvent.click(chip("where"));
     choose(".task-launcher-menu .task-launcher-base", "");
     await settle();
     expect(selected()).toEqual([expect.stringContaining("Opus plan")]);

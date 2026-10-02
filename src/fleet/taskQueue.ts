@@ -3,7 +3,9 @@
 // With a cap on running agents (a count, memory, or both) set in
 // Settings > Limits, a new agent task that finds no free slot waits here
 // instead of starting. The next task starts on its own as soon as a slot
-// frees, oldest first. "Start now" skips the wait for one task.
+// frees, oldest first. "Start now" skips the wait for one task. The queue
+// is kept in a setting (TASK_QUEUE_KEY) while Hermes is closed, and comes
+// back, in order, when it opens again.
 //
 // A slot is held by an agent session that is still working on its task.
 // It frees when the agent says its turn is done or it went idle, when the
@@ -15,6 +17,7 @@ import { useSyncExternalStore } from "react";
 import type { AgentStatus } from "../agent/contract/status";
 import type { CreateSessionOpts } from "../types/session";
 import type { FleetCaps } from "./fleetSettings";
+import type { QueuedLaunch } from "../launcher/launchTask";
 
 /** How long a new agent session holds its slot before its agent shows up. */
 export const STARTUP_GRACE_MS = 30_000;
@@ -75,6 +78,11 @@ export interface QueuedTask {
   /** For the queued row: the task's name, or the agent's. */
   readonly label: string;
   readonly enqueuedAt: number;
+  /**
+   * A task from the ⌘N launcher: the rest of its launch (feature.md, checks,
+   * record, pairing), run when it starts. Absent for the New Session wizard.
+   */
+  readonly launch?: QueuedLaunch;
 }
 
 type Listener = () => void;
@@ -88,10 +96,64 @@ function publish(next: readonly QueuedTask[]): void {
   for (const l of [...listeners]) l();
 }
 
-export function enqueueTask(opts: CreateSessionOpts, label: string): QueuedTask {
-  const task: QueuedTask = Object.freeze({ id: `task-${nextId++}`, opts, label, enqueuedAt: clock() });
+export function enqueueTask(opts: CreateSessionOpts, label: string, launch?: QueuedLaunch): QueuedTask {
+  const task: QueuedTask = Object.freeze({ id: `task-${nextId++}`, opts, label, enqueuedAt: clock(), ...(launch ? { launch } : {}) });
   publish([...queue, task]);
   return task;
+}
+
+// ── Kept across a quit (setting `task_queue`) ─────────────────────────
+
+/** Settings key holding the queue while Hermes is closed. */
+export const TASK_QUEUE_KEY = "task_queue";
+
+interface StoredTask {
+  opts: CreateSessionOpts;
+  label: string;
+  enqueuedAt: number;
+  launch?: QueuedLaunch;
+}
+
+/** The queue as it is stored, oldest first (its order is the list's). */
+export function serializeTaskQueue(list: readonly QueuedTask[]): string {
+  const stored: StoredTask[] = list.map((t) => ({ opts: t.opts, label: t.label, enqueuedAt: t.enqueuedAt, ...(t.launch ? { launch: t.launch } : {}) }));
+  return JSON.stringify(stored);
+}
+
+/** The tasks a stored queue holds; anything unreadable is left out. */
+export function parseStoredTaskQueue(raw: string | null | undefined): StoredTask[] {
+  if (!raw) return [];
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return [];
+  }
+  if (!Array.isArray(parsed)) return [];
+  return parsed.filter(
+    (t): t is StoredTask =>
+      !!t && typeof t === "object" && !!(t as StoredTask).opts && typeof (t as StoredTask).opts === "object" && typeof (t as StoredTask).label === "string",
+  );
+}
+
+/**
+ * Puts the tasks of a stored queue back, after any already queued (none,
+ * at startup). Returns how many came back.
+ */
+export function restoreTaskQueue(raw: string | null | undefined): number {
+  const stored = parseStoredTaskQueue(raw);
+  if (stored.length === 0) return 0;
+  const restored = stored.map((s) =>
+    Object.freeze({
+      id: `task-${nextId++}`,
+      opts: s.opts,
+      label: s.label,
+      enqueuedAt: typeof s.enqueuedAt === "number" ? s.enqueuedAt : clock(),
+      ...(s.launch ? { launch: s.launch } : {}),
+    }) as QueuedTask,
+  );
+  publish([...queue, ...restored]);
+  return restored.length;
 }
 
 /** Take a task out of the queue (to start it, or because it was removed). */

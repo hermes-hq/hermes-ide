@@ -47,6 +47,7 @@ import {
   type BranchConflictChoice, type BranchInUse, type ReusedCheckout,
 } from "./isolation";
 import { useSaveWorkspaceOnChange } from "./useSaveWorkspaceOnChange";
+import { nestUnderParents } from "../limits/handoff";
 import { useWorkspaceFlushOnQuit } from "./useWorkspaceFlushOnQuit";
 import { runWorktreeRecipes, type CreatedWorktree } from "./worktreeRecipes";
 // Shown only when a branch is in use elsewhere: its code loads on demand.
@@ -2937,7 +2938,9 @@ export function useSessionList(): SessionData[] {
 
 /**
  * Orders sessions to match the sidebar visual order:
- * named groups (alphabetically) → ungrouped, with destroyed sessions last within each group.
+ * named groups (alphabetically) → ungrouped, with destroyed sessions last
+ * within each group and a handed-off session right under the one it came
+ * from. ⌘1–9, the palette's ⌘1–9 labels and the sidebar all use this order.
  */
 export function sidebarOrderSessions(sessions: SessionData[]): SessionData[] {
   const grouped = new Map<string | null, SessionData[]>();
@@ -2949,11 +2952,13 @@ export function sidebarOrderSessions(sessions: SessionData[]): SessionData[] {
   }
   // Sort within each group: destroyed sessions last
   const sortGroup = (list: SessionData[]) =>
-    [...list].sort((a, b) => {
-      const aD = a.phase === "destroyed" ? 1 : 0;
-      const bD = b.phase === "destroyed" ? 1 : 0;
-      return aD - bD;
-    });
+    nestUnderParents(
+      [...list].sort((a, b) => {
+        const aD = a.phase === "destroyed" ? 1 : 0;
+        const bD = b.phase === "destroyed" ? 1 : 0;
+        return aD - bD;
+      }),
+    );
   // Named groups alphabetically, then ungrouped
   const namedKeys = Array.from(grouped.keys())
     .filter((g): g is string => g !== null)

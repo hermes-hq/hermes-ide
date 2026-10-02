@@ -51,6 +51,22 @@ pub struct HostFallback {
 #[derive(Default)]
 pub struct SessionHostState {
     pub quit_decision: Mutex<Option<bool>>,
+    /// Tasks waiting in the frontend's task queue (N22). They are kept for
+    /// the next start; a quit with some asks first, so the person is told.
+    pub queued_tasks: std::sync::atomic::AtomicUsize,
+}
+
+/// Whether a quit asks first: undecided, and an agent at work or tasks waiting.
+fn quit_asks(decision: Option<bool>, working: usize, queued: usize) -> bool {
+    decision.is_none() && (working > 0 || queued > 0)
+}
+
+/// The frontend's task queue changed: how many tasks wait now.
+#[tauri::command]
+pub fn session_host_set_queued(host_state: State<'_, SessionHostState>, count: usize) {
+    host_state
+        .queued_tasks
+        .store(count, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Where the host's files live for one app instance.
@@ -534,13 +550,19 @@ pub fn on_exit_requested(app: &AppHandle) -> bool {
     }
     // Every session quitting would interrupt, hosted or not (XP-05): one in
     // this process ends with the app, so it is asked about as well (the
-    // dialog then offers no "keep running" for it).
+    // dialog then offers no "keep running" for it). Tasks waiting in the
+    // queue are kept for the next start, and the quit asks so the person is
+    // told (N22).
     let working = working_sessions(app, &state, false);
-    if working.is_empty() {
+    let queued = app
+        .try_state::<SessionHostState>()
+        .map(|s| s.queued_tasks.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(0);
+    if !quit_asks(decision, working.len(), queued) {
         return false;
     }
     log::info!(
-        "[session-host] quit requested with {} working session(s) ({} hosted); asking",
+        "[session-host] quit requested with {} working session(s) ({} hosted) and {queued} queued task(s); asking",
         working.len(),
         working.iter().filter(|s| s.hosted).count()
     );
@@ -1028,6 +1050,18 @@ mod tests {
             assert!(!reported_busy(Some(kind)), "{kind:?}");
         }
         assert!(!reported_busy(None));
+    }
+
+    #[test]
+    fn a_quit_asks_while_agents_work_or_tasks_wait_until_answered() {
+        assert!(!quit_asks(None, 0, 0), "nothing to say: quit at once");
+        assert!(quit_asks(None, 1, 0), "an agent at work");
+        assert!(
+            quit_asks(None, 0, 2),
+            "tasks waiting in the queue, no agent at work"
+        );
+        assert!(!quit_asks(Some(true), 1, 2), "answered: keep running");
+        assert!(!quit_asks(Some(false), 0, 2), "answered: stop");
     }
 
     #[test]

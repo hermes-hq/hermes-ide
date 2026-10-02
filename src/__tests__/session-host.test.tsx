@@ -106,7 +106,7 @@ describe("QuitWithAgentsDialog", () => {
       />,
     );
     expect(screen.getByRole("dialog")).toHaveTextContent("Agents and programs are still running");
-    expect(screen.getByRole("dialog")).toHaveTextContent("2 queued tasks have not started yet.");
+    expect(screen.getByRole("dialog")).toHaveTextContent("2 tasks are waiting in the queue — they will start next time Hermes opens.");
   });
 
   it("without the session host, quitting stops them: no Keep running, Enter cancels (XP-05)", () => {

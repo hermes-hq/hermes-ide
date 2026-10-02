@@ -9,9 +9,8 @@
 //          - a real mouse click puts the OS focus in the task field; then,
 //            with real key presses only: Tab reaches the agent chip, Tab Tab
 //            Tab the approval chip; Return opens its menu on the current mode;
-//            Tab moves to Plan first and Return picks it; Escape closes the
-//            menu with the focus back on the chip; Shift+Tab ×4 is back in the
-//            task field; Return launches.
+//            Tab moves to Plan first and Return picks it, which closes the
+//            menu and gives the task field the keyboard; Return launches.
 //          - the agent started with Plan first and the task.
 //
 // Real OS key presses (xdotool under Xvfb on Linux, SendInput on Windows) run
@@ -119,12 +118,11 @@ try {
   await expectFocus(bridge, "mode:plan", "Tab moves to Plan first");
   await press(pid, "return");
   await bridge.waitFor("Plan first chosen", `return /^Plan first/.test(e2e.norm(e2e.first('[data-chip="approval"]')?.innerText ?? ""));`, { timeoutMs: 3_000 });
-  await press(pid, "escape");
+  // A pick closes the menu and gives the task field the keyboard, so the
+  // next Return launches (QA SOLO-10).
   await bridge.waitFor("the menu to close", `return !e2e.first(".task-launcher-menu");`, { timeoutMs: 3_000 });
-  await expectFocus(bridge, "chip:approval", "Escape closes the menu and leaves the focus on the chip");
+  await expectFocus(bridge, "task", "the pick closes the menu and the task field has the keyboard");
   assert(await bridge.eval(`return !!e2e.first(".task-launcher-sheet");`), "the sheet stays open");
-  for (let i = 0; i < 4; i++) await press(pid, "shift+tab");
-  await expectFocus(bridge, "task", "Shift+Tab ×4 is back in the task field");
   const n0 = fx.records().length;
   await press(pid, "return");
   await bridge.waitFor("the sheet to close", `return !e2e.first(".task-launcher-sheet");`, { timeoutMs: 30_000 });

@@ -24,7 +24,7 @@ import { fmt, isMac, PLATFORM } from "./utils/platform";
 import { matchAppShortcut } from "./utils/shortcuts";
 import { shortcutLabel } from "./utils/keymap";
 import { installAppChordListener } from "./hooks/appChordListener";
-import { triggerMenuBarActionFromKeyboard } from "./hooks/nativeMenuBridge";
+import { isMenuGated, triggerMenuBarActionFromKeyboard } from "./hooks/nativeMenuBridge";
 import { createProject } from "./api/projects";
 import { SessionProvider, useSession, useActiveSession, useSessionList, useSidebarOrderedSessions } from "./state/SessionContext";
 import { workingSessionIds } from "./state/tileLayout";
@@ -53,7 +53,7 @@ import { CloseSessionDialog } from "./components/CloseSessionDialog";
 import { LandSheetHost } from "./land/LandSheetHost";
 import { QuitWithAgentsDialog, type WorkingSession } from "./components/QuitWithAgentsDialog";
 import { DialogGalleryHost } from "./e2e/DialogGalleryHost";
-import { sessionHostQuit } from "./api/sessions";
+import { sessionHostQuit, sessionHostSetQueued } from "./api/sessions";
 import { FlowToast } from "./components/FlowToast";
 import { copyContextToClipboard } from "./utils/copyContextToClipboard";
 import { ProjectPicker } from "./components/ProjectPicker";
@@ -88,8 +88,8 @@ import { OnboardingGate } from "./components/OnboardingGate";
 import { getAgent } from "./catalog/agentCatalog";
 import { getProjectsOrdered, getSessionProjects } from "./api/projects";
 import { getSessionWorktreeInfo } from "./api/git";
-import { taskTrackPrompt, writeTaskFeatureFile } from "./api/launcher";
-import { handleUndeliveredTask, launchTask, normalizeRepoPath, type UndeliveredTask } from "./launcher/launchTask";
+import { probeTaskRepo, taskTrackPrompt, writeTaskDoneWhen, writeTaskFeatureFile } from "./api/launcher";
+import { finishQueuedLaunch, handleUndeliveredTask, launchTask, normalizeRepoPath, type LaunchTaskDeps, type UndeliveredTask } from "./launcher/launchTask";
 import { TASK_LAUNCHES_KEY } from "./launcher/taskLauncher";
 import { LauncherReopen } from "./launcher/launcherReopen";
 import type { TaskLaunchRequest, TaskLaunchResult } from "./components/TaskLauncher";
@@ -97,6 +97,8 @@ import { WhatsNewGate } from "./components/WhatsNewGate";
 import { ContainedErrorBoundary } from "./components/ContainedErrorBoundary";
 import { PanelResizeHandle } from "./components/PanelResizeHandle";
 import { useFleetControls } from "./fleet/useFleetControls";
+import { TASK_QUEUE_KEY, getOccupancy, listQueuedTasks, restoreTaskQueue, serializeTaskQueue, startTaskNow, subscribeTaskQueue, type QueuedTask } from "./fleet/taskQueue";
+import { useOverlay } from "./state/overlays";
 import type { CreateSessionOpts } from "./types/session";
 
 // Loaded on demand, off the startup path: the editor (CodeMirror) with the
@@ -198,7 +200,7 @@ function AppContent() {
   // Task launcher (F15, flag taskLauncher): ⌘N opens it; the creator above
   // stays at ⌘⇧N for SSH, tmux and existing branches.
   // `gen` names the sheet: a new one (fresh state) mounts when it changes.
-  const [taskLauncherOpen, setTaskLauncherOpen] = useState<false | { repo: string | null; gen: number }>(false);
+  const [taskLauncherOpen, setTaskLauncherOpen] = useState<false | { repo: string | null; gen: number; focus?: number }>(false);
   const taskLauncherOpenRef = useRef(taskLauncherOpen);
   taskLauncherOpenRef.current = taskLauncherOpen;
   const launcherGenRef = useRef(0);
@@ -638,6 +640,8 @@ function AppContent() {
     const handler = (e: KeyboardEvent) => {
       const action = matchAppShortcut(e);
       if (!action) return;
+      // The unfinished first-run welcome owns the window (see setMenuGate).
+      if (isMenuGated()) return;
 
       // Cmd+Shift+P — always toggles command palette (alternative shortcut)
       if (action === "app.command-palette-alt") {
@@ -954,12 +958,20 @@ function AppContent() {
   activeIdRef.current = state.activeSessionId;
   /** A queued task starts in the background: whatever the user is looking
    *  at stays in front. */
-  const startQueuedTask = useCallback(async (opts: CreateSessionOpts) => {
+  // The launcher's launch steps (set below), for a launcher task that waited in the queue.
+  const launchDepsRef = useRef<(() => LaunchTaskDeps) | null>(null);
+  const startQueuedTask = useCallback(async (opts: CreateSessionOpts, task: QueuedTask) => {
     const before = activeIdRef.current;
     const session = await createSession(opts);
     if (session) {
       if (!layoutRootRef.current) dispatch({ type: "INIT_PANE", sessionId: session.id });
       else if (before) dispatch({ type: "SET_ACTIVE", id: before });
+      // A task from the ⌘N launcher finishes its launch as one that started
+      // at once: its feature.md, its checks, its record, its pairing.
+      const deps = launchDepsRef.current?.();
+      if (task.launch && deps) {
+        void finishQueuedLaunch(task.launch, session.id, deps).catch((err) => console.warn("[App] a queued task's launch did not finish:", err));
+      }
     }
     return session;
   }, [createSession, dispatch]);
@@ -987,13 +999,27 @@ function AppContent() {
     if (!fresh && !launcherReopen.requestOpen(!!taskLauncherOpenRef.current)) return;
     // Opened again (⌘N, or the configuration it waited for closed): nothing waits any more.
     launcherReturnRef.current = null;
+    // Already open: it keeps its state and takes the keyboard back.
+    if (taskLauncherOpenRef.current && !fresh) {
+      setTaskLauncherOpen((cur) => (cur ? { ...cur, focus: (cur.focus ?? 0) + 1 } : cur));
+      return;
+    }
     const s = activeSessionRef.current;
     let repo: string | null = null;
-    if (s && !s.ssh_info) {
+    // The active session's repository, when it is in one. A plain shell in
+    // the home folder or a sign-in terminal is not a place to start a task:
+    // the launcher then starts on the most used project.
+    if (s && !s.ssh_info && !s.agent_launch?.login) {
+      let candidate = s.working_directory;
       try {
-        repo = (await getSessionProjects(s.id))[0]?.path ?? s.working_directory;
+        candidate = (await getSessionProjects(s.id))[0]?.path ?? s.working_directory;
       } catch {
-        repo = s.working_directory;
+        // the session's own folder
+      }
+      try {
+        repo = candidate ? (await probeTaskRepo(candidate)).git_root : null;
+      } catch {
+        repo = null;
       }
     }
     setTaskLauncherOpen((cur) => ({ repo, gen: cur && !fresh ? cur.gen : ++launcherGenRef.current }));
@@ -1016,6 +1042,51 @@ function AppContent() {
     setSettingsOpen(null);
     if (launcherReturnRef.current?.kind === "settings") void openTaskLauncher();
   }, [openTaskLauncher]);
+
+  // One overlay at a time (state/overlays.ts): Settings, Keyboard Shortcuts,
+  // the cost dashboard and the New Session wizard close when another overlay
+  // opens, and opening one of them closes the others (the launcher keeps its
+  // draft). Closed this way, Settings does not bring the launcher back.
+  useOverlay("settings", !!settingsOpen, () => {
+    launcherReturnRef.current = null;
+    setSettingsOpen(null);
+  });
+  useOverlay("shortcuts", shortcutsOpen, () => setShortcutsOpen(false));
+  useOverlay("cost", costDashboardOpen, () => setCostDashboardOpen(false));
+  useOverlay("creator", !!sessionCreatorOpen, () => {
+    setSessionCreatorOpen(false);
+    pendingSplit.current = null;
+  });
+
+  // N22: tasks waiting in the queue are kept while Hermes is closed and come
+  // back when it opens (setting task_queue), in their order.
+  const [queuedCount, setQueuedCount] = useState(0);
+  useEffect(() => {
+    let restored = false;
+    let cancelled = false;
+    getSetting(TASK_QUEUE_KEY)
+      .catch(() => "")
+      .then((raw) => {
+        if (cancelled) return;
+        restoreTaskQueue(raw);
+        restored = true;
+        setQueuedCount(listQueuedTasks().length);
+      });
+    const off = subscribeTaskQueue(() => {
+      const list = listQueuedTasks();
+      setQueuedCount(list.length);
+      // Not before the stored queue was read: writing first would lose it.
+      if (restored) setSetting(TASK_QUEUE_KEY, serializeTaskQueue(list)).catch((err) => console.warn("[App] could not keep the task queue:", err));
+    });
+    return () => {
+      cancelled = true;
+      off();
+    };
+  }, []);
+  // The quit asks first when tasks wait in the queue, also with no agent at work.
+  useEffect(() => {
+    sessionHostSetQueued(queuedCount).catch(() => {});
+  }, [queuedCount]);
   /** A sign-in from the launcher (or from Settings opened from it): the launcher waits for that terminal. */
   const launcherWaitsForSignIn = useCallback((): boolean => {
     const from = !!taskLauncherOpenRef.current || launcherReturnRef.current?.kind === "settings";
@@ -1079,40 +1150,69 @@ function AppContent() {
     signInStarted(fromLauncher, session?.id ?? null);
   }, [createSession, showSession, t, launcherWaitsForSignIn, signInStarted]);
 
+  /** What a launcher task's launch does to the app (launchTask's effects), for now or for when it leaves the queue. */
+  const launchDeps = useCallback((): LaunchTaskDeps => ({
+    projectFor: async (root) => {
+      const want = normalizeRepoPath(root, PLATFORM === "win");
+      const known = (await getProjectsOrdered()).find((p) => normalizeRepoPath(p.path, PLATFORM === "win") === want);
+      return known ? known.id : (await createProject(root, null)).id;
+    },
+    createSession,
+    // With a running-agents or memory cap and no free slot, the task
+    // waits in the queue instead of starting (N22).
+    queue: (opts, label, launch) => fleet.queueIfFull(opts, label, launch),
+    place: (sessionId, index, firstSessionId) => {
+      const paneId = layoutRef.current.focusedPaneId;
+      if (index === 0 || !firstSessionId || !paneId) {
+        showSession(sessionId);
+        return;
+      }
+      // The same task on a second agent opens beside the first. Creating
+      // it put it into the focused pane, so that pane gets the first back.
+      for (const action of splitAfterCreateActions({ paneId, sessionId: firstSessionId }, { paneId, direction: "horizontal" }, sessionId)) {
+        dispatch(action);
+      }
+    },
+    // A linked worktree only: a session on the repository's own checkout has none.
+    worktreePath: async (sessionId, projectId) => {
+      const info = await getSessionWorktreeInfo(sessionId, projectId);
+      return info && !info.isMainWorktree ? info.worktreePath : null;
+    },
+    writeFeatureFile: writeTaskFeatureFile,
+    writeDoneWhen: writeTaskDoneWhen,
+    trackPrompt: taskTrackPrompt,
+    copyText: (text) => navigator.clipboard.writeText(text),
+    readRecords: () => getSetting(TASK_LAUNCHES_KEY).catch(() => ""),
+    writeRecords: (raw) => setSetting(TASK_LAUNCHES_KEY, raw),
+    now: () => Date.now(),
+    notify: (message) => toastStoreRef.current.addToast({ message, type: "error", duration: 10000 }),
+  }), [createSession, dispatch, showSession, fleet]);
+  launchDepsRef.current = launchDeps;
+
   const runTaskLaunch = useCallback(async (req: TaskLaunchRequest): Promise<TaskLaunchResult> => {
-    const result = await launchTask(req, {
-      projectFor: async (root) => {
-        const want = normalizeRepoPath(root, PLATFORM === "win");
-        const known = (await getProjectsOrdered()).find((p) => normalizeRepoPath(p.path, PLATFORM === "win") === want);
-        return known ? known.id : (await createProject(root, null)).id;
-      },
-      createSession,
-      // With a running-agents or memory cap and no free slot, the task
-      // waits in the queue instead of starting (N22).
-      queue: (opts, label) => fleet.queueIfFull(opts, label),
-      place: (sessionId, index, firstSessionId) => {
-        const paneId = layoutRef.current.focusedPaneId;
-        if (index === 0 || !firstSessionId || !paneId) {
-          showSession(sessionId);
-          return;
-        }
-        // The same task on a second agent opens beside the first. Creating
-        // it put it into the focused pane, so that pane gets the first back.
-        for (const action of splitAfterCreateActions({ paneId, sessionId: firstSessionId }, { paneId, direction: "horizontal" }, sessionId)) {
-          dispatch(action);
-        }
-      },
-      worktreePath: async (sessionId, projectId) => (await getSessionWorktreeInfo(sessionId, projectId))?.worktreePath ?? null,
-      writeFeatureFile: writeTaskFeatureFile,
-      trackPrompt: taskTrackPrompt,
-      copyText: (text) => navigator.clipboard.writeText(text),
-      readRecords: () => getSetting(TASK_LAUNCHES_KEY).catch(() => ""),
-      writeRecords: (raw) => setSetting(TASK_LAUNCHES_KEY, raw),
-      now: () => Date.now(),
-    });
+    const result = await launchTask(req, launchDeps());
     if (!result.ok) return false;
-    return result.sessionIds.length === 0 && result.queued > 0 ? "queued" : true;
-  }, [createSession, dispatch, showSession, fleet]);
+    if (result.sessionIds.length === 0 && result.queued > 0) {
+      // Nothing started: said on screen (the queue may be out of view), with a way to start it anyway.
+      const running = getOccupancy().sessionIds.length;
+      toastStoreRef.current.addToast({
+        message: running === 0 ? t("fleet.queuedToastSlot") : running === 1 ? t("fleet.queuedToastOne") : t("fleet.queuedToast", { count: running }),
+        type: "info",
+        duration: 8000,
+        actions: [
+          {
+            label: t("fleet.queueStartNow"),
+            primary: true,
+            onClick: () => {
+              for (const q of listQueuedTasks()) if (q.launch?.launchId === result.launchId) startTaskNow(q.id);
+            },
+          },
+        ],
+      });
+      return "queued";
+    }
+    return true;
+  }, [launchDeps, t]);
 
   /** A launch from the ⌘N sheet, which closes itself once it is done (unless it stays open). */
   const runSheetLaunch = useCallback(async (req: TaskLaunchRequest): Promise<TaskLaunchResult> => {
@@ -1678,7 +1778,9 @@ function AppContent() {
         <Suspense fallback={null}>
         <CommandPalette
           onClose={() => dispatch({ type: "TOGGLE_PALETTE" })}
-          sessions={sessions}
+          sessions={sidebarSessions}
+          onCloseSession={state.activeSessionId ? () => { if (state.activeSessionId) requestCloseSession(state.activeSessionId); } : undefined}
+          onCloseSessionRemoveWorktree={state.activeSessionId ? () => { if (state.activeSessionId) requestCloseSession(state.activeSessionId); } : undefined}
           activeSessionId={state.activeSessionId}
           onSelectSession={setActive}
           onNewSession={openNewSession}
@@ -1821,9 +1923,10 @@ function AppContent() {
           <TaskLauncher
             key={taskLauncherOpen.gen}
             defaultRepo={taskLauncherOpen.repo}
+            focusNonce={taskLauncherOpen.focus}
             onClose={onTaskLauncherClosed}
             onOpenAdvanced={openAdvancedCreator}
-            onSignIn={(agentId) => void signInAgent(agentId)}
+            onSignIn={(agentId, accountId) => void (accountId ? signInAccount(agentId, accountId) : signInAgent(agentId))}
             onManageAccounts={() => openSettings("agents")}
             onStartOver={() => setTaskLauncherOpen((cur) => (cur ? { ...cur, gen: ++launcherGenRef.current } : cur))}
             onLaunch={runSheetLaunch}
@@ -1909,7 +2012,7 @@ function AppContent() {
 
       <OnboardingGate
         onLaunch={runTaskLaunch}
-        onSignIn={(agentId) => void signInAgent(agentId)}
+        onSignIn={(agentId, accountId) => void (accountId ? signInAccount(agentId, accountId) : signInAgent(agentId))}
         onOpenShell={() => void createSessionDirect()}
       />
       <LandSheetHost />
@@ -1931,9 +2034,10 @@ function AppContent() {
         />
       )}
 
-      {quitAsk && quitAsk.length > 0 && (
+      {quitAsk && (quitAsk.length > 0 || queuedCount > 0) && (
         <QuitWithAgentsDialog
           sessions={quitAsk}
+          queuedCount={queuedCount}
           onKeep={() => { void answerQuit(true); }}
           onStop={() => { void answerQuit(false); }}
           onCancel={() => setQuitAsk(null)}

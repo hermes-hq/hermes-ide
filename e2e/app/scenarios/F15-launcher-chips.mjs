@@ -147,6 +147,8 @@ try {
   assert(JSON.stringify(modes.map((m) => m.id)) === JSON.stringify(["default", "acceptEdits", "plan", "auto", "dontAsk", "bypassPermissions"]), "Claude's modes, in order");
   assert(modes.find((m) => m.id === "bypassPermissions")?.danger && /Skip all/.test(modes.find((m) => m.id === "bypassPermissions").text), "Skip all is marked dangerous");
   await bridge.click('.task-launcher-approval-modes [data-mode="bypassPermissions"]');
+  // A pick closes the menu; open again to read the chosen mode's note.
+  await openChip(bridge, "approval");
   const skip = await bridge.eval(`return { note: e2e.norm(e2e.first(".task-launcher-approval-note")?.innerText ?? ""), red: !!e2e.first(".task-launcher-approval-note.danger"), flag: e2e.first(".task-launcher-approval code")?.textContent };`);
   assert(skip.red && /Never asks, for anything/.test(skip.note), `its note, in red: "${skip.note}"`);
   assert(skip.flag === "--permission-mode bypassPermissions", `and its flag: ${skip.flag}`);
@@ -193,11 +195,11 @@ try {
   const [claudeLine, codexLine] = st.preview.split(" + ");
   const inOrder = (line, words) => words.every((w, i) => line.indexOf(w) >= 0 && (i === 0 || line.indexOf(w) > line.indexOf(words[i - 1])));
   assert(
-    inOrder(claudeLine, [...(PREFIX ? [PREFIX] : []), "claude", "--permission-mode plan", "--model opus", "--effort high", `"${TASK}"`, "--channels plugin:proof", "--extra-proof"]),
+    inOrder(claudeLine, [...(PREFIX ? [PREFIX] : []), "claude", "--permission-mode plan", "--model opus", "--effort high", `'${TASK}'`, "--channels plugin:proof", "--extra-proof"]),
     `Hermes will run: the claude line with every choice (${claudeLine})`,
   );
   assert(
-    inOrder(codexLine ?? "", ["codex", "--dangerously-bypass-approvals-and-sandbox", `-m ${CODEX_MODEL}`, "model_reasoning_effort", `"${TASK}"`]) && /model_reasoning_effort=\\?"?high/.test(codexLine),
+    inOrder(codexLine ?? "", ["codex", "--dangerously-bypass-approvals-and-sandbox", `-m ${CODEX_MODEL}`, "model_reasoning_effort", `'${TASK}'`]) && /model_reasoning_effort=\\?"?high/.test(codexLine),
     `and the codex line with its own (${codexLine})`,
   );
   assert(/in worktree hermes\/fix-the-flaky-login-test from develop/.test(st.preview), "and where: a new worktree from develop");

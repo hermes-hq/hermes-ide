@@ -30,20 +30,59 @@ export const MAX_TASK_LAUNCHES = 200;
 /** Words of the task that make up its branch name. */
 const SLUG_WORDS = 6;
 
+/** Letters a plain accent strip would lose or mangle, spelled the way their language writes them without the mark. */
+const TRANSLITERATE: Record<string, string> = { ä: "ae", ö: "oe", ü: "ue", ß: "ss", Ä: "Ae", Ö: "Oe", Ü: "Ue", ẞ: "SS" };
+
 /**
  * Branch-name slug for a task: its first few words, e.g. "Fix the flaky
- * login test on CI" → "fix-the-flaky-login-test-on". Empty when the task has
- * no letters or digits at all.
+ * login test on CI" → "fix-the-flaky-login-test-on". German umlauts and ß
+ * are spelled out ("Größe prüfen" → "groesse-pruefen"). Empty when the task
+ * has no letters or digits at all.
  */
 export function taskSlug(task: string): string {
-  const words = task.trim().split(/\s+/).slice(0, SLUG_WORDS).join(" ");
+  const words = task
+    .trim()
+    .split(/\s+/)
+    .slice(0, SLUG_WORDS)
+    .join(" ")
+    .replace(/[äöüßÄÖÜẞ]/g, (c) => TRANSLITERATE[c] ?? c);
   const slug = slugify(words, 40);
   return isFeatureSlug(slug) ? slug : "";
 }
 
-/** The branch a task gets: hermes/<slug>, or hermes/task when it has no slug. */
-export function taskBranch(task: string): string {
-  return `hermes/${taskSlug(task) || "task"}`;
+/**
+ * The branch a task gets: hermes/<slug>. A task with no letters or digits
+ * to name it (emoji, a script slugify cannot spell) gets hermes/task-<id>,
+ * `id` being a short id the sheet keeps for its lifetime; without one,
+ * hermes/task.
+ */
+export function taskBranch(task: string, fallbackId?: string): string {
+  const slug = taskSlug(task);
+  if (slug) return `hermes/${slug}`;
+  return fallbackId ? `hermes/task-${fallbackId}` : "hermes/task";
+}
+
+/** Six hex digits, for the branch of a task with nothing in it to name it after. */
+export function shortTaskId(random: () => number = Math.random): string {
+  let s = "";
+  for (let i = 0; i < 6; i++) s += Math.floor(random() * 16).toString(16);
+  return s;
+}
+
+/**
+ * The branch the launcher makes up for a task: hermes/<slug>, or the first
+ * free hermes/<slug>-2, -3… when that one is taken (letter case included,
+ * see findBranchClash). The person never has to name a branch to run the
+ * same task twice.
+ */
+export function autoTaskBranch(task: string, branches: readonly string[], fallbackId?: string): string {
+  const base = taskBranch(task, fallbackId);
+  const taken = (b: string) => findBranchClash(b, branches) !== null || branchNameProblem(b, branches) !== null;
+  if (!taken(base)) return base;
+  // A folder spelled in another letter case (`Hermes/…`) is that folder: its spelling is kept.
+  const free = freeBranchFor(base, branches);
+  if (free && !taken(free)) return free;
+  return nextFreeBranch(base, taken);
 }
 
 /** The branch of the same task on a second agent: <branch>-<agent>. */
@@ -105,6 +144,42 @@ export function isUsableBranchName(branch: string): boolean {
   return true;
 }
 
+/** Longest branch name the launcher accepts: its worktree folder is named after it, and file names stop at 255 bytes. */
+export const MAX_BRANCH_LENGTH = 200;
+
+/**
+ * Why git (or the file system under the worktree) would refuse a branch
+ * name that passes isUsableBranchName, or null:
+ *   - "folder": the name is a folder of existing branches (`release` next to `release/2.3`);
+ *   - "under-branch": a folder of the name is an existing branch (`feature/inbox/sub` next to `feature/inbox`);
+ *   - "dot-part": a part starts with "." (`hermes/.wip`);
+ *   - "lock-part": a part ends with ".lock";
+ *   - "too-long": longer than MAX_BRANCH_LENGTH.
+ * Folders compare without letter case (macOS and Windows keep one folder).
+ */
+export type BranchNameProblem =
+  | { kind: "folder"; existing: string }
+  | { kind: "under-branch"; existing: string }
+  | { kind: "dot-part" }
+  | { kind: "lock-part" }
+  | { kind: "too-long"; max: number };
+
+export function branchNameProblem(branch: string, branches: readonly string[]): BranchNameProblem | null {
+  const b = branch.trim();
+  if (!b) return null;
+  const parts = b.split("/");
+  if (parts.some((p) => p.startsWith("."))) return { kind: "dot-part" };
+  if (parts.some((p) => p.toLowerCase().endsWith(".lock"))) return { kind: "lock-part" };
+  if (b.length > MAX_BRANCH_LENGTH) return { kind: "too-long", max: MAX_BRANCH_LENGTH };
+  const lower = b.toLowerCase();
+  for (const other of branches) {
+    const o = other.toLowerCase();
+    if (o.startsWith(`${lower}/`)) return { kind: "folder", existing: other };
+    if (lower.startsWith(`${o}/`)) return { kind: "under-branch", existing: other };
+  }
+  return null;
+}
+
 /** The session's name: the task's first line, cut to fit the sidebar. */
 export function taskLabel(task: string, max = 48): string {
   const first = task.trim().split(/\r?\n/)[0]?.trim() ?? "";
@@ -132,21 +207,43 @@ export function agentTakesFirstPrompt(agentId: string): boolean {
 
 export type BlockingRow =
   | { kind: "not-installed"; agentId: string }
-  | { kind: "signed-out"; agentId: string }
+  /**
+   * The agent cannot run signed out. `accountId`: an account Hermes added
+   * (not the CLI's default profile) is the one signed out.
+   */
+  | { kind: "signed-out"; agentId: string; accountId?: string }
   | { kind: "no-repo" }
-  | { kind: "not-git"; path: string }
+  /** `missing`: nothing at that path; `file`: a file, not a folder. */
+  | { kind: "not-git"; path: string; missing?: "missing" | "file" }
+  /** The repository has no commit yet: a new worktree has nothing to start from. */
+  | { kind: "no-commits" }
   /**
    * The branch to create is taken: by a branch of that exact name, or by one
    * whose name (or folder) differs only in letter case, which macOS and
    * Windows treat as the same (`existing` is that branch's name).
    */
   | { kind: "branch-exists"; branch: string; suggestion: string | null; existing: string; clash: BranchClash["kind"] }
-  | { kind: "bad-branch"; branch: string }
+  /** `problem`: why git would refuse a name that looks fine (see branchNameProblem). */
+  | { kind: "bad-branch"; branch: string; problem?: BranchNameProblem }
   | { kind: "low-disk"; freeBytes: number; requiredBytes: number };
+
+export interface LaunchCheckAgent {
+  id: string;
+  /** The branch to create ("" when the agent creates none). */
+  branch: string;
+  /** The account the agent runs on; the CLI's own profile when absent or "default". */
+  accountId?: string | null;
+  /**
+   * Whether that account is signed in, as the capability backend says
+   * (undefined: not known yet). Only an added account is judged by it: the
+   * doctor checks the default profile.
+   */
+  accountSignedIn?: boolean;
+}
 
 export interface LaunchCheckInput {
   /** The agents the task runs on (the second agent, when one is chosen, too). */
-  agents: readonly { id: string; branch: string }[];
+  agents: readonly LaunchCheckAgent[];
   /** Doctor rows by agent id; an agent with no row yet is not judged. */
   doctor: Readonly<Record<string, DoctorRow | undefined>>;
   repoPath: string;
@@ -155,6 +252,13 @@ export interface LaunchCheckInput {
   /** The local branches of the repository. */
   branches: readonly string[];
   disk: { freeBytes: number | null; requiredBytes: number; belowThreshold: boolean } | null;
+  /** What the probe saw at the path (absent: not known, nothing is said). */
+  folder?: { exists: boolean; isDir: boolean; hasCommits: boolean } | null;
+}
+
+/** An added account (not the CLI's default profile). */
+export function isAddedAccount(accountId: string | null | undefined): accountId is string {
+  return !!accountId && accountId !== "default";
 }
 
 /**
@@ -166,17 +270,30 @@ export function blockingRows(input: LaunchCheckInput): BlockingRow[] {
   const rows: BlockingRow[] = [];
   const repo = input.repoPath.trim();
   if (!repo) rows.push({ kind: "no-repo" });
-  else if (input.gitRoot === null) rows.push({ kind: "not-git", path: repo });
-  for (const { id } of input.agents) {
+  else if (input.gitRoot === null) {
+    const missing = input.folder && !input.folder.exists ? "missing" : input.folder && !input.folder.isDir ? "file" : undefined;
+    rows.push(missing ? { kind: "not-git", path: repo, missing } : { kind: "not-git", path: repo });
+  } else if (input.gitRoot && input.folder && !input.folder.hasCommits && input.agents.length > 0) {
+    // (The agents given here are the ones that create a branch.)
+    rows.push({ kind: "no-commits" });
+  }
+  for (const { id, accountId, accountSignedIn } of input.agents) {
     const row = input.doctor[id];
     if (!row) continue;
     if (!row.installed) rows.push({ kind: "not-installed", agentId: id });
-    else if (row.signed_in === "no") rows.push({ kind: "signed-out", agentId: id });
+    // The doctor speaks for the CLI's default profile only; an account
+    // Hermes added has its own sign-in state.
+    else if (isAddedAccount(accountId)) {
+      if (accountSignedIn === false) rows.push({ kind: "signed-out", agentId: id, accountId });
+    } else if (row.signed_in === "no") rows.push({ kind: "signed-out", agentId: id });
   }
   if (repo && input.gitRoot) {
     for (const { branch } of input.agents) {
+      const problem = isUsableBranchName(branch) ? branchNameProblem(branch, input.branches) : null;
       if (!isUsableBranchName(branch)) {
         rows.push({ kind: "bad-branch", branch });
+      } else if (problem) {
+        rows.push({ kind: "bad-branch", branch, problem });
       } else {
         const clash = findBranchClash(branch, input.branches);
         if (clash) {
@@ -242,6 +359,11 @@ export interface TaskLaunchRecord {
   /** The session started for the same task on a second agent, if any. */
   pairedWith: string | null;
   createdAt: number;
+  /**
+   * One id per launch (both agents of an "Also on" share it), so a second
+   * agent that started later from the task queue is paired with the first.
+   */
+  launchId?: string;
 }
 
 export function parseTaskLaunches(raw: string | null | undefined): TaskLaunchRecord[] {
@@ -263,10 +385,22 @@ export function parseTaskLaunches(raw: string | null | undefined): TaskLaunchRec
   );
 }
 
-/** Adds records, newest last, keeping at most MAX_TASK_LAUNCHES. */
+/**
+ * Adds records, newest last, keeping at most MAX_TASK_LAUNCHES. Two records
+ * of one launch (the same launchId: the task on two agents, one of which
+ * may have waited in the queue) are paired with each other.
+ */
 export function appendTaskLaunches(existing: readonly TaskLaunchRecord[], added: readonly TaskLaunchRecord[]): TaskLaunchRecord[] {
   const ids = new Set(added.map((r) => r.sessionId));
-  return [...existing.filter((r) => !ids.has(r.sessionId)), ...added].slice(-MAX_TASK_LAUNCHES);
+  const all = [...existing.filter((r) => !ids.has(r.sessionId)), ...added].map((r) => ({ ...r }));
+  for (const r of all) {
+    if (!r.launchId || !ids.has(r.sessionId)) continue;
+    const other = all.find((o) => o !== r && o.launchId === r.launchId);
+    if (!other) continue;
+    r.pairedWith = other.sessionId;
+    other.pairedWith = r.sessionId;
+  }
+  return all.slice(-MAX_TASK_LAUNCHES);
 }
 
 // ─── Defaults ───────────────────────────────────────────────────────────

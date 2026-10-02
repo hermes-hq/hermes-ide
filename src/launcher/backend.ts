@@ -55,7 +55,8 @@ export interface SessionLaunch {
 }
 
 export interface LauncherBackend {
-  capabilities(agentId: string, accountId?: string | null): Promise<AgentCapabilities>;
+  /** `refresh`: asked of the CLI again, not answered from the cache (Check again). */
+  capabilities(agentId: string, accountId?: string | null, refresh?: boolean): Promise<AgentCapabilities>;
   validate(choice: LaunchChoice): Promise<LaunchValidation>;
   preview(choice: LaunchChoice, task: string): Promise<string>;
   usual(repo: string | null): Promise<UsualLaunchChoice>;
@@ -121,7 +122,7 @@ export function validateChoice(choice: LaunchChoice, caps: AgentCapabilities | u
 }
 
 export const capabilityBackend: LauncherBackend = {
-  capabilities: (agentId, accountId) => getAgentCapabilities(agentId, accountId ?? null),
+  capabilities: (agentId, accountId, refresh) => getAgentCapabilities(agentId, accountId ?? null, refresh ?? false),
   validate: validateLaunch,
   preview: previewLaunch,
   usual: getUsualLaunchChoice,

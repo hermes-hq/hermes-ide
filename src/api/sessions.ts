@@ -86,6 +86,11 @@ export function sessionHostQuit(keepRunning: boolean): Promise<void> {
   return invoke("session_host_quit", { keepRunning });
 }
 
+/** How many tasks wait in the queue: a quit then asks first (and says they start next time). */
+export function sessionHostSetQueued(count: number): Promise<void> {
+  return invoke("session_host_set_queued", { count });
+}
+
 /**
  * Whether a quit has to ask first: the flag is on, a hosted session has an
  * agent at work, and nobody has answered yet.

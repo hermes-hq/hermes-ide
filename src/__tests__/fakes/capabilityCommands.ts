@@ -142,6 +142,8 @@ export interface FakeCapabilityCommands {
   failing: Map<string, string>;
   /** Per-agent overrides of the reported capabilities. */
   override: Map<string, (caps: AgentCapabilities) => AgentCapabilities>;
+  /** Overrides of what get_agent_capabilities answers for one account ("agent\naccount"). */
+  accountOverride: Map<string, (caps: AgentCapabilities) => AgentCapabilities>;
   /** The command's answer, or undefined when it is not a capability command. */
   handle(cmd: string, args: Record<string, unknown>): { value: unknown } | undefined;
   calls: { cmd: string; args: Record<string, unknown> }[];
@@ -157,6 +159,7 @@ export function fakeCapabilityCommands(doctor: () => DoctorRow[]): FakeCapabilit
     dismissed: [],
     failing: new Map(),
     override: new Map(),
+    accountOverride: new Map(),
     calls: [],
     handle(cmd, args) {
       const caps = (agentId: string) => {
@@ -176,7 +179,8 @@ export function fakeCapabilityCommands(doctor: () => DoctorRow[]): FakeCapabilit
           const failure = self.failing.get(id);
           if (failure !== undefined) throw new Error(failure);
           if (!getAgent(id) || getAgent(id)?.custom) throw new Error(`Unknown agent "${id}"`);
-          return { value: caps(id) };
+          const ofAccount = args.accountId ? self.accountOverride.get(`${id}\n${String(args.accountId)}`) : undefined;
+          return { value: ofAccount ? ofAccount(caps(id)) : caps(id) };
         }
         case "validate_launch":
           return { value: validateChoice(choice, caps(choice.agentId)) satisfies LaunchValidation };
