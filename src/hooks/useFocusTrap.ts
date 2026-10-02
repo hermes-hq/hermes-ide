@@ -11,7 +11,8 @@
 //   - Esc closes it (`onEscape`), unless something inside the dialog
 //     handled that Esc already (a rename field cancels its edit first);
 //   - a terminal behind it cannot take the keyboard back (xterm refocuses
-//     itself on output, a session switch, a click that lands late);
+//     itself on output, a session switch, a click that lands late): the
+//     terminals are inert while it is open;
 //   - when it closes, the keyboard goes back to where it was (the terminal
 //     it came from), if that is still on screen and nothing else took it.
 //
@@ -58,6 +59,24 @@ function inOtherSurface(root: HTMLElement): boolean {
 	return !!at.closest('[aria-modal="true"], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"]');
 }
 
+/**
+ * Make the terminals behind `root` unable to take the keyboard (inert), and
+ * return how to undo it. The focusin guard below needs focus events, and a
+ * window without the system focus (in the background) gets none: a
+ * terminal's focus() there would move the keyboard without a word.
+ */
+function inertTerminalsOutside(root: HTMLElement): () => void {
+	const changed: HTMLElement[] = [];
+	for (const el of Array.from(document.querySelectorAll<HTMLElement>(".xterm"))) {
+		if (root.contains(el) || el.hasAttribute("inert")) continue;
+		el.setAttribute("inert", "");
+		changed.push(el);
+	}
+	return () => {
+		for (const el of changed) el.removeAttribute("inert");
+	};
+}
+
 /** Move the keyboard into `root`: `initialFocus`, its first control, or the dialog itself. */
 export function focusInto(root: HTMLElement, initialFocus?: string): void {
 	const preferred = initialFocus ? root.querySelector<HTMLElement>(initialFocus) : null;
@@ -88,6 +107,7 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, { onEscape, ini
 			if (isTerminalInput(document.activeElement)) (document.activeElement as HTMLElement).blur();
 		};
 		blurTerminal();
+		const restoreTerminals = inertTerminalsOutside(root);
 		focusInto(root, initialFocus);
 		const frame = requestAnimationFrame(() => {
 			if (top() && !root.contains(document.activeElement)) focusInto(root, initialFocus);
@@ -138,6 +158,7 @@ export function useFocusTrap(ref: RefObject<HTMLElement | null>, { onEscape, ini
 			document.removeEventListener("focusin", onFocusIn, true);
 			const i = stack.lastIndexOf(ref);
 			if (i >= 0) stack.splice(i, 1);
+			restoreTerminals();
 			// Give the keyboard back, unless something else took it meanwhile.
 			const now = document.activeElement;
 			const lost = !now || now === document.body || root.contains(now) || !now.isConnected;

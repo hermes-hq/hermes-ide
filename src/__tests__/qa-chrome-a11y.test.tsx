@@ -123,6 +123,19 @@ describe("useFocusTrap", () => {
     expect(document.querySelector(".panel")).toBeNull();
   });
 
+  it("keeps the terminals inert while it is open (no focus events in a window in the background)", () => {
+    render(<Host />);
+    const xterm = document.querySelector<HTMLElement>(".xterm")!;
+    act(() => {
+      (document.querySelector(".opener") as HTMLButtonElement).click();
+    });
+    expect(xterm).toHaveAttribute("inert");
+    act(() => {
+      key(document.activeElement, { key: "Escape" });
+    });
+    expect(xterm).not.toHaveAttribute("inert");
+  });
+
   it("gives the keyboard back to where it was when the dialog closes", () => {
     function Wrapper() {
       const [open, setOpen] = useState(true);
