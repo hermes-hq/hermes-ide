@@ -260,12 +260,7 @@ pub fn create(
         &file,
         &front_matter::render_new(slug, track, first, title, body),
     )?;
-    let mut seeded = seed_phase_prompts(root)?;
-    let command = root.join(CLAUDE_COMMAND_FILE);
-    if !command.exists() {
-        write_atomic(&command, CLAUDE_COMMAND)?;
-        seeded.push(command);
-    }
+    let seeded = seed_repo_files(root)?;
     Ok(CreateOutcome {
         created: true,
         track,
@@ -302,6 +297,60 @@ pub fn ensure_branch(root: &Path, slug: &str) -> Option<String> {
             "Stayed on the current branch (git not available: {e})"
         )),
     }
+}
+
+/// The phase prompts (`.hermes/phases/`) and the one Claude slash command,
+/// where they are missing. Returns what was written.
+pub fn seed_repo_files(root: &Path) -> Result<Vec<PathBuf>, TrackError> {
+    let mut seeded = seed_phase_prompts(root)?;
+    let command = root.join(CLAUDE_COMMAND_FILE);
+    if !command.exists() {
+        write_atomic(&command, CLAUDE_COMMAND)?;
+        seeded.push(command);
+    }
+    Ok(seeded)
+}
+
+/// The first message an agent gets for a task tracked as a feature: the
+/// task, how the track works, and the first phase's instructions (the
+/// repository's `.hermes/phases/<phase>.md`, else the built-in), ending with
+/// the gate: hand the file over with `hi phase done`, then stop and wait for
+/// a person. Without it the agent only sees the task and does all of it at
+/// once, while the Track panel waits for questions that never come.
+pub fn first_prompt(root: &Path, slug: &str, track: Track, task: &str) -> String {
+    let phases = track_phases(track);
+    let Some(first) = phases.first().copied() else {
+        return task.trim().to_string();
+    };
+    let (prompt, _) = prompt_for(root, first);
+    let names = phases
+        .iter()
+        .map(|p| p.as_str())
+        .collect::<Vec<_>>()
+        .join(" → ");
+    let dir = format!("{FEATURES_DIR}/{slug}");
+    let mut text = format!(
+        "Hermes Feature Track ({track}): this task is planned in phases before any code is written, and every phase stops at a gate for a person's approval.\n\n\
+         The task (feature \"{slug}\", {dir}/feature.md):\n{task}\n\n\
+         Phases: {names}. Do only the current phase. Do not write or change code before the implement phase.\n\n\
+         Current phase: {first} (1 of {count}).\n\n{prompt}\n\n",
+        track = track.as_str(),
+        task = task.trim(),
+        first = first.as_str(),
+        count = phases.len(),
+        prompt = prompt.trim(),
+    );
+    if let (Some(file), Some(cap)) = (first.file_name(), first.line_cap()) {
+        text.push_str(&format!("Write {dir}/{file} (at most {cap} lines). "));
+    }
+    text.push_str(
+        "When it is written, run `hi phase done`, then STOP: end your turn and wait. \
+         A person reviews the file in Hermes and approves it or sends you edits. \
+         Never edit the gate: line of feature.md yourself. \
+         When Hermes tells you the phase was approved, run `hi phase` and follow what it prints for the next phase, the same way. \
+         (`hi` is Hermes's helper on your PATH; if your shell does not find it, run \"$HERMES_BIN_DIR/hi\".)",
+    );
+    text
 }
 
 /// Copy the built-in prompts into `.hermes/phases/` where none exist, so a
@@ -419,10 +468,10 @@ pub fn start_phase(
     text.push_str("\n\n—\n");
     match (&file, cap) {
         (Some(path), Some(cap)) => text.push_str(&format!(
-            "Write {} (at most {cap} lines). When it is ready: hi phase done\n",
+            "Write {} (at most {cap} lines). When it is ready: hi phase done\nThen stop and wait: a person approves the phase in Hermes before the next one starts.\n",
             display_relative(root, path)
         )),
-        _ => text.push_str("When the work is finished and the checks pass: hi phase done\n"),
+        _ => text.push_str("When the work is finished and the checks pass: hi phase done\nThen stop and wait for the person's review in Hermes.\n"),
     }
     Ok(StartOutcome {
         phase: target,
@@ -623,6 +672,66 @@ mod tests {
 
     fn meta(root: &Path, slug: &str) -> Meta {
         FeatureDir::new(root, slug).load().unwrap().meta
+    }
+
+    #[test]
+    fn the_first_prompt_carries_the_task_the_first_phase_and_the_gate() {
+        let dir = repo();
+        let text = first_prompt(
+            dir.path(),
+            "fail-notice",
+            Track::Full,
+            "  Build the failure notification  ",
+        );
+        assert!(text.contains("The task (feature \"fail-notice\", .hermes/features/fail-notice/feature.md):\nBuild the failure notification\n"), "{text}");
+        assert!(
+            text.contains("Phases: questions → research → design → structure → plan → implement."),
+            "{text}"
+        );
+        assert!(
+            text.contains("Current phase: questions (1 of 6)."),
+            "{text}"
+        );
+        // The built-in questions prompt, without its template.
+        assert!(text.contains("# Phase: questions"), "{text}");
+        assert!(!text.contains("## Template"), "{text}");
+        assert!(
+            text.contains("Write .hermes/features/fail-notice/questions.md (at most 40 lines)."),
+            "{text}"
+        );
+        assert!(
+            text.contains("run `hi phase done`, then STOP: end your turn and wait."),
+            "{text}"
+        );
+        // The repository's own prompt wins.
+        let phases = dir.path().join(PHASES_DIR);
+        fs::create_dir_all(&phases).unwrap();
+        fs::write(
+            phases.join("questions.md"),
+            "# Phase: questions\n\nAsk about the database only.\n\n## Template\n# Q\n",
+        )
+        .unwrap();
+        let own = first_prompt(dir.path(), "fail-notice", Track::Light, "x");
+        assert!(own.contains("Ask about the database only."), "{own}");
+        assert!(
+            own.contains("Phases: questions → plan → implement."),
+            "{own}"
+        );
+        assert!(own.contains("Current phase: questions (1 of 3)."), "{own}");
+        // A Quick track has no phases: just the task.
+        assert_eq!(
+            first_prompt(dir.path(), "q", Track::Quick, " do it "),
+            "do it"
+        );
+    }
+
+    #[test]
+    fn seeding_writes_the_phase_prompts_and_the_command_once() {
+        let dir = repo();
+        let first = seed_repo_files(dir.path()).unwrap();
+        assert_eq!(first.len(), PROMPTED_PHASES.len() + 1);
+        assert!(dir.path().join(CLAUDE_COMMAND_FILE).exists());
+        assert!(seed_repo_files(dir.path()).unwrap().is_empty());
     }
 
     #[test]

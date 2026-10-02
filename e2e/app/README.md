@@ -61,6 +61,10 @@ node e2e/acceptance-check.mjs                   # the ledger is well-formed
 node e2e/acceptance-check.mjs --results <dir>   # ...and green everywhere
 ```
 
+On a machine with little free disk, `HERMES_E2E_LOCAL_FREE_SPACE_BYTES` makes
+the test app's disk guard see that much free space (a scenario that sets its
+own, like N14, keeps it); CI never sets it.
+
 Set `HERMES_E2E_OUT` to choose where the app and the evidence go (default:
 `$TMPDIR/hermes-e2e`). Evidence never belongs in the repository.
 

@@ -816,6 +816,7 @@ pub fn run() {
             agent_caps::commands::relaunch_agent,
             task_launcher::task_repo_probe,
             task_launcher::task_write_feature_file,
+            task_launcher::task_track_prompt,
             // Session management
             pty::create_session,
             pty::ssh_list_directory,

@@ -67,6 +67,21 @@ describe("reduceSessionEvent", () => {
     expect(empty.version).toBe(0);
   });
 
+  it("identity from several sources merges: a later report without the model keeps the model the agent named", () => {
+    // The order seen on CI: the agent's SessionStart named the model, then
+    // Hermes's own view of the terminal (no model, the launch's permission
+    // mode, the conversation id) arrived. The row lost its model tag.
+    const reported = reduceSessionEvent(empty, { type: "identity", at: 1, source: "transcript:claude", vendorSessionId: null, model: "fake-default-model", permissionMode: "acceptEdits" });
+    const observed = reduceSessionEvent(reported, { type: "identity", at: 2, source: "hermes", vendorSessionId: "v1", model: null, permissionMode: "acceptEdits" });
+    expect(observed.identity).toEqual({ vendorSessionId: "v1", model: "fake-default-model", permissionMode: "acceptEdits" });
+    // A real change still replaces (a /model switch, a new permission mode).
+    const switched = reduceSessionEvent(observed, { type: "identity", at: 3, vendorSessionId: null, model: "other-model", permissionMode: "plan" });
+    expect(switched.identity).toEqual({ vendorSessionId: "v1", model: "other-model", permissionMode: "plan" });
+    // And the other order gives the same result.
+    const first = reduceSessionEvent(empty, { type: "identity", at: 1, source: "hermes", vendorSessionId: "v1", model: null, permissionMode: "acceptEdits" });
+    expect(reduceSessionEvent(first, { type: "identity", at: 2, vendorSessionId: null, model: "fake-default-model", permissionMode: "acceptEdits" }).identity).toEqual(observed.identity);
+  });
+
   it("closes a turn on end, failure or interruption and counts it", () => {
     for (const type of ["turn_end", "turn_failed", "turn_interrupted"] as const) {
       const started = reduceSessionEvent(empty, { type: "turn_start", at: 1, n: 2 });

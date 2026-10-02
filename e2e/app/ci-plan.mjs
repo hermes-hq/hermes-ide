@@ -41,6 +41,9 @@ export const CI_EXCLUDED = {
   "REAL-status-claude.mjs": "local only: needs a signed-in real claude and costs a few turns; it says SKIP in CI",
   "REAL-status-codex.mjs": "local only: needs a signed-in real codex and costs a few turns; it says SKIP in CI",
   "REAL-status-agy.mjs": "local only: needs a signed-in real agy and costs a few turns; it says SKIP in CI",
+  "REAL-track-claude.mjs": "local only: needs a signed-in real claude and costs a few tiny turns; it says SKIP in CI",
+  "REAL-context-claude.mjs": "local only: needs a signed-in real claude and costs a few tiny turns; it says SKIP in CI",
+  "REAL-context-codex.mjs": "local only: needs a signed-in real codex (and agy, when installed) and costs a few tiny turns; it says SKIP in CI",
 };
 
 /**

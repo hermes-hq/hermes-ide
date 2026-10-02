@@ -20,3 +20,12 @@ export function probeTaskRepo(path: string, branch?: string): Promise<RepoProbe>
 export function writeTaskFeatureFile(checkout: string, slug: string, contents: string): Promise<string> {
   return invoke<string>("task_write_feature_file", { checkout, slug, contents });
 }
+
+/**
+ * The first prompt of a task tracked as a feature: the task, the track's
+ * rules and the first phase's instructions (the repository's
+ * .hermes/phases/, else Hermes's own), ending at the first gate.
+ */
+export function taskTrackPrompt(repoRoot: string, slug: string, task: string): Promise<string> {
+  return invoke<string>("task_track_prompt", { repoRoot, slug, task });
+}

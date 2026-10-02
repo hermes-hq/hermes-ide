@@ -134,7 +134,17 @@ export function reduceSessionEvent(prev: SessionEventSnapshot, event: SessionEve
       next.attention = event.detail;
       break;
     case "identity":
-      next.identity = { vendorSessionId: event.vendorSessionId, model: event.model, permissionMode: event.permissionMode };
+      // Field by field: several sources report identity (the agent's own
+      // signals, and what Hermes observes of the terminal), and each sends
+      // only what it knows. A null field is "this source does not know", not
+      // "it changed to unknown": a terminal update after the agent's
+      // SessionStart named the model must not erase that model (it did, on
+      // a slow machine, whenever the terminal update came second).
+      next.identity = {
+        vendorSessionId: event.vendorSessionId ?? prev.identity.vendorSessionId,
+        model: event.model ?? prev.identity.model,
+        permissionMode: event.permissionMode ?? prev.identity.permissionMode,
+      };
       break;
     case "subagents":
       next.subagents = event.running;

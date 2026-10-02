@@ -642,6 +642,9 @@ export async function launchApp({
       TMP: appTmp,
       TEMP: appTmp,
       ...(flagDefaults ? { HERMES_E2E_FLAG_DEFAULTS: JSON.stringify(flagDefaults) } : {}),
+      // Local runs on a nearly full disk: the free space the disk guard sees
+      // (a scenario that sets its own, N14, keeps it). The CI workflow never sets it.
+      ...(process.env.HERMES_E2E_LOCAL_FREE_SPACE_BYTES ? { HERMES_E2E_FREE_SPACE_BYTES: process.env.HERMES_E2E_LOCAL_FREE_SPACE_BYTES } : {}),
       ...extraEnv,
     },
     stdio: ["ignore", fd, fd],

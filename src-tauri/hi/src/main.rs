@@ -1181,6 +1181,16 @@ pub fn signal_line(
         if let Some(rl) = map.get("rate_limits").and_then(kept_rate_limits) {
             kept.insert("rate_limits".to_string(), rl);
         }
+        // The status line input's window size (F14): the one number the
+        // context gauge needs from `context_window`, nothing else of it.
+        if let Some(size) = map
+            .get("context_window")
+            .and_then(|c| c.get("context_window_size"))
+            .and_then(|n| n.as_u64())
+            .filter(|n| *n > 0 && *n <= 100_000_000)
+        {
+            kept.insert("context_window_size".to_string(), serde_json::json!(size));
+        }
         // Antigravity names the tool inside `toolCall` (its arguments, which
         // can hold a command line, are dropped): lift the name alone.
         if !kept.contains_key("tool_name") {
@@ -2015,6 +2025,50 @@ mod tests {
             Some(&serde_json::json!({ "rate_limits": {} })),
         );
         assert!(none["payload"].get("rate_limits").is_none());
+    }
+
+    #[test]
+    fn a_status_line_record_keeps_the_window_size_and_nothing_else_of_context_window() {
+        // Claude Code 2.1.286's status line input (captured from a real run,
+        // paths and ids replaced).
+        let payload = serde_json::json!({
+            "session_id": "00000000-0000-4000-8000-000000000001",
+            "transcript_path": "/fixture-home/.claude/projects/x/s.jsonl",
+            "model": { "id": "claude-haiku-4-5-20251001", "display_name": "Haiku 4.5" },
+            "context_window": {
+                "total_input_tokens": 41150, "total_output_tokens": 27,
+                "context_window_size": 200000,
+                "current_usage": { "input_tokens": 8, "output_tokens": 27, "cache_creation_input_tokens": 229, "cache_read_input_tokens": 40913 },
+                "used_percentage": 21, "remaining_percentage": 79
+            },
+            "exceeds_200k_tokens": false
+        });
+        let line = signal_line(
+            Some("StatusLine"),
+            "claude",
+            "h1",
+            Some("n"),
+            Some(&payload),
+        );
+        let kept = line["payload"].as_object().unwrap();
+        assert_eq!(
+            kept.get("context_window_size"),
+            Some(&serde_json::json!(200000))
+        );
+        assert!(kept.get("context_window").is_none());
+        assert_eq!(
+            kept.get("model"),
+            Some(&serde_json::json!("claude-haiku-4-5-20251001"))
+        );
+        for junk in [
+            serde_json::json!(0),
+            serde_json::json!("200000"),
+            serde_json::json!(-1),
+        ] {
+            let p = serde_json::json!({ "context_window": { "context_window_size": junk } });
+            let l = signal_line(Some("StatusLine"), "claude", "h1", Some("n"), Some(&p));
+            assert!(l["payload"].get("context_window_size").is_none(), "{p}");
+        }
     }
 
     #[test]
