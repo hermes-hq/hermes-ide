@@ -274,9 +274,11 @@ export function StatusBar({ onOpenShortcuts, updateAvailable, updateVersion, upd
                 ]);
               }}
             >
-              {costBefore && <span className="status-bar-cost-scope">{costBefore}</span>}
+              {/* The words around the amount give way first (the tooltip has
+                  them); the amount itself is never cut. */}
+              <span className="status-bar-cost-scope status-bar-cost-before">{costBefore}</span>
               <span className="status-bar-cost-amount">{costText}</span>
-              {costAfter && <span className="status-bar-cost-scope">{costAfter}</span>}
+              <span className="status-bar-cost-scope status-bar-cost-after">{costAfter}</span>
             </span>
             <span className="status-bar-divider" />
           </>

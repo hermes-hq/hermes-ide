@@ -201,7 +201,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     } else if (key === "agent_timeline_style") {
       applyAgentTimelineStyle(value);
     }
-    setSetting(key, value).catch(console.error);
+    return setSetting(key, value).catch(console.error);
   }, [settings]);
 
   const applyWindowSize = useCallback((widthStr: string, heightStr: string, immediate = false) => {

@@ -399,6 +399,7 @@ const hooks = {
   /** What the attention center decided and asked the OS for, oldest first. */
   attentionState: () => ({
     decisions: [...(attentionDebug.notifier?.log() ?? [])],
+    pendingAway: [...(attentionDebug.notifier?.pendingAway() ?? [])],
     os: [...attentionDebug.os],
     away: attentionDebug.away.map((e) => ({ payload: e.payload, result: e.result })),
     badge: [...attentionDebug.badge],

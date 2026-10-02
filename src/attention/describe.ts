@@ -75,15 +75,20 @@ export function awayPayload(
 
 export type PlacedSession = Pick<SessionData, "id" | "working_directory" | "created_at">;
 
+/** A home folder: /Users/<name>, /home/<name>, /root, C:/Users/<name>. Its last part is the account name. */
+const HOME_DIR = /^(?:\/(?:Users|home)\/[^/]+|\/root|[A-Za-z]:\/Users\/[^/]+)$/i;
+
 /**
  * The folder a session works in, by name, when that name cannot come from a
  * prompt: the project's name for a Hermes worktree (whose folder is named
- * after its branch, which can come from the task text), else the last part
- * of the working directory. Null when unknown.
+ * after its branch, which can come from the task text), "~" for a home
+ * folder (whose name is the account name), else the last part of the
+ * working directory. Null when unknown.
  */
 export function repoNameOf(session: PlacedSession, projectName: string | null | undefined): string | null {
   const dir = (session.working_directory ?? "").replace(/\\/g, "/").replace(/\/+$/, "");
   if (isHermesWorktreePath(`${dir}/`)) return projectName?.trim() || null;
+  if (dir === "~" || HOME_DIR.test(dir)) return "~";
   return dir.split("/").pop() || null;
 }
 

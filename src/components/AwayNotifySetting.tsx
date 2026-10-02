@@ -11,7 +11,6 @@
 
 import { useEffect, useRef, useState } from "react";
 import { AWAY_NOTIFY_URL_KEY, sendAwayNotification } from "../api/attention";
-import { setSetting } from "../api/settings";
 import {
   AWAY_DELAY_CHOICES,
   AWAY_NOTIFY_DELAY_KEY,
@@ -43,7 +42,8 @@ const DELAY_LABEL_KEYS: Record<AwayDelayChoice, string> = {
 
 interface AwayNotifySettingProps {
   value: string;
-  onSave: (key: string, value: string) => void;
+  /** Saves a setting; a returned promise settles once it is stored. */
+  onSave: (key: string, value: string) => void | Promise<unknown>;
 }
 
 export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
@@ -67,8 +67,8 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
     void loadAwayPrefs();
   }, []);
 
-  /** Save the typed address when it is acceptable; the address to use, or null. */
-  const commit = (): string | null => {
+  /** Save the typed address when it is acceptable: the address to use and when it is stored, or null. */
+  const commit = (): { address: string; saved: Promise<unknown> } | null => {
     const next = draft.trim();
     if (!isAwayUrlAcceptable(next)) {
       setInvalid(true);
@@ -76,8 +76,7 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
     }
     setInvalid(false);
     dirty.current = false;
-    if (next !== value) onSave(AWAY_NOTIFY_URL_KEY, next);
-    return next;
+    return { address: next, saved: Promise.resolve(next !== value ? onSave(AWAY_NOTIFY_URL_KEY, next) : undefined) };
   };
 
   const savePref = (key: string, next: string) => {
@@ -86,12 +85,12 @@ export function AwayNotifySetting({ value, onSave }: AwayNotifySettingProps) {
   };
 
   const sendTest = async () => {
-    const address = commit();
-    if (!address) return;
+    const committed = commit();
+    if (!committed) return;
     setTesting(true);
     try {
-      // The backend reads the saved address: make sure it is the one shown.
-      if (address !== value) await setSetting(AWAY_NOTIFY_URL_KEY, address);
+      // The backend reads the saved address: wait until the one shown is stored.
+      await committed.saved;
       const result = await sendAwayNotification(AWAY_TEST_PAYLOAD);
       if (noteAwayResult(result)?.outcome === "sent") clearAwayFailureNotices();
     } catch (e) {

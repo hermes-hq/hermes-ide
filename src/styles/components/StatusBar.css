@@ -29,7 +29,16 @@
 .status-bar-left { overflow: hidden; }
 .status-bar-right { max-width: 60%; }
 .status-bar-right > * { flex-shrink: 0; }
-.status-bar-right > .status-bar-cost { flex-shrink: 1; min-width: 0; }
+/* What gives way, in order: the words around the spend ("Open sessions:"),
+ * then the folder name. The spend amount never shrinks (see below). */
+.status-bar-right > .status-bar-cost { flex-shrink: 1000; }
+.status-bar-right > .status-bar-cwd {
+  display: block;
+  flex-shrink: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 /* The bar is the bottom edge of the window, which clips: rings are drawn
  * inside the controls instead of 2 px outside them. */
 .status-bar :focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }
@@ -171,11 +180,13 @@
 }
 
 .status-bar-cost {
-  /* One line of text (its tooltip has it all), cut with an ellipsis when
-   * the window is narrow. */
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
+  /* "Open sessions: $12.34" on one line. The words sit in tracks that may
+   * shrink to nothing (cut with an ellipsis; the tooltip has them all), the
+   * amount in one that never does: the grid's smallest width is the
+   * amount's, so the bar can squeeze the words but never the number. */
+  display: grid;
+  grid-template-columns: minmax(0, max-content) max-content minmax(0, max-content);
+  align-items: center;
   color: var(--text-2);
   font-family: var(--font-numeric);
   font-variant-numeric: tabular-nums slashed-zero;
@@ -184,10 +195,17 @@
   transition: color 1.5s ease-out;
 }
 .status-bar-cost-scope {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-family: var(--font-ui, inherit);
   font-weight: var(--weight-regular, 400);
   color: var(--text-3);
 }
+.status-bar-cost-before:not(:empty) { padding-inline-end: 0.3em; }
+.status-bar-cost-after:not(:empty) { padding-inline-start: 0.3em; }
+.status-bar-cost-amount { white-space: nowrap; }
 .status-bar-cost[data-just-changed="true"] {
   color: var(--brass, var(--voice-user));
 }

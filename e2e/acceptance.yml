@@ -1209,8 +1209,8 @@ features:
         text: "The badge, the dock and ⌘I count the same agents; a Hermes notice is listed apart as Hermes · n notice(s) and never counted as an agent"
         scenarios: [QA-status-attention-counts.mjs]
       QA-STATUS-2:
-        text: "An away message goes out only when Hermes is not in front of you (or after the chosen delay unanswered); Immediately sends at once"
-        scenarios: [QA-status-away-at-desk.mjs]
+        text: "An away message goes out only when Hermes is not in front of you (or after the chosen delay unanswered, also for the session in view); Immediately sends at once"
+        scenarios: [QA-status-away-at-desk.mjs, QA-status-away-stepped-away.mjs]
       QA-STATUS-3:
         text: "Away messages say where each agent works (folder and session number) without prompt text; session names only when opted in"
         scenarios: [QA-status-away-tells-agents-apart.mjs]
@@ -1232,6 +1232,12 @@ features:
       QA-STATUS-9:
         text: "At 600 × 400 (English and German) every status-bar control is inside the window; Check for updates, Report a Bug and Keyboard Shortcuts fold into a ⋯ menu"
         scenarios: [QA-status-min-window.mjs]
+      QA-STATUS-10:
+        text: "A Hermes notice alone lights the badge and the dock with \"!\" (never counted as an agent), and ⌘I opens the inbox on it"
+        scenarios: [QA-status-notice-visible.mjs]
+      QA-STATUS-11:
+        text: "From 761 to 1000 px (English and German) the status bar's spend amount is shown whole; the words before it and the folder name give way first"
+        scenarios: [QA-status-spend-mid-window.mjs]
   N22:
     # Behind the fleetControls flag; fake agents started as Custom agents.
     # HERMES_E2E_N22_CAP=off (no cap) must fail.
