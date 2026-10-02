@@ -74,6 +74,20 @@
   color: var(--text-1);
 }
 
+/* The pills share one row; those that do not fit wrap below it, out of
+   sight, so the Commands trigger after them is never pushed off the pane. */
+.pab-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  align-content: flex-start;
+  gap: calc(var(--space-1) * 1.5);
+  flex: 1 1 auto;
+  min-width: 0;
+  height: calc(var(--text-sm) * 1.5 + var(--space-1) + var(--control-border-width) * 2);
+  overflow: hidden;
+}
+
 /* ─── Spacer ──────────────────────────────────────────── */
 
 .pab-spacer {

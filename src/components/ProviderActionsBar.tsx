@@ -194,17 +194,20 @@ export function ProviderActionsBar({ sessionId, actions, recentActions, aiProvid
 
       <div className="pab-divider" />
 
-      {/* Quick action pills */}
-      {quickActions.map((action) => (
-        <button
-          key={action.command}
-          className="pab-action"
-          title={action.description}
-          onClick={() => handleExecute(action.command)}
-        >
-          {action.command}
-        </button>
-      ))}
+      {/* Quick action pills: the ones that do not fit wrap out of sight, so
+          the Commands trigger (which lists them all) stays in the window. */}
+      <div className="pab-actions">
+        {quickActions.map((action) => (
+          <button
+            key={action.command}
+            className="pab-action"
+            title={action.description}
+            onClick={() => handleExecute(action.command)}
+          >
+            {action.command}
+          </button>
+        ))}
+      </div>
 
       {/* Spacer pushes dropdown trigger to the right */}
       {showDropdown && <div className="pab-spacer" />}
