@@ -104,7 +104,8 @@ try {
 
   log("step 3: Skip all, chosen by hand, is said in red in the chip row");
   await bridge.click('.task-launcher-approval-modes [data-mode="bypassPermissions"]');
-  await bridge.eval(`e2e.first(".task-launcher-menu").dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); return true;`);
+  // A pick closes the menu (QA-launcher-10); Esc closes it if it is still open.
+  await bridge.eval(`e2e.first(".task-launcher-menu")?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true })); return true;`);
   await bridge.waitFor("the menu to close", `return !e2e.first(".task-launcher-menu");`);
   const warning = await bridge.eval(`
     const w = e2e.first(".task-launcher-danger-warning");

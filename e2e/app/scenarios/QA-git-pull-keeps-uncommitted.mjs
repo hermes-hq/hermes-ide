@@ -57,11 +57,12 @@ const matePush = (file, content, msg) => {
 matePush("NEWS.md", "teammate news\n", "news");
 const homeDir = join(work, "home");
 
-async function pressPull(bridge) {
+/** Pull, then this Pull's result: messages other than the ones a previous Pull left on screen. */
+async function pressPull(bridge, previous = []) {
   await bridge.waitFor("the Pull button", `return e2e.all(".review-desk button").some((b) => /^Pull/.test(e2e.nameOf(b)));`, { timeoutMs: 20_000 });
   await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.all(".review-desk button").find((b) => /^Pull/.test(e2e.nameOf(b))), "Pull"));`);
   return bridge
-    .waitFor("the Pull result", `const m = e2e.all(".review-desk .git-error, .review-desk .review-changes-toast, .review-desk .review-notice").map((x) => e2e.norm(x.innerText)).filter(Boolean); return m.length ? m : null;`, { timeoutMs: 30_000 })
+    .waitFor("the Pull result", `const old = ${JSON.stringify(previous)}; const m = e2e.all(".review-desk .git-error, .review-desk .review-changes-toast, .review-desk .review-notice").map((x) => e2e.norm(x.innerText)).filter((t) => t && !old.includes(t)); return m.length ? m : null;`, { timeoutMs: 30_000 })
     .catch(() => []);
 }
 
@@ -90,7 +91,7 @@ try {
   matePush("README.md", "# mono\n\nteammate's line\n", "readme");
   const mainBefore = gitIn(repo, "rev-parse", "main");
   await sleep(500);
-  const msg2 = await pressPull(bridge);
+  const msg2 = await pressPull(bridge, msg1);
   log(`  after the second Pull: ${JSON.stringify(msg2)}`);
   await bridge.screenshot(join(evidenceDir, "02-pull-stopped.png"));
   check(readFileSync(join(repo, "README.md"), "utf8") === EDIT, "the README.md edit survives a Pull whose commits also change README.md");

@@ -51,6 +51,9 @@ const ghEnv = { HERMES_E2E_GH: FAKE_GH, FAKE_GH_STATE: ghState, FAKE_GH_LOG: joi
 const closeSheet = async (bridge) => {
   if (await bridge.exists(".land-sheet")) await bridge.click(".land-sheet-cancel").catch(() => {});
   await sleep(500);
+  // Cancel brings the person back to the Review Desk the sheet was opened
+  // from (QA-review-14): close it too, so the session list is reachable.
+  if (await bridge.exists(".review-desk")) await bridge.click(".review-desk .review-close").catch(() => {});
 };
 
 let app;

@@ -34,7 +34,8 @@ await runAccountsQa(
     writeFileSync(join(added.account.profileEnv.value, ".fake-auth"), "in\n");
     await refuse(bridge, f, "gpt-fake-old", "default");
     await refuse(bridge, f, "gpt-fake-luna", "personal");
-    const personal = await invoke(bridge, "get_agent_capabilities", { agentId: "codex", accountId: "personal", refresh: true });
+    // Not refresh: a refresh is Check again, which forgets the agent's refusals (ACC-03).
+    const personal = await invoke(bridge, "get_agent_capabilities", { agentId: "codex", accountId: "personal", refresh: false });
     const bp = Object.fromEntries(personal.models.map((m) => [m.id, m.available]));
     log(`  backend, Personal: ${JSON.stringify(bp)}`);
     assert(bp["gpt-fake-old"] === true && bp["gpt-fake-luna"] === false, "the backend knows each account's refusals");

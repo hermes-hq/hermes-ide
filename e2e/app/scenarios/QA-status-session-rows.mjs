@@ -100,6 +100,9 @@ await runScenario("QA-status-session-rows", async ({ evidenceDir, log, assert, a
   assert(estimated.length === 3, `the three estimated spends start with ≈ (${estimated.map((r) => r.spend.text).join(", ")})`);
   assert(estimated.every((r) => /estimated/i.test(r.spend.title)), "their tooltip says the cost is estimated");
 
+  // "+ Project" is offered once a project group exists: put one session in one.
+  await bridge.eval(`await window.__TAURI_INTERNALS__.invoke("update_session_group", { sessionId: ${JSON.stringify(ids[2])}, group: "api" }); return true;`);
+  await bridge.waitFor("the + Project button", `return !!e2e.first(".session-item-project-assign");`, { timeoutMs: 10_000 });
   // "+ Project" is hidden until hovered; given the keyboard focus it shows.
   const project = await bridge.eval(`
     const b = e2e.first(".session-item-project-assign");
@@ -107,10 +110,17 @@ await runScenario("QA-status-session-rows", async ({ evidenceDir, log, assert, a
     const before = getComputedStyle(b).opacity;
     b.focus();
     await new Promise((r) => setTimeout(r, 400));
-    const out = { before, focused: document.activeElement === b, focusVisible: b.matches(":focus-visible"), opacity: getComputedStyle(b).opacity };
+    const out = { before, focused: document.activeElement === b, focusVisible: b.matches(":focus-visible"), opacity: getComputedStyle(b).opacity, windowFocused: document.hasFocus() };
     b.blur();
     return out;`);
   log(`  "+ Project" with the keyboard focus: ${JSON.stringify(project)}`);
-  assert(project && project.focused && project.focusVisible, `"+ Project" takes the keyboard focus (${JSON.stringify(project)})`);
-  assert(project.opacity === "1", `"+ Project" shows when it has the keyboard focus (opacity ${project?.opacity})`);
+  assert(project && project.focused, `"+ Project" takes the keyboard focus (${JSON.stringify(project)})`);
+  // :focus and :focus-visible match only while the window itself has the
+  // system focus; a local run behind other windows cannot check what shows.
+  if (project.windowFocused) {
+    assert(project.focusVisible, `"+ Project" has the keyboard focus ring state (${JSON.stringify(project)})`);
+    assert(project.opacity === "1", `"+ Project" shows when it has the keyboard focus (opacity ${project?.opacity})`);
+  } else {
+    log("  the window does not have the system focus here: what shows on focus is not checked");
+  }
 });

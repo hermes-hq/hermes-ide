@@ -439,10 +439,16 @@ try {
   `);
   await openLauncher(bridge);
   await typeInto(bridge, ".task-launcher-task", "Existing task");
-  await bridge.waitFor("the branch-exists row", `return e2e.all('.task-launcher-block[data-kind="branch-exists"]').length === 1;`, { timeoutMs: 20_000 });
   await expandOptions(bridge);
+  // The same task again gets the next free branch by itself (QA-launcher-11).
+  await bridge.waitFor("the next free branch", `return e2e.first(".task-launcher-branch")?.value === "hermes/existing-task-2";`, { timeoutMs: 20_000 });
   st = await launcherState(bridge);
-  assert(st.branch === "hermes/existing-task" && st.launchDisabled, "hermes/existing-task exists, so Launch is disabled");
+  assert(!st.blocks.some((b) => b.kind === "branch-exists"), "hermes/existing-task exists, so the task gets hermes/existing-task-2 by itself and nothing blocks");
+  // A branch typed by hand that exists still blocks Launch with its own row.
+  await typeInto(bridge, ".task-launcher-branch", "hermes/existing-task");
+  await bridge.waitFor("the branch-exists row", `return e2e.all('.task-launcher-block[data-kind="branch-exists"]').length === 1;`, { timeoutMs: 20_000 });
+  st = await launcherState(bridge);
+  assert(st.branch === "hermes/existing-task" && st.launchDisabled, "a typed hermes/existing-task exists, so Launch is disabled");
   await bridge.click(".task-launcher-use-branch");
   await bridge.click(".task-launcher-also-toggle");
   await bridge.waitFor("the second agent picker", `return !!e2e.first(".task-launcher-also-agent");`);

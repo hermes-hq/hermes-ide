@@ -50,6 +50,10 @@ await runScenario("QA-status-spend-mid-window", async ({ evidenceDir, log, asser
       await invoke(bridge, "set_setting", { key: "ui_language", value: lang });
       await bridge.eval(`localStorage.setItem("hermes.ui_language", ${JSON.stringify(lang)}); return true;`);
       await bridge.reload();
+      // The reloaded page starts with no usage reports: send them again.
+      await bridge.waitFor("the status bar after the reload", `return !!e2e.first(".status-bar-cost");`, { timeoutMs: 30_000 });
+      await emitFromRust(bridge, A, usage(1234.56));
+      await emitFromRust(bridge, B, usage(3.0));
       await bridge.waitFor("the app after the reload", `return /1237[.,]56/.test(e2e.first(".status-bar-cost")?.textContent ?? "");`, { timeoutMs: 30_000 });
       await sleep(1500);
     }
