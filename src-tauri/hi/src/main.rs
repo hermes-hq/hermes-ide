@@ -1477,6 +1477,38 @@ fn cmd_check(args: &[String]) -> i32 {
     check_exit_code(report.state)
 }
 
+/// Why the Stop hook must not hold the agent to the checks now: the
+/// checkout's feature (named, else its `hermes/<slug>` branch or only
+/// folder) is in a planning phase, or its gate waits for a person.
+pub fn track_holds_checks(cwd: &Path, feature: Option<&str>) -> Option<String> {
+    use hermes_track::{phases::Gate, phases::Phase, phases::Track};
+    let root = done_when::find_root(cwd);
+    let slug = match feature {
+        Some(s) => s.to_string(),
+        None => hermes_track::find_slug(&root, done_when::current_branch(&root).as_deref())?,
+    };
+    let meta = hermes_track::FeatureDir::new(&root, &slug)
+        .load()
+        .ok()?
+        .meta;
+    if meta.track == Track::Quick {
+        return None;
+    }
+    if meta.gate == Gate::Waiting {
+        return Some(format!(
+            "{slug}: {} waits for the person's review",
+            meta.phase.as_str()
+        ));
+    }
+    if !matches!(meta.phase, Phase::Implement | Phase::Done) {
+        return Some(format!(
+            "{slug} is in the {} phase (planning, no code yet)",
+            meta.phase.as_str()
+        ));
+    }
+    None
+}
+
 /// `hi check --stop-hook`: Claude's Stop hook. Reads the hook payload on
 /// stdin, runs the checks and decides whether the agent may stop.
 fn check_stop_hook(feature: Option<&str>, run_budget: Duration) -> i32 {
@@ -1492,6 +1524,14 @@ fn check_stop_hook(feature: Option<&str>, run_budget: Duration) -> i32 {
         .filter(|p| p.is_dir())
         .or_else(|| std::env::current_dir().ok())
         .unwrap_or_else(|| PathBuf::from("."));
+    // A Feature Track in a planning phase (no code yet), or waiting at a
+    // gate for the person: the checks are not what this turn is about, and
+    // sending the agent back to "fix" them would make it write code before
+    // the plan is approved, or move past a gate.
+    if let Some(why) = track_holds_checks(&cwd, feature) {
+        eprintln!("hi check: {why}; the checks run in the implement phase");
+        return 0;
+    }
     let report = done_when::check(&cwd, feature, "stop_hook", run_budget, true);
     if report.state == done_when::State::None {
         return 0;
@@ -1568,7 +1608,8 @@ fn usage() -> i32 {
          usage:\n  hi run <session-id | launch-file>\n  hi signal [--agent <id>] [--event <name>] [--argv-json <json>]\n  hi check [--json] [--feature <slug>] [--stop-hook]\n\
          \n  hi feature new <slug> [--track Quick|Light|Full] [--title <text>] [--no-branch]\n\
          \x20 hi feature check\n\
-         \x20 hi phase [questions|research|design|structure|plan|implement|done|skip]\n\
+         \x20 hi phase [questions|research|design|structure|plan|implement|done]\n\
+         \x20 hi phase skip         (people only)\n\
          \x20 hi approve            (people only: refuses when HERMES_AGENT is set)\n\
          \x20 hi land [--body-file <path>]\n  hi status [--all]\n  hi --version"
     );
@@ -1602,6 +1643,37 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_stop_hook_leaves_the_checks_to_the_implement_phase() {
+        use hermes_track::{feature, Track};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/hermes/demo\n").unwrap();
+        // No feature: the checks apply.
+        assert_eq!(track_holds_checks(root, None), None);
+        feature::create(root, "demo", Track::Full, "", "").unwrap();
+        // Planning: questions, gate none.
+        let why = track_holds_checks(root, None).unwrap();
+        assert!(why.contains("questions phase"), "{why}");
+        // Waiting at a gate.
+        std::fs::write(root.join(".hermes/features/demo/questions.md"), "# Q\n").unwrap();
+        feature::finish_phase(root, "demo").unwrap();
+        assert!(track_holds_checks(root, None)
+            .unwrap()
+            .contains("waits for the person's review"));
+        // Implement, working: the checks hold the agent.
+        let file = root.join(".hermes/features/demo/feature.md");
+        let text = std::fs::read_to_string(&file).unwrap();
+        let text =
+            hermes_track::set_keys(&text, &[("phase", "implement"), ("gate", "none")]).unwrap();
+        std::fs::write(&file, text).unwrap();
+        assert_eq!(track_holds_checks(root, None), None);
+        // A Quick track never holds them back.
+        feature::create(root, "quick", Track::Quick, "", "").unwrap();
+        assert_eq!(track_holds_checks(root, Some("quick")), None);
+    }
 
     fn write_exe(dir: &Path, name: &str) -> PathBuf {
         let p = dir.join(name);

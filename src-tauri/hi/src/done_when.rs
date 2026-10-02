@@ -6,7 +6,10 @@
 //! 1. `.hermes/features/<slug>/feature.md` front matter `done_when:` — the
 //!    feature named with `--feature`, or the one whose branch is checked out
 //!    (`hermes/<slug>`), when that file lists at least one command;
-//! 2. `.hermes/worktree.toml` `done_when = [...]`.
+//! 2. the task's own checks, as the person set them in the launcher:
+//!    `<git dir>/hermes/done-when.json` (`{"v": 1, "done_when": [...]}`),
+//!    outside the repository so no commit carries them;
+//! 3. `.hermes/worktree.toml` `done_when = [...]`.
 //!
 //! A file that exists but cannot be read is an error with its line number,
 //! never a guess. The two readers are ports of the frontend's contract
@@ -597,6 +600,8 @@ pub fn feature_front_matter(text: &str) -> Result<FeatureMeta, ReadError> {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SourceKind {
     Feature,
+    /// The checks the launcher set for this task (`<git dir>/hermes/done-when.json`).
+    Task,
     Worktree,
 }
 
@@ -604,9 +609,45 @@ impl SourceKind {
     pub fn as_str(self) -> &'static str {
         match self {
             SourceKind::Feature => "feature",
+            SourceKind::Task => "task",
             SourceKind::Worktree => "worktree",
         }
     }
+}
+
+/// The task's checks, relative to the checkout's git dir.
+pub const TASK_CHECKS_FILE: &str = "hermes/done-when.json";
+/// How the task's checks file is named in a report.
+pub const TASK_CHECKS_DISPLAY: &str = ".git/hermes/done-when.json";
+
+/// Read the task's checks file: `{"v": 1, "done_when": ["npm test"]}` (a
+/// bare array of strings is read too). Blank commands are dropped.
+pub fn task_done_when(text: &str) -> Result<Vec<String>, ReadError> {
+    let value: serde_json::Value = match serde_json::from_str(text) {
+        Ok(v) => v,
+        Err(e) => return err(format!("not JSON: {e}"), e.line()),
+    };
+    let list = match &value {
+        serde_json::Value::Array(_) => &value,
+        serde_json::Value::Object(map) => match map.get("done_when") {
+            Some(v) => v,
+            None => return err("done_when is missing", 0),
+        },
+        _ => return err("expected an object with done_when", 0),
+    };
+    let Some(items) = list.as_array() else {
+        return err("done_when must be an array of strings", 0);
+    };
+    let mut out = Vec::new();
+    for item in items {
+        let Some(s) = item.as_str() else {
+            return err("done_when must be an array of strings", 0);
+        };
+        if !s.trim().is_empty() {
+            out.push(s.to_string());
+        }
+    }
+    Ok(out)
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -641,27 +682,28 @@ pub fn find_root(start: &Path) -> PathBuf {
     start.to_path_buf()
 }
 
+/// The git dir of the checkout at `root`: `.git`, or where a linked
+/// worktree's `.git` file points (`gitdir:`).
+pub fn git_dir(root: &Path) -> Option<PathBuf> {
+    let dot_git = root.join(".git");
+    if dot_git.is_dir() {
+        return Some(dot_git);
+    }
+    let text = std::fs::read_to_string(&dot_git).ok()?;
+    let target = text
+        .lines()
+        .next()?
+        .strip_prefix("gitdir:")?
+        .trim()
+        .to_string();
+    let p = PathBuf::from(&target);
+    Some(if p.is_absolute() { p } else { root.join(p) })
+}
+
 /// The branch checked out in `root` (`None` when detached or not a repo).
 /// Reads `.git/HEAD` directly, following a linked worktree's `gitdir:`.
 pub fn current_branch(root: &Path) -> Option<String> {
-    let dot_git = root.join(".git");
-    let git_dir = if dot_git.is_dir() {
-        dot_git
-    } else {
-        let text = std::fs::read_to_string(&dot_git).ok()?;
-        let target = text
-            .lines()
-            .next()?
-            .strip_prefix("gitdir:")?
-            .trim()
-            .to_string();
-        let p = PathBuf::from(&target);
-        if p.is_absolute() {
-            p
-        } else {
-            root.join(p)
-        }
-    };
+    let git_dir = git_dir(root)?;
     let head = std::fs::read_to_string(git_dir.join("HEAD")).ok()?;
     head.trim()
         .strip_prefix("ref: refs/heads/")
@@ -717,6 +759,26 @@ pub fn resolve(root: &Path, feature: Option<&str>) -> Resolved {
                 }
                 Ok(_) => {}
             }
+        }
+    }
+    // The task's own checks, as the person set them in the launcher: kept in
+    // the checkout's git dir (never in the repository, so an agent's commit
+    // cannot carry them, and they stay with this one task).
+    if let Some(file) = git_dir(root).map(|d| d.join(TASK_CHECKS_FILE)) {
+        if let Ok(text) = std::fs::read_to_string(&file) {
+            let source = Source {
+                kind: SourceKind::Task,
+                path: TASK_CHECKS_DISPLAY.to_string(),
+            };
+            return match task_done_when(&text) {
+                Err(e) => Resolved::Error {
+                    source,
+                    message: read_error("done-when.json", &e),
+                },
+                Ok(commands) if !commands.is_empty() => Resolved::Commands { source, commands },
+                // The person removed every check for this task.
+                Ok(_) => Resolved::None,
+            };
         }
     }
     let Ok(text) = std::fs::read_to_string(root.join(WORKTREE_TOML)) else {
@@ -1404,6 +1466,87 @@ mod tests {
             "setup = [\"npm ci\"]\ndone_when = []\n",
         );
         assert_eq!(resolve(none.path(), None), Resolved::None);
+    }
+
+    #[test]
+    fn the_tasks_launcher_checks_win_over_the_worktree_file() {
+        let r = repo("hermes/add");
+        write(r.path(), WORKTREE_TOML, "done_when = [\"npm test\"]\n");
+        write(
+            r.path(),
+            ".git/hermes/done-when.json",
+            "{\"v\": 1, \"done_when\": [\"node -e \\\"process.exit(3)\\\"\", \"  \"]}\n",
+        );
+        assert_eq!(
+            resolve(r.path(), None),
+            Resolved::Commands {
+                source: Source {
+                    kind: SourceKind::Task,
+                    path: TASK_CHECKS_DISPLAY.into()
+                },
+                commands: vec!["node -e \"process.exit(3)\"".into()]
+            }
+        );
+        // A feature's own checks still come first.
+        write(
+            r.path(),
+            ".hermes/features/add/feature.md",
+            "---\nslug: add\ntrack: Full\ndone_when: [npm run e2e]\n---\n",
+        );
+        assert!(matches!(
+            resolve(r.path(), None),
+            Resolved::Commands {
+                source: Source {
+                    kind: SourceKind::Feature,
+                    ..
+                },
+                ..
+            }
+        ));
+        // Every check removed in the launcher: none run.
+        let none = repo("hermes/b");
+        write(none.path(), WORKTREE_TOML, "done_when = [\"npm test\"]\n");
+        write(
+            none.path(),
+            ".git/hermes/done-when.json",
+            "{\"v\":1,\"done_when\":[]}",
+        );
+        assert_eq!(resolve(none.path(), None), Resolved::None);
+        // A bare array is read too; anything else is an error, never a guess.
+        assert_eq!(task_done_when("[\"make\"]").unwrap(), vec!["make"]);
+        write(
+            none.path(),
+            ".git/hermes/done-when.json",
+            "{\"done_when\": \"make\"}",
+        );
+        assert!(matches!(
+            resolve(none.path(), None),
+            Resolved::Error { ref message, .. } if message == "done-when.json can't be read: done_when must be an array of strings"
+        ));
+        assert!(task_done_when("{").is_err());
+    }
+
+    #[test]
+    fn a_linked_worktree_reads_the_tasks_checks_from_its_own_git_dir() {
+        let main = tempfile::tempdir().unwrap();
+        let gitdir = main.path().join("worktrees").join("wt");
+        std::fs::create_dir_all(gitdir.join("hermes")).unwrap();
+        std::fs::write(gitdir.join("HEAD"), "ref: refs/heads/hermes/x\n").unwrap();
+        std::fs::write(
+            gitdir.join("hermes/done-when.json"),
+            "{\"v\":1,\"done_when\":[\"true\"]}",
+        )
+        .unwrap();
+        let wt = tempfile::tempdir().unwrap();
+        std::fs::write(
+            wt.path().join(".git"),
+            format!("gitdir: {}\n", gitdir.display()),
+        )
+        .unwrap();
+        assert!(matches!(
+            resolve(wt.path(), None),
+            Resolved::Commands { source: Source { kind: SourceKind::Task, .. }, ref commands } if commands == &["true".to_string()]
+        ));
     }
 
     #[test]

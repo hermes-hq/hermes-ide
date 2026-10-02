@@ -1048,6 +1048,8 @@ pub fn run() {
             turn_ledger::turn_ledger_turn_ended,
             turn_ledger::preview_restore_turn,
             turn_ledger::restore_turn,
+            turn_ledger::undo_restore_turn,
+            turn_ledger::turn_ledger_between,
             // Review Desk (F21): merge-base diff, revert a turn, review file.
             review::review_diff,
             review::review_revert_preview,
@@ -1071,6 +1073,8 @@ pub fn run() {
             track::track_skip,
             track::track_revert_gate,
             track::track_promote,
+            track::track_promote_plan,
+            track::track_undo_promote,
             track::track_read_file,
             track::track_file_path,
             track::track_write_review,

@@ -52,11 +52,22 @@ pub struct TrackFileInfo {
 #[serde(rename_all = "camelCase")]
 pub struct TrackFeatureSnapshot {
     pub slug: String,
+    /// feature.md, at most [`TEXT_CAP`] bytes of it.
     pub feature_text: String,
     pub feature_modified_at: i64,
+    /// feature.md's size in bytes.
+    pub feature_size: u64,
+    /// feature.md is larger than [`TEXT_CAP`]: `feature_text` is its start.
+    pub feature_truncated: bool,
+    /// questions.md, at most [`TEXT_CAP`] bytes of it.
     pub questions_text: Option<String>,
     pub files: Vec<TrackFileInfo>,
 }
+
+/// The most of a track file the watcher reads and sends to the window. A
+/// feature.md is a few lines; one an agent dumped a log into is shown as
+/// "too large" instead of being re-read and shipped whole.
+pub const TEXT_CAP: u64 = 256 * 1024;
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
@@ -84,21 +95,66 @@ fn mtime_ms(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
+/// The first `cap` bytes of a file as text (cut back to a character
+/// boundary), and whether there was more.
+fn read_capped(path: &Path, cap: u64) -> Option<(String, bool)> {
+    use std::io::Read;
+    let file = std::fs::File::open(path).ok()?;
+    let mut buf = Vec::new();
+    file.take(cap + 1).read_to_end(&mut buf).ok()?;
+    let truncated = buf.len() as u64 > cap;
+    if truncated {
+        buf.truncate(cap as usize);
+    }
+    let text = match String::from_utf8(buf) {
+        Ok(t) => t,
+        Err(e) => {
+            let valid = e.utf8_error().valid_up_to();
+            let mut bytes = e.into_bytes();
+            bytes.truncate(valid);
+            String::from_utf8(bytes).unwrap_or_default()
+        }
+    };
+    Some((text, truncated))
+}
+
+/// A file's line count, read in blocks (never the whole file at once).
+fn count_lines(path: &Path) -> Option<usize> {
+    use std::io::Read;
+    let mut file = std::fs::File::open(path).ok()?;
+    let mut buf = [0u8; 64 * 1024];
+    let (mut lines, mut last) = (0usize, b'\n');
+    loop {
+        let n = file.read(&mut buf).ok()?;
+        if n == 0 {
+            break;
+        }
+        lines += buf[..n].iter().filter(|b| **b == b'\n').count();
+        last = buf[n - 1];
+    }
+    // Like str::lines: a last line without a newline still counts.
+    Some(if last == b'\n' { lines } else { lines + 1 })
+}
+
 /// Read the state of every feature folder in a worktree.
 pub fn snapshot(worktree: &Path) -> TrackWorktreeSnapshot {
     let mut features = Vec::new();
     for slug in ht::list_features(worktree) {
         let dir = ht::FeatureDir::new(worktree, &slug);
         let feature_file = dir.feature_file();
-        let feature_text = std::fs::read_to_string(&feature_file).unwrap_or_default();
-        let questions_text = std::fs::read_to_string(dir.dir().join("questions.md")).ok();
+        let feature_size = std::fs::metadata(&feature_file)
+            .map(|m| m.len())
+            .unwrap_or(0);
+        let (feature_text, feature_truncated) =
+            read_capped(&feature_file, TEXT_CAP).unwrap_or_default();
+        let questions_text = read_capped(&dir.dir().join("questions.md"), TEXT_CAP).map(|(t, _)| t);
         let mut files = Vec::new();
         for name in READABLE.iter().skip(1) {
             let path = dir.dir().join(name);
-            if let Ok(text) = std::fs::read_to_string(&path) {
+            if let Some(lines) = count_lines(&path) {
                 files.push(TrackFileInfo {
                     name: (*name).to_string(),
-                    lines: text.lines().count(),
+                    lines,
                     modified_at: mtime_ms(&path),
                 });
             }
@@ -107,6 +163,8 @@ pub fn snapshot(worktree: &Path) -> TrackWorktreeSnapshot {
             slug,
             feature_text,
             feature_modified_at: mtime_ms(&feature_file),
+            feature_size,
+            feature_truncated,
             questions_text,
             files,
         });
@@ -124,12 +182,67 @@ fn digest(snap: &TrackWorktreeSnapshot) -> String {
     serde_json::to_string(&(&snap.branch, &snap.features)).unwrap_or_default()
 }
 
+/// What a poll looks at first, from `stat` calls only: the branch and the
+/// size and modification time of every track file. A worktree whose
+/// fingerprint did not move is not read at all.
+fn fingerprint(worktree: &Path) -> String {
+    let stamp = |p: &Path| match std::fs::metadata(p) {
+        Ok(m) => {
+            let t = m
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            format!("{}:{t}", m.len())
+        }
+        Err(_) => "-".to_string(),
+    };
+    let mut out = ht::current_branch(worktree).unwrap_or_default();
+    for slug in ht::list_features(worktree) {
+        let dir = ht::FeatureDir::new(worktree, &slug).dir();
+        out.push('\n');
+        out.push_str(&slug);
+        for name in READABLE {
+            out.push(' ');
+            out.push_str(&stamp(&dir.join(name)));
+        }
+    }
+    out
+}
+
 #[derive(Default)]
 pub struct TrackWatchState {
     /// worktree path -> sessions attached to it.
     watched: Mutex<BTreeMap<String, BTreeSet<String>>>,
     last: Mutex<HashMap<String, String>>,
+    /// worktree path -> its fingerprint at the last read.
+    prints: Mutex<HashMap<String, String>>,
     stopped: AtomicBool,
+}
+
+impl TrackWatchState {
+    /// One poll of one worktree: the snapshot when something changed since
+    /// the last one, else None (and nothing but `stat` calls were made).
+    fn poll(&self, path: &str) -> Option<TrackWorktreeSnapshot> {
+        let print = fingerprint(Path::new(path));
+        let moved = self
+            .prints
+            .lock()
+            .map(|mut p| p.insert(path.to_string(), print.clone()) != Some(print))
+            .unwrap_or(true);
+        if !moved {
+            return None;
+        }
+        let snap = snapshot(Path::new(path));
+        let d = digest(&snap);
+        let changed = self
+            .last
+            .lock()
+            .map(|mut last| last.insert(path.to_string(), d.clone()) != Some(d))
+            .unwrap_or(false);
+        changed.then_some(snap)
+    }
 }
 
 impl TrackWatchState {
@@ -151,14 +264,7 @@ pub fn start(app: AppHandle, state: Arc<TrackWatchState>) {
                 return;
             }
             for path in state.watched_paths() {
-                let snap = snapshot(Path::new(&path));
-                let d = digest(&snap);
-                let changed = state
-                    .last
-                    .lock()
-                    .map(|mut last| last.insert(path.clone(), d.clone()) != Some(d))
-                    .unwrap_or(false);
-                if changed {
+                if let Some(snap) = state.poll(&path) {
                     if let Err(e) = app.emit(TRACK_CHANGED_EVENT, &snap) {
                         log::warn!("[track] could not emit change for {path}: {e}");
                     }
@@ -190,7 +296,11 @@ impl TrackWatchState {
     pub fn watch(&self, session_id: &str, raw_path: &str) -> Result<TrackWorktreeSnapshot, String> {
         let path = absolute_dir(raw_path)?;
         let key = path.to_string_lossy().to_string();
+        let print = fingerprint(&path);
         let snap = snapshot(&path);
+        if let Ok(mut p) = self.prints.lock() {
+            p.insert(key.clone(), print);
+        }
         if let Ok(mut w) = self.watched.lock() {
             w.entry(key.clone())
                 .or_default()
@@ -212,6 +322,9 @@ impl TrackWatchState {
             let live: BTreeSet<String> = w.keys().cloned().collect();
             if let Ok(mut last) = self.last.lock() {
                 last.retain(|k, _| live.contains(k));
+            }
+            if let Ok(mut prints) = self.prints.lock() {
+                prints.retain(|k, _| live.contains(k));
             }
         }
     }
@@ -289,6 +402,138 @@ pub struct PromoteOutcome {
     /// What happened to the branch (`hermes/<slug>`, like `hi feature new`),
     /// or `None` outside a repository.
     pub branch: Option<String>,
+    /// Every file written (feature.md, the phase prompts, the command).
+    pub written: Vec<WrittenFile>,
+}
+
+/// One file "Make it a feature" wrote, so Undo can remove exactly it.
+#[derive(Debug, Clone, Serialize, serde::Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct WrittenFile {
+    /// Relative to the worktree, forward slashes.
+    pub path: String,
+    /// FNV-1a of the bytes written: Undo leaves a file someone changed since.
+    pub hash: String,
+}
+
+fn fnv1a(bytes: &[u8]) -> String {
+    let mut h: u64 = 0xcbf2_9ce4_8422_2325;
+    for b in bytes {
+        h ^= u64::from(*b);
+        h = h.wrapping_mul(0x0100_0000_01b3);
+    }
+    format!("{h:016x}")
+}
+
+fn relative_slash(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// The files "Make it a feature" would write in this worktree now (the
+/// confirmation says how many and where): feature.md, and the phase prompts
+/// and the Claude command where the repository has none yet.
+pub fn promote_plan(root: &Path, slug: &str, track: ht::Track) -> Vec<String> {
+    if track == ht::Track::Quick {
+        return Vec::new();
+    }
+    let mut out = vec![relative_slash(
+        root,
+        &ht::FeatureDir::new(root, slug).feature_file(),
+    )];
+    for phase in ht::phases::PROMPTED_PHASES {
+        let path = root
+            .join(ht::PHASES_DIR)
+            .join(format!("{}.md", phase.as_str()));
+        if !path.exists() && phase.default_prompt().is_some() {
+            out.push(relative_slash(root, &path));
+        }
+    }
+    if !root.join(ht::CLAUDE_COMMAND_FILE).exists() {
+        out.push(ht::CLAUDE_COMMAND_FILE.replace('\\', "/"));
+    }
+    out
+}
+
+/// What "Make it a feature" would write, for its confirmation.
+#[tauri::command]
+pub fn track_promote_plan(
+    worktree_path: String,
+    slug: String,
+    track: String,
+) -> Result<Vec<String>, String> {
+    let root = absolute_dir(&worktree_path)?;
+    let slug = checked_slug(&slug)?;
+    let track = ht::Track::parse(&track).ok_or_else(|| format!("unknown track {track:?}"))?;
+    Ok(promote_plan(&root, slug, track))
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct UndoPromoteOutcome {
+    /// Files removed (unchanged since "Make it a feature" wrote them).
+    pub removed: Vec<String>,
+    /// Files kept because they changed since (an agent or the person wrote them).
+    pub kept: Vec<String>,
+}
+
+/// Undo of "Make it a feature": remove exactly the files it wrote that
+/// nobody changed since, then the folders left empty. A file that changed
+/// is kept and named, never deleted.
+pub fn undo_promote(root: &Path, written: &[WrittenFile]) -> UndoPromoteOutcome {
+    let mut out = UndoPromoteOutcome {
+        removed: Vec::new(),
+        kept: Vec::new(),
+    };
+    let mut dirs: BTreeSet<PathBuf> = BTreeSet::new();
+    for w in written {
+        // Only paths inside the two folders it writes to.
+        let rel = Path::new(&w.path);
+        let inside = (w.path.starts_with(".hermes/") || w.path.starts_with(".claude/commands/"))
+            && rel
+                .components()
+                .all(|c| matches!(c, std::path::Component::Normal(_)));
+        if !inside {
+            out.kept.push(w.path.clone());
+            continue;
+        }
+        let path = root.join(rel);
+        match std::fs::read(&path) {
+            Ok(bytes) if fnv1a(&bytes) == w.hash => match std::fs::remove_file(&path) {
+                Ok(()) => {
+                    out.removed.push(w.path.clone());
+                    let mut d = path.parent();
+                    while let Some(dir) = d {
+                        if dir == root {
+                            break;
+                        }
+                        dirs.insert(dir.to_path_buf());
+                        d = dir.parent();
+                    }
+                }
+                Err(_) => out.kept.push(w.path.clone()),
+            },
+            Ok(_) => out.kept.push(w.path.clone()),
+            Err(_) => {}
+        }
+    }
+    // Deepest first; remove_dir refuses a folder that is not empty.
+    for dir in dirs.iter().rev() {
+        let _ = std::fs::remove_dir(dir);
+    }
+    out
+}
+
+/// Undo "Make it a feature" (the toast's Undo).
+#[tauri::command]
+pub fn track_undo_promote(
+    worktree_path: String,
+    written: Vec<WrittenFile>,
+) -> Result<UndoPromoteOutcome, String> {
+    let root = absolute_dir(&worktree_path)?;
+    Ok(undo_promote(&root, &written))
 }
 
 /// "Make it a feature": the worktree gets its folder and, like `hi feature
@@ -304,12 +549,24 @@ pub fn track_promote(
     let track = ht::Track::parse(&track).ok_or_else(|| format!("unknown track {track:?}"))?;
     let out =
         ht::create(&root, &slug, track, title.as_deref().unwrap_or(""), "").map_err(track_err)?;
+    let written = out
+        .feature_file
+        .iter()
+        .chain(out.seeded.iter())
+        .filter_map(|p| {
+            std::fs::read(p).ok().map(|bytes| WrittenFile {
+                path: relative_slash(&root, p),
+                hash: fnv1a(&bytes),
+            })
+        })
+        .collect();
     let branch = ht::ensure_branch(&root, &slug);
     Ok(PromoteOutcome {
         created: out.created,
         slug,
         feature_file: out.feature_file.map(|p| p.to_string_lossy().to_string()),
         branch,
+        written,
     })
 }
 
@@ -386,13 +643,18 @@ pub fn unified_diff(name: &str, before: &str, after: &str) -> Result<String, Str
     Ok(String::from_utf8_lossy(&buf).to_string())
 }
 
-/// Pure: the review file's text and the line for the agent.
+/// Pure: the review file's text and the line for the agent. The person's
+/// edits are already saved in the file (the diff runs from what the agent
+/// handed over to what is there now), so the agent is never asked to apply
+/// them; and while the phase waits at its gate it is told to take them into
+/// account and NOT to hand the phase over again (the gate already waits).
 pub fn review_text(
     slug: &str,
     name: &str,
     n: u32,
     before: Option<&str>,
     after: &str,
+    waiting: bool,
 ) -> Result<(String, String, usize), String> {
     let rel = format!("{}/{slug}/review-{n}.md", ht::FEATURES_DIR);
     let (body, changed) = match before {
@@ -409,15 +671,23 @@ pub fn review_text(
             (format!("```diff\n{diff}```\n"), changed)
         }
         _ => (
-            format!("The file as I want it:\n\n```markdown\n{after}\n```\n"),
+            format!("The file as I saved it:\n\n```markdown\n{after}\n```\n"),
             after.lines().count(),
         ),
     };
-    let text = format!(
-        "# Review {n}: my edits to {name}\n\nApply these edits to `{}/{slug}/{name}`, keep everything else, then continue the phase.\n\n{body}",
-        ht::FEATURES_DIR
-    );
-    let line = format!("hermes review: read {rel} and apply my edits to {name}, then continue");
+    let file = format!("{}/{slug}/{name}", ht::FEATURES_DIR);
+    let (ask, line) = if waiting {
+        (
+            format!("I edited `{file}` (diff below); my edits are already in the file. Take them into account; the gate is still waiting — do not run `hi phase done` again."),
+            format!("hermes review: I edited {name} (diff in {rel}). Take it into account; the gate is still waiting — do not run `hi phase done` again."),
+        )
+    } else {
+        (
+            format!("I edited `{file}` (diff below); my edits are already in the file. Take them into account and keep working on the phase from there."),
+            format!("hermes review: I edited {name} (diff in {rel}). Take it into account and keep working on the phase from there."),
+        )
+    };
+    let text = format!("# Review {n}: my edits to {name}\n\n{ask}\n\n{body}");
     Ok((text, line, changed))
 }
 
@@ -439,7 +709,12 @@ pub fn track_write_review(
     while dir.join(format!("review-{n}.md")).exists() {
         n += 1;
     }
-    let (text, line, changed_lines) = review_text(&slug, &name, n, baseline.as_deref(), &after)?;
+    let waiting = ht::FeatureDir::new(&root, &slug)
+        .load()
+        .map(|l| l.meta.gate == ht::Gate::Waiting)
+        .unwrap_or(false);
+    let (text, line, changed_lines) =
+        review_text(&slug, &name, n, baseline.as_deref(), &after, waiting)?;
     let review = dir.join(format!("review-{n}.md"));
     ht::feature::write_atomic(&review, &text).map_err(track_err)?;
     Ok(ReviewOutcome {
@@ -579,6 +854,86 @@ mod tests {
     }
 
     #[test]
+    fn a_huge_feature_md_is_capped_and_an_unchanged_worktree_is_not_read_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        ht::create(root, "big", ht::Track::Light, "Big", "").unwrap();
+        let file = root.join(".hermes/features/big/feature.md");
+        let head = std::fs::read_to_string(&file).unwrap();
+        let big = format!("{head}{}", "log line é\n".repeat(60_000));
+        std::fs::write(&file, &big).unwrap();
+        let snap = snapshot(root);
+        let f = &snap.features[0];
+        assert!(f.feature_truncated);
+        assert_eq!(f.feature_size, big.len() as u64);
+        assert!(f.feature_text.len() as u64 <= TEXT_CAP);
+        assert!(f.feature_text.starts_with("---\nslug: big"));
+        // A plan file's lines are counted without reading it whole.
+        std::fs::write(root.join(".hermes/features/big/plan.md"), "a\nb\nc").unwrap();
+        assert_eq!(
+            count_lines(&root.join(".hermes/features/big/plan.md")),
+            Some(3)
+        );
+
+        let state = TrackWatchState::default();
+        let wt = root.to_string_lossy().to_string();
+        state.watch("s1", &wt).unwrap();
+        // Nothing moved: no snapshot (stat calls only).
+        assert!(state.poll(&wt).is_none());
+        assert!(state.poll(&wt).is_none());
+        // A real change is seen once.
+        std::fs::write(
+            root.join(".hermes/features/big/questions.md"),
+            "- [ ] Which?\n",
+        )
+        .unwrap();
+        assert!(state.poll(&wt).is_some());
+        assert!(state.poll(&wt).is_none());
+    }
+
+    #[test]
+    fn make_it_a_feature_says_what_it_writes_and_undo_removes_exactly_that() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let wt = root.to_string_lossy().to_string();
+        let plan = track_promote_plan(wt.clone(), "demo".into(), "Light".into()).unwrap();
+        assert_eq!(plan[0], ".hermes/features/demo/feature.md");
+        assert!(plan.contains(&".claude/commands/hermes-phase.md".to_string()));
+        assert!(plan.iter().any(|p| p.starts_with(".hermes/phases/")));
+        assert!(
+            track_promote_plan(wt.clone(), "demo".into(), "Quick".into())
+                .unwrap()
+                .is_empty()
+        );
+        // The person already had a .claude folder of their own.
+        std::fs::create_dir_all(root.join(".claude")).unwrap();
+        std::fs::write(root.join(".claude/settings.json"), "{}").unwrap();
+        let out = track_promote(wt.clone(), "demo".into(), "Light".into(), None).unwrap();
+        assert_eq!(
+            out.written
+                .iter()
+                .map(|w| w.path.clone())
+                .collect::<Vec<_>>(),
+            plan
+        );
+        // Someone edits one of them before Undo: it stays.
+        std::fs::write(root.join(".hermes/phases/plan.md"), "my own plan prompt\n").unwrap();
+        let undo = track_undo_promote(wt.clone(), out.written.clone()).unwrap();
+        assert_eq!(undo.kept, vec![".hermes/phases/plan.md".to_string()]);
+        assert_eq!(undo.removed.len(), plan.len() - 1);
+        assert!(!root.join(".hermes/features").exists());
+        assert!(!root.join(".claude/commands").exists());
+        assert!(root.join(".claude/settings.json").is_file());
+        assert!(root.join(".hermes/phases/plan.md").is_file());
+        // Never outside the two folders.
+        let evil = vec![WrittenFile {
+            path: "../outside.txt".into(),
+            hash: fnv1a(b""),
+        }];
+        assert_eq!(undo_promote(root, &evil).removed.len(), 0);
+    }
+
+    #[test]
     fn only_track_files_can_be_read() {
         let dir = tempfile::tempdir().unwrap();
         assert!(readable(dir.path(), "demo", "plan.md").is_ok());
@@ -591,20 +946,34 @@ mod tests {
     fn a_review_is_a_diff_against_the_handed_over_version_or_the_whole_file() {
         let before = "# Plan\n\n- [ ] index\n- [ ] query\n";
         let after = "# Plan\n\n- [ ] index (with tests)\n- [ ] query\n";
-        let (text, line, changed) = review_text("demo", "plan.md", 2, Some(before), after).unwrap();
+        let (text, line, changed) =
+            review_text("demo", "plan.md", 2, Some(before), after, true).unwrap();
         assert!(text.starts_with("# Review 2: my edits to plan.md"));
         assert!(
             text.contains("-- [ ] index\n+- [ ] index (with tests)"),
             "{text}"
         );
         assert_eq!(changed, 2);
-        assert_eq!(line, "hermes review: read .hermes/features/demo/review-2.md and apply my edits to plan.md, then continue");
-        let (text, _, changed) = review_text("demo", "plan.md", 1, None, after).unwrap();
-        assert!(text.contains("The file as I want it"));
-        assert_eq!(changed, 4);
-        let (text, _, _) = review_text("demo", "plan.md", 1, Some(after), after).unwrap();
+        // The edits are already in the file, and the gate waits: never
+        // "apply" them, never "continue", never hand the phase over again.
+        assert!(text.contains("I edited `.hermes/features/demo/plan.md` (diff below); my edits are already in the file. Take them into account; the gate is still waiting — do not run `hi phase done` again."), "{text}");
+        assert!(!text.contains("Apply these edits") && !text.contains("continue the phase"));
+        assert_eq!(line, "hermes review: I edited plan.md (diff in .hermes/features/demo/review-2.md). Take it into account; the gate is still waiting — do not run `hi phase done` again.");
+        assert!(!line.contains("then continue"));
+        // While the phase is still being written, the agent keeps working on it.
+        let (text, line, _) =
+            review_text("demo", "plan.md", 3, Some(before), after, false).unwrap();
         assert!(
-            text.contains("The file as I want it"),
+            text.contains("keep working on the phase from there"),
+            "{text}"
+        );
+        assert!(line.contains("keep working on the phase") && !line.contains("hi phase done"));
+        let (text, _, changed) = review_text("demo", "plan.md", 1, None, after, true).unwrap();
+        assert!(text.contains("The file as I saved it"));
+        assert_eq!(changed, 4);
+        let (text, _, _) = review_text("demo", "plan.md", 1, Some(after), after, true).unwrap();
+        assert!(
+            text.contains("The file as I saved it"),
             "identical: send the file"
         );
     }

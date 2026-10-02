@@ -67,6 +67,10 @@ pub struct RevertPreview {
     /// What git said when it was not clean.
     pub message: String,
     pub files: Vec<ReviewFile>,
+    /// The turn's changes are not in the worktree any more (applying the
+    /// patch forward would work): it was reverted already, nothing to undo.
+    #[serde(default)]
+    pub already_reverted: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -398,6 +402,7 @@ pub fn review_revert_preview(path: String, patch: String) -> Result<RevertPrevie
             clean: false,
             message: "this turn changed nothing that can be reverted".to_string(),
             files,
+            already_reverted: false,
         });
     }
     let (_dir, file) = write_patch_file(&patch)?;
@@ -407,12 +412,19 @@ pub fn review_revert_preview(path: String, patch: String) -> Result<RevertPrevie
             clean: true,
             message: String::new(),
             files,
+            already_reverted: false,
         }),
-        Err(message) => Ok(RevertPreview {
-            clean: false,
-            message,
-            files,
-        }),
+        Err(message) => {
+            // Not reversible, but the patch applies forward: the turn's
+            // changes are gone already (reverted before), not in conflict.
+            let already_reverted = git(&repo, &["apply", "--check", &file_str], &[]).is_ok();
+            Ok(RevertPreview {
+                clean: false,
+                message,
+                files,
+                already_reverted,
+            })
+        }
     }
 }
 
@@ -436,6 +448,12 @@ pub fn review_revert_patch(path: String, patch: String) -> Result<RevertResult, 
             ok: true,
             method: "plain".to_string(),
             message: String::new(),
+        }),
+        // Reverted already: a three-way merge would only leave markers.
+        Err(_) if git(&repo, &["apply", "--check", &file_str], &[]).is_ok() => Ok(RevertResult {
+            ok: false,
+            method: "already".to_string(),
+            message: "this turn is already reverted".to_string(),
         }),
         Err(plain) => match git(&repo, &["apply", "-R", "--3way", &file_str], &[]) {
             Ok(_) => Ok(RevertResult {
@@ -731,7 +749,19 @@ mod tests {
             review_revert_preview(repo.to_string_lossy().to_string(), turn2.clone()).unwrap();
         assert!(!again.clean);
         assert!(!again.message.is_empty());
-        let _ = turn1;
+        // ...because it was reverted already, which the preview says.
+        assert!(again.already_reverted);
+        assert!(!preview.already_reverted);
+        let result =
+            review_revert_patch(repo.to_string_lossy().to_string(), turn2.clone()).unwrap();
+        assert!(!result.ok);
+        assert_eq!(result.method, "already");
+        assert!(!repo.join("src/util.js").exists(), "nothing came back");
+        // A turn whose lines a later edit changed is in conflict, not reverted.
+        fs::write(repo.join("src/app.js"), "const a = 9;\nexport default a;\n").unwrap();
+        let conflict =
+            review_revert_preview(repo.to_string_lossy().to_string(), turn1.clone()).unwrap();
+        assert!(!conflict.clean && !conflict.already_reverted);
     }
 
     #[test]

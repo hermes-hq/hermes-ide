@@ -43,7 +43,7 @@ use snapshot::{Repo, WriteTree, DEFAULT_BUDGET};
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, State};
 
@@ -113,12 +113,35 @@ pub enum SnapshotOutcome {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RestorePreview {
     pub turn: Turn,
     /// What restoring would change, as a unified diff of the worktree now
     /// against the turn's tree.
     pub patch: String,
     pub diffstat: Diffstat,
+    /// Files with edits no turn made (the person's, since the last
+    /// snapshot): a restore sets them aside, and Undo brings them back.
+    pub set_aside: Vec<String>,
+}
+
+/// The changes no turn made, between two turns (see `between_turns`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BetweenTurns {
+    /// The turn these changes came before.
+    pub before: u32,
+    pub patch: String,
+    pub diffstat: Diffstat,
+    /// When the turn before ended (epoch ms): the changes came after it.
+    pub at: i64,
+}
+
+/// A review file Hermes writes for the person (`r` in the Track view):
+/// `.hermes/features/<slug>/review-<n>.md`.
+pub fn is_hermes_review_file(path: &str) -> bool {
+    let parts: Vec<&str> = path.split('/').collect();
+    matches!(parts.as_slice(), [".hermes", "features", _, name] if name.starts_with("review-") && name.ends_with(".md"))
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -127,6 +150,10 @@ pub struct RestoreResult {
     pub n: u32,
     /// Paths written or removed.
     pub files: u32,
+    /// The number `k` of `before-restore/<k>`, which holds the worktree as
+    /// it was before this restore: what Undo goes back to.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub set_aside: Option<u32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -159,6 +186,39 @@ pub struct TurnLedger {
     /// chatty PTY (Busy -> Idle several times before the first snapshot
     /// gets the lane) queues one worker, not one per transition.
     queued: Mutex<HashSet<String>>,
+    /// Per session, the order its background jobs (baseline at a turn's
+    /// start, snapshot at its end) were asked for: they run in that order,
+    /// so a turn start's baseline is never taken after that turn's end (it
+    /// would hand the agent's work to "between turns"), and a turn end never
+    /// overtakes the baseline of its start (it would charge the person's
+    /// edits to the agent).
+    order: Mutex<HashMap<String, Tickets>>,
+    order_cv: Condvar,
+}
+
+#[derive(Debug, Default, Clone, Copy)]
+struct Tickets {
+    next: u64,
+    serving: u64,
+}
+
+/// How long a job waits for the ones asked for before it (a stuck git).
+const ORDER_WAIT: Duration = Duration::from_secs(30);
+
+/// Held while a session's job runs; lets the next one go when dropped.
+pub struct TicketGuard<'a> {
+    ledger: &'a TurnLedger,
+    session_id: String,
+    ticket: u64,
+}
+
+impl Drop for TicketGuard<'_> {
+    fn drop(&mut self) {
+        let mut order = self.ledger.order.lock().unwrap_or_else(|p| p.into_inner());
+        let t = order.entry(self.session_id.clone()).or_default();
+        t.serving = t.serving.max(self.ticket + 1);
+        self.ledger.order_cv.notify_all();
+    }
 }
 
 impl Default for TurnLedger {
@@ -176,6 +236,41 @@ impl TurnLedger {
             degraded: Mutex::new(HashMap::new()),
             sessions: Mutex::new(HashMap::new()),
             queued: Mutex::new(HashSet::new()),
+            order: Mutex::new(HashMap::new()),
+            order_cv: Condvar::new(),
+        }
+    }
+
+    /// Take the session's next place in line, when its job is asked for.
+    pub fn take_ticket(&self, session_id: &str) -> u64 {
+        let mut order = self.order.lock().unwrap_or_else(|p| p.into_inner());
+        let t = order.entry(session_id.to_string()).or_default();
+        let k = t.next;
+        t.next += 1;
+        k
+    }
+
+    /// Wait until every job of the session asked for before `ticket` ran
+    /// (or [`ORDER_WAIT`] passed), then run; the guard lets the next go.
+    pub fn wait_ticket(&self, session_id: &str, ticket: u64) -> TicketGuard<'_> {
+        let deadline = std::time::Instant::now() + ORDER_WAIT;
+        let mut order = self.order.lock().unwrap_or_else(|p| p.into_inner());
+        loop {
+            let serving = order.get(session_id).map(|t| t.serving).unwrap_or(0);
+            let now = std::time::Instant::now();
+            if serving >= ticket || now >= deadline {
+                break;
+            }
+            order = self
+                .order_cv
+                .wait_timeout(order, deadline - now)
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+        TicketGuard {
+            ledger: self,
+            session_id: session_id.to_string(),
+            ticket,
         }
     }
 
@@ -464,16 +559,30 @@ impl TurnLedger {
             self.with_session(session_id, |s| s.turn_started_at = None);
             return Ok(SnapshotOutcome::NoChange);
         }
-        let n = {
-            let d = db.lock().map_err(|_| "database lock poisoned")?;
-            store::max_n(&d, session_id)? + 1
+        // The review files Hermes writes for the person while the agent
+        // works (`.hermes/features/<slug>/review-<n>.md`) are not the
+        // agent's: they go into the baseline the turn is diffed against.
+        let hermes_paths: Vec<String> = repo
+            .paths_between(&before_tree, &tree)?
+            .into_iter()
+            .filter(|p| is_hermes_review_file(p))
+            .collect();
+        let agent_before = if hermes_paths.is_empty() {
+            before_tree.clone()
+        } else {
+            repo.graft(&before_tree, &tree, &hermes_paths)?
         };
-        let git_ref = turn_ref(session_id, n).ok_or("turn ref")?;
         // The first change this session records: its baseline (kept in
         // memory until now) becomes the root of the chain, so the diff of
         // turn 1 is against the worktree as the session found it.
-        let parent = match (state.last_commit.clone(), state.last_tree.as_deref()) {
+        let mut parent = match (state.last_commit.clone(), state.last_tree.as_deref()) {
             (Some(c), _) => Some(c),
+            (None, Some(_)) if agent_before == tree => {
+                // Only Hermes's files moved, and nothing was recorded yet.
+                self.remember_baseline(session_id, &tree, None);
+                self.with_session(session_id, |s| s.turn_started_at = None);
+                return Ok(SnapshotOutcome::NoChange);
+            }
             (None, Some(base_tree)) => {
                 let head = repo.rev_parse("HEAD");
                 let base = repo.commit_tree(
@@ -486,6 +595,26 @@ impl TurnLedger {
             }
             (None, None) => repo.rev_parse("HEAD"),
         };
+        if agent_before != before_tree {
+            let base = repo.commit_tree(
+                &agent_before,
+                parent.as_deref(),
+                &format!("Hermes baseline for session {session_id} (review files)"),
+            )?;
+            repo.update_ref(&base_ref(session_id), &base)?;
+            if agent_before == tree {
+                self.remember_baseline(session_id, &tree, Some(&base));
+                self.with_session(session_id, |s| s.turn_started_at = None);
+                return Ok(SnapshotOutcome::NoChange);
+            }
+            parent = Some(base);
+        }
+        let before_tree = agent_before;
+        let n = {
+            let d = db.lock().map_err(|_| "database lock poisoned")?;
+            store::max_n(&d, session_id)? + 1
+        };
+        let git_ref = turn_ref(session_id, n).ok_or("turn ref")?;
         let commit = repo.commit_tree(
             &tree,
             parent.as_deref(),
@@ -581,6 +710,62 @@ impl TurnLedger {
         Ok(Some(TurnDiff { turn, patch }))
     }
 
+    /// What changed between turn `n - 1` and the start of turn `n` that no
+    /// turn made (the person's edits, a restore, the review files Hermes
+    /// wrote): the snapshot before turn `n` against turn `n - 1`'s. None for
+    /// the first turn, a summary-only turn, or when nothing changed.
+    pub fn between_turns(
+        &self,
+        db: &Mutex<Database>,
+        session_id: &str,
+        n: u32,
+        cwd: &Path,
+    ) -> Result<Option<BetweenTurns>, String> {
+        if n < 2 {
+            return Ok(None);
+        }
+        let (turn, prev) = {
+            let d = db.lock().map_err(|_| "database lock poisoned")?;
+            (
+                store::get_turn(&d, session_id, n)?,
+                store::get_turn(&d, session_id, n - 1)?,
+            )
+        };
+        let (Some(turn), Some(prev)) = (turn, prev) else {
+            return Ok(None);
+        };
+        if turn.degraded || prev.degraded {
+            return Ok(None);
+        }
+        let Some(repo) = Repo::discover(cwd) else {
+            return Ok(None);
+        };
+        let (Some(commit), Some(prev_commit)) =
+            (repo.rev_parse(&turn.git_ref), repo.rev_parse(&prev.git_ref))
+        else {
+            return Ok(None);
+        };
+        let Some(start) = repo.parent_of(&commit) else {
+            return Ok(None);
+        };
+        let (Some(start_tree), Some(prev_tree)) =
+            (repo.tree_of(&start), repo.tree_of(&prev_commit))
+        else {
+            return Ok(None);
+        };
+        if start_tree == prev_tree {
+            return Ok(None);
+        }
+        let diffstat = repo.diffstat(&prev_tree, &start_tree)?;
+        let patch = repo.patch(&prev_tree, &start_tree)?;
+        Ok(Some(BetweenTurns {
+            before: n,
+            patch,
+            diffstat,
+            at: prev.ended_at.unwrap_or(prev.started_at),
+        }))
+    }
+
     fn turn_target(
         &self,
         db: &Mutex<Database>,
@@ -618,6 +803,7 @@ impl TurnLedger {
         };
         let lane = self.lane(&repo.lane_key());
         let _flight = lane.lock().unwrap_or_else(|p| p.into_inner());
+        let state = self.session_state(db, session_id, &repo);
         let Some((turn, _commit, target)) = self.turn_target(db, session_id, n, &repo)? else {
             return Ok(None);
         };
@@ -627,11 +813,53 @@ impl TurnLedger {
         };
         let patch = repo.patch(&current, &target)?;
         let diffstat = repo.diffstat(&current, &target)?;
+        let set_aside = match state.last_tree.as_deref() {
+            Some(last) if last != current => repo
+                .paths_between(last, &current)?
+                .into_iter()
+                .filter(|p| !is_hermes_review_file(p))
+                .collect(),
+            _ => Vec::new(),
+        };
         Ok(Some(RestorePreview {
             turn,
             patch,
             diffstat,
+            set_aside,
         }))
+    }
+
+    /// Undo a restore: the worktree goes back to what restore `k` set aside
+    /// (`refs/hermes/<session>/before-restore/<k>`), the person's edits
+    /// included.
+    pub fn undo_restore(
+        &self,
+        db: &Mutex<Database>,
+        session_id: &str,
+        k: u32,
+        cwd: &Path,
+    ) -> Result<RestoreResult, String> {
+        let Some(repo) = Repo::discover(cwd) else {
+            return Err("this session is not in a git repository".to_string());
+        };
+        let lane = self.lane(&repo.lane_key());
+        let _flight = lane.lock().unwrap_or_else(|p| p.into_inner());
+        let _ = self.session_state(db, session_id, &repo);
+        let kept = repo
+            .rev_parse(&before_restore_ref(session_id, k as usize))
+            .ok_or_else(|| "what that restore set aside is gone".to_string())?;
+        let target = repo.tree_of(&kept).ok_or("set-aside tree")?;
+        let current = match repo.write_tree(BASELINE_BUDGET)? {
+            WriteTree::Tree(t) => t,
+            WriteTree::TooSlow { .. } => return Err("reading the worktree timed out".to_string()),
+        };
+        let files = repo.restore(&current, &target)?;
+        self.remember(session_id, &target, &kept);
+        Ok(RestoreResult {
+            n: 0,
+            files,
+            set_aside: None,
+        })
     }
 
     /// Make the worktree exactly the tree of turn `n`. The state before is
@@ -657,19 +885,28 @@ impl TurnLedger {
             WriteTree::Tree(t) => t,
             WriteTree::TooSlow { .. } => return Err("reading the worktree timed out".to_string()),
         };
-        if state.last_tree.as_deref() != Some(current.as_str()) {
-            let parent = state.last_commit.clone().or_else(|| repo.rev_parse("HEAD"));
-            let keep = repo.commit_tree(
-                &current,
-                parent.as_deref(),
-                &format!("Hermes: worktree before restoring turn {n}"),
-            )?;
-            let k = repo.refs_under(&before_restore_prefix(session_id)).len() + 1;
-            repo.update_ref(&before_restore_ref(session_id, k), &keep)?;
-        }
+        // What is there now is always kept (Undo brings it back): as its own
+        // commit when it differs from the last snapshot, else that snapshot.
+        let keep = match (state.last_tree.as_deref(), state.last_commit.clone()) {
+            (Some(last), Some(c)) if last == current => c,
+            _ => {
+                let parent = state.last_commit.clone().or_else(|| repo.rev_parse("HEAD"));
+                repo.commit_tree(
+                    &current,
+                    parent.as_deref(),
+                    &format!("Hermes: worktree before restoring turn {n}"),
+                )?
+            }
+        };
+        let k = repo.refs_under(&before_restore_prefix(session_id)).len() + 1;
+        repo.update_ref(&before_restore_ref(session_id, k), &keep)?;
         let files = repo.restore(&current, &target)?;
         self.remember(session_id, &target, &commit);
-        Ok(Some(RestoreResult { n, files }))
+        Ok(Some(RestoreResult {
+            n,
+            files,
+            set_aside: Some(k as u32),
+        }))
     }
 }
 
@@ -752,27 +989,62 @@ fn spawn_worker(app: &AppHandle, name: &'static str, f: impl FnOnce(&AppHandle) 
     }
 }
 
+/// A session's job, run in the order it was asked for among that
+/// session's jobs (see [`TurnLedger::take_ticket`]).
+fn spawn_in_order(
+    app: &AppHandle,
+    ledger: &TurnLedger,
+    session_id: &str,
+    name: &'static str,
+    f: impl FnOnce(&AppHandle, &AppState, &TurnLedger) + Send + 'static,
+) {
+    let ticket = ledger.take_ticket(session_id);
+    let sid = session_id.to_string();
+    let app2 = app.clone();
+    let started = std::thread::Builder::new()
+        .name(format!("turn-ledger-{name}"))
+        .spawn(move || {
+            let (Some(state), Some(ledger)) =
+                (app2.try_state::<AppState>(), app2.try_state::<TurnLedger>())
+            else {
+                return;
+            };
+            let _turn = ledger.wait_ticket(&sid, ticket);
+            f(&app2, &state, &ledger);
+        });
+    if let Err(e) = started {
+        log::warn!("[turn-ledger] could not start the {name} worker: {e}");
+        // Let the session's next job go.
+        drop(ledger.wait_ticket(session_id, ticket));
+    }
+}
+
 /// A session got its terminal: take its baseline in the background.
 pub fn on_session_started(app: &AppHandle, session_id: &str, cwd: &str) {
-    let ledger = app.try_state::<TurnLedger>();
-    if !ledger.map(|l| l.is_enabled()).unwrap_or(false) {
+    let Some(ledger) = app.try_state::<TurnLedger>() else {
+        return;
+    };
+    if !ledger.is_enabled() {
         return;
     }
     let sid = session_id.to_string();
     let cwd = PathBuf::from(cwd);
-    spawn_worker(app, "baseline", move |app| {
-        let (Some(state), Some(ledger)) =
-            (app.try_state::<AppState>(), app.try_state::<TurnLedger>())
-        else {
-            return;
-        };
-        if let Err(e) = ledger.ensure_baseline(&state.db, &sid, &cwd) {
-            log::warn!("[turn-ledger] baseline for {sid}: {e}");
-        }
-    });
+    spawn_in_order(
+        app,
+        &ledger,
+        session_id,
+        "baseline",
+        move |_, state, ledger| {
+            if let Err(e) = ledger.ensure_baseline(&state.db, &sid, &cwd) {
+                log::warn!("[turn-ledger] baseline for {sid}: {e}");
+            }
+        },
+    );
 }
 
-/// A turn began. `exact` when the agent itself said so.
+/// A turn began. `exact` when the agent itself said so. The worktree as it
+/// is now becomes what the turn is diffed against: whatever changed since
+/// the last turn (the person's edits) is never the agent's.
 pub fn on_turn_started(app: &AppHandle, session_id: &str, at: i64, exact: bool) {
     let Some(ledger) = app.try_state::<TurnLedger>() else {
         return;
@@ -784,16 +1056,17 @@ pub fn on_turn_started(app: &AppHandle, session_id: &str, at: i64, exact: bool) 
         return;
     };
     let sid = session_id.to_string();
-    spawn_worker(app, "turn-start", move |app| {
-        let (Some(state), Some(ledger)) =
-            (app.try_state::<AppState>(), app.try_state::<TurnLedger>())
-        else {
-            return;
-        };
-        if let Err(e) = ledger.ensure_baseline(&state.db, &sid, &cwd) {
-            log::warn!("[turn-ledger] baseline at turn start for {sid}: {e}");
-        }
-    });
+    spawn_in_order(
+        app,
+        &ledger,
+        session_id,
+        "turn-start",
+        move |_, state, ledger| {
+            if let Err(e) = ledger.ensure_baseline(&state.db, &sid, &cwd) {
+                log::warn!("[turn-ledger] baseline at turn start for {sid}: {e}");
+            }
+        },
+    );
 }
 
 /// A turn ended: snapshot in the background and tell the frontend.
@@ -812,13 +1085,12 @@ pub fn on_turn_ended(app: &AppHandle, session_id: &str, at: i64, exact: bool) {
         return;
     }
     let sid = session_id.to_string();
-    spawn_worker(app, "turn-end", move |app| {
-        let (Some(state), Some(ledger)) =
-            (app.try_state::<AppState>(), app.try_state::<TurnLedger>())
-        else {
-            return;
-        };
-        match ledger.record_turn(&state.db, &sid, &cwd, None, at) {
+    spawn_in_order(
+        app,
+        &ledger,
+        session_id,
+        "turn-end",
+        move |app, state, ledger| match ledger.record_turn(&state.db, &sid, &cwd, None, at) {
             Ok(SnapshotOutcome::Recorded(turn)) | Ok(SnapshotOutcome::Degraded(turn)) => {
                 log::info!(
                     "[turn-ledger] {sid} turn {} ({} files, +{} -{}){}",
@@ -845,8 +1117,8 @@ pub fn on_turn_ended(app: &AppHandle, session_id: &str, at: i64, exact: bool) {
             }
             Ok(SnapshotOutcome::Disabled) => {}
             Err(e) => log::warn!("[turn-ledger] snapshot for {sid} failed: {e}"),
-        }
-    });
+        },
+    );
 }
 
 /// The PTY heuristic: a session running an agent goes Busy -> Idle or
@@ -879,13 +1151,13 @@ pub fn on_phase_change(
             }
             let sid = session_id.to_string();
             let cwd = PathBuf::from(cwd);
-            spawn_worker(app, "turn-end-guess", move |app| {
-                let (Some(state), Some(ledger)) =
-                    (app.try_state::<AppState>(), app.try_state::<TurnLedger>())
-                else {
-                    return;
-                };
-                match ledger.record_turn(&state.db, &sid, &cwd, None, at) {
+            spawn_in_order(
+                app,
+                &ledger,
+                session_id,
+                "turn-end-guess",
+                move |app, state, ledger| match ledger.record_turn(&state.db, &sid, &cwd, None, at)
+                {
                     Ok(SnapshotOutcome::Recorded(turn)) | Ok(SnapshotOutcome::Degraded(turn)) => {
                         emit(
                             app,
@@ -898,11 +1170,28 @@ pub fn on_phase_change(
                     }
                     Ok(_) => {}
                     Err(e) => log::warn!("[turn-ledger] guessed turn for {sid} failed: {e}"),
-                }
-            });
+                },
+            );
         }
-        (_, SessionPhase::Busy) => {
-            ledger.note_turn_started(session_id, at, false);
+        (from, SessionPhase::Busy) if !matches!(from, SessionPhase::Busy) => {
+            // A guessed turn start takes the baseline too, like an exact
+            // one: the person's edits since the last turn are theirs.
+            if !ledger.note_turn_started(session_id, at, false) {
+                return;
+            }
+            let sid = session_id.to_string();
+            let cwd = PathBuf::from(cwd);
+            spawn_in_order(
+                app,
+                &ledger,
+                session_id,
+                "turn-start-guess",
+                move |_, state, ledger| {
+                    if let Err(e) = ledger.ensure_baseline(&state.db, &sid, &cwd) {
+                        log::warn!("[turn-ledger] baseline at a guessed turn start for {sid}: {e}");
+                    }
+                },
+            );
         }
         _ => {}
     }
@@ -1031,6 +1320,50 @@ pub fn restore_turn(
         );
     }
     Ok(result)
+}
+
+/// Undo of a restore (the turn bar's Undo): back to what restore `k` set aside.
+#[tauri::command]
+pub fn undo_restore_turn(
+    app: AppHandle,
+    ledger: State<'_, TurnLedger>,
+    state: State<'_, AppState>,
+    session_id: String,
+    k: u32,
+) -> Result<RestoreResult, String> {
+    if turn_ref(&session_id, 1).is_none() {
+        return Err(format!("not a session id: {session_id:?}"));
+    }
+    let cwd = session_cwd(&app, &session_id).ok_or("unknown session")?;
+    let result = ledger.undo_restore(&state.db, &session_id, k, &cwd)?;
+    emit(
+        &app,
+        TurnLedgerEvent {
+            session_id,
+            turn: None,
+            restored_to: None,
+        },
+    );
+    Ok(result)
+}
+
+/// What changed before turn `n` that no turn made (the Review Desk's
+/// "Between turns · you" row), or null.
+#[tauri::command]
+pub fn turn_ledger_between(
+    app: AppHandle,
+    ledger: State<'_, TurnLedger>,
+    state: State<'_, AppState>,
+    session_id: String,
+    n: u32,
+) -> Result<Option<BetweenTurns>, String> {
+    if turn_ref(&session_id, n.max(1)).is_none() {
+        return Err(format!("not a turn: {session_id:?} #{n}"));
+    }
+    let Some(cwd) = session_cwd(&app, &session_id) else {
+        return Ok(None);
+    };
+    ledger.between_turns(&state.db, &session_id, n, &cwd)
 }
 
 #[cfg(test)]
@@ -1237,6 +1570,84 @@ mod tests {
     }
 
     #[test]
+    fn the_persons_edits_between_turns_are_their_own_row_and_never_a_turns() {
+        let t = TestRepo::new();
+        let (_d, db) = open_db();
+        let db = Mutex::new(db);
+        let l = ledger();
+        l.ensure_baseline(&db, "s1", t.root()).unwrap();
+        write(t.root(), "agent1.txt", "by the agent\n");
+        recorded(l.record_turn(&db, "s1", t.root(), None, 1).unwrap());
+        // Between turns: the person.
+        write(t.root(), "person.txt", "mine\n");
+        // Turn 2 starts (the baseline), the agent works.
+        l.ensure_baseline(&db, "s1", t.root()).unwrap();
+        write(t.root(), "agent2.txt", "by the agent\n");
+        // Hermes writes a review file while the agent works.
+        write(
+            t.root(),
+            ".hermes/features/demo/review-1.md",
+            "# Review 1\n",
+        );
+        let two = recorded(l.record_turn(&db, "s1", t.root(), None, 2).unwrap());
+        assert_eq!(two.diffstat.files, 1, "{:?}", two.diffstat);
+        let diff = l.turn_diff(&db, "s1", 2, Some(t.root())).unwrap().unwrap();
+        assert!(diff.patch.contains("agent2.txt"), "{}", diff.patch);
+        assert!(!diff.patch.contains("person.txt"), "{}", diff.patch);
+        assert!(!diff.patch.contains("review-1.md"), "{}", diff.patch);
+        // The person's edit (and Hermes's file) are the "between turns" row.
+        let between = l.between_turns(&db, "s1", 2, t.root()).unwrap().unwrap();
+        assert_eq!(between.before, 2);
+        assert!(between.patch.contains("person.txt"), "{}", between.patch);
+        assert!(between.patch.contains("review-1.md"), "{}", between.patch);
+        assert!(!between.patch.contains("agent2.txt"), "{}", between.patch);
+        assert!(l.between_turns(&db, "s1", 1, t.root()).unwrap().is_none());
+        // A turn that only Hermes's review file moved records nothing.
+        l.ensure_baseline(&db, "s1", t.root()).unwrap();
+        write(
+            t.root(),
+            ".hermes/features/demo/review-2.md",
+            "# Review 2\n",
+        );
+        assert_eq!(
+            l.record_turn(&db, "s1", t.root(), None, 3).unwrap(),
+            SnapshotOutcome::NoChange
+        );
+        // No edit between turns: no row.
+        write(t.root(), "agent3.txt", "x\n");
+        recorded(l.record_turn(&db, "s1", t.root(), None, 4).unwrap());
+        assert!(l.between_turns(&db, "s1", 3, t.root()).unwrap().is_some());
+        assert!(is_hermes_review_file(".hermes/features/x/review-12.md"));
+        assert!(!is_hermes_review_file(".hermes/features/x/plan.md"));
+        assert!(!is_hermes_review_file("src/review-1.md"));
+    }
+
+    #[test]
+    fn a_sessions_jobs_run_in_the_order_they_were_asked_for() {
+        let l = Arc::new(ledger());
+        let start = l.take_ticket("s1");
+        let end = l.take_ticket("s1");
+        let other = l.take_ticket("s2");
+        let log = Arc::new(Mutex::new(Vec::new()));
+        // The turn end's worker is scheduled first, but waits for the start.
+        let (l2, log2) = (l.clone(), log.clone());
+        let ender = std::thread::spawn(move || {
+            let _g = l2.wait_ticket("s1", end);
+            log2.lock().unwrap().push("end");
+        });
+        std::thread::sleep(Duration::from_millis(50));
+        assert!(log.lock().unwrap().is_empty(), "the end waits");
+        // Another session never waits for this one.
+        drop(l.wait_ticket("s2", other));
+        {
+            let _g = l.wait_ticket("s1", start);
+            log.lock().unwrap().push("start");
+        }
+        ender.join().unwrap();
+        assert_eq!(*log.lock().unwrap(), vec!["start", "end"]);
+    }
+
+    #[test]
     fn the_chain_survives_a_restart_of_the_ledger() {
         let t = TestRepo::new();
         let (_d, db) = open_db();
@@ -1387,8 +1798,20 @@ mod tests {
         );
         assert!(l.preview_restore(&db, "s1", 9, t.root()).unwrap().is_none());
 
+        assert_eq!(
+            preview.set_aside,
+            vec!["src/app.txt".to_string()],
+            "the edit no turn made is named"
+        );
         let result = l.restore(&db, "s1", 1, t.root()).unwrap().unwrap();
-        assert_eq!(result, RestoreResult { n: 1, files: 3 });
+        assert_eq!(
+            result,
+            RestoreResult {
+                n: 1,
+                files: 3,
+                set_aside: Some(1)
+            }
+        );
         assert_eq!(
             std::fs::read_to_string(t.root().join("src/app.txt")).unwrap(),
             "turn one\n"
@@ -1468,9 +1891,20 @@ mod tests {
             .unwrap()
             .contains("+after four"));
         // Restoring when the worktree already is the last snapshot keeps
-        // nothing new: the snapshot itself holds that state.
-        l.restore(&db, "s1", 1, t.root()).unwrap().unwrap();
-        assert_eq!(t.repo.refs_under("refs/hermes/s1/before-restore/").len(), 2);
+        // that snapshot itself (no new commit), so Undo can go back to it.
+        let again = l.restore(&db, "s1", 1, t.root()).unwrap().unwrap();
+        assert_eq!(again.set_aside, Some(3));
+        assert_eq!(
+            t.repo.rev_parse("refs/hermes/s1/before-restore/3"),
+            t.repo.rev_parse("refs/hermes/s1/turn/3"),
+        );
+        // Undo of the second restore brings "after four" back.
+        l.undo_restore(&db, "s1", 2, t.root()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(t.root().join("src/app.txt")).unwrap(),
+            "after four\n"
+        );
+        assert!(l.undo_restore(&db, "s1", 9, t.root()).is_err());
     }
 
     #[test]

@@ -124,8 +124,11 @@ fn hi_phase_plan_prints_the_prompt_and_creates_plan_md_from_its_template() {
         "only one"
     );
 
-    // The Light track starts at questions; skip it to reach plan.
+    // The Light track starts at questions; the agent cannot skip it, the
+    // person can (from their own shell), to reach plan.
     let out = hi(root, &["phase", "skip"], true);
+    assert_eq!(out.status.code(), Some(3), "{}", text(&out.stderr));
+    let out = hi(root, &["phase", "skip"], false);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
     let out = hi(root, &["phase", "plan"], true);
     assert_eq!(out.status.code(), Some(0), "{}", text(&out.stderr));
@@ -181,8 +184,8 @@ fn hi_approve_exits_non_zero_inside_an_agent_process_and_works_for_a_person() {
     );
     // ...or to skip past it, or to start the next phase.
     let out = hi(root, &["phase", "skip"], true);
-    assert_eq!(out.status.code(), Some(4));
-    assert!(text(&out.stderr).contains("only a person can skip it"));
+    assert_eq!(out.status.code(), Some(3));
+    assert!(text(&out.stderr).contains("hi phase skip is for people, not agents"));
     let out = hi(root, &["phase", "plan"], true);
     assert_eq!(out.status.code(), Some(4));
     assert!(text(&out.stderr).contains("waiting for a person's approval"));
