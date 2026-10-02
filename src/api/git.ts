@@ -296,22 +296,6 @@ export async function detachWorktree(sessionId: string, projectId: string): Prom
   return invoke<void>("git_detach_worktree", { sessionId, projectId });
 }
 
-/**
- * Commit a session worktree's uncommitted changes: on its own branch
- * ("session") or on a new hermes-archive/<branch> branch ("archive").
- * Never touches the stash.
- */
-export async function commitWorktree(
-  sessionId: string,
-  projectId: string,
-  message: string,
-  target: "session" | "archive",
-  /** The branch the dialog named: the backend refuses if the worktree is on another. */
-  expectedBranch?: string | null,
-): Promise<CommitOutcome> {
-  return invoke<CommitOutcome>("git_commit_worktree", { sessionId, projectId, message, target, expectedBranch: expectedBranch ?? null });
-}
-
 /** Unlink the session from its worktree so closing it leaves the folder on disk. Returns the folder. */
 export async function keepWorktree(sessionId: string, projectId: string): Promise<string> {
   return invoke<string>("git_keep_worktree", { sessionId, projectId });
