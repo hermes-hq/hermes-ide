@@ -1,161 +1,100 @@
-# Hermes IDE 1.4.1
+# Hermes IDE 2.0.0
 
-Every agent now opens in its own terminal, updates wait until your agents
-are done, a crash stays inside its pane, and Hermes is private by default.
+Hermes 2.0 is a vendor-neutral console for every coding agent, terminal first. Claude Code, Codex, Antigravity, GitHub Copilot, OpenCode, goose, Aider, Kiro, Hermes Agent or any command you add run in their own terminal interface, exactly as they run anywhere else, and Hermes supervises them all the same way: it starts them, tells you which one needs you, records what each turn changed and helps you review and land the result. Hermes follows what your agents report and never answers a prompt on their behalf. The Agent view for Claude stays available as an option. Hermes IDE is not affiliated with Nous Research or its Hermes Agent.
 
-## Terminal first, for every agent
+## Headline features
 
-- New sessions open every agent, Claude included, in the agent's own
-  terminal interface, exactly as it runs anywhere else.
-- Claude's Agent view is now an option: tick **Agent view for Claude** on
-  the agent step of New Session to have Hermes render the conversation
-  instead.
-- New Session starts straight on "What do you want to run?"; the separate
-  mode step is gone, and **Connect over SSH** is a link on that step.
-- Hermes remembers the agent you picked and how you ran it, and preselects
-  both next time.
-- Saved Agent-view sessions still restore in the Agent view.
+### Every agent, started and resumed the same way
 
-## Updates wait for your agents
+- Hermes knows today's coding agents and how to install and sign in to each one, now including Antigravity CLI, GitHub Copilot CLI, OpenCode, goose and Hermes Agent.
+- Add any other command-line agent as a **Custom agent**: it runs in a terminal and shows under its own name in the sidebar.
+- Add more than one account for an agent: each signs in on its own, shows its own models and never borrows another account's sign-in.
+- Every agent starts from one short line that is the same on every shell and OS, instead of its own launch command typed with shell-specific quoting.
+- Quit and reopen Hermes and each agent continues its own conversation in its own folder; if an agent cannot resume, it says so in one line and starts fresh.
+- When an agent refuses to start (a model your account does not have, or you are signed out), the session says why in the agent's own words and offers to retry, pick another model or sign in.
+- An agent stuck at a "do you trust this folder?" prompt is marked as waiting at a startup prompt instead of stalling unseen.
 
-- An update no longer relaunches Hermes while an agent is mid-turn or a
-  command is still running; the dialog says how many sessions it is
-  waiting for and offers **Relaunch now** if you want to install anyway.
-- New builds go to a **beta** channel first and reach stable after a soak
-  period; pick your channel in Settings → General → Update channel.
-- Before your data is updated, Hermes saves a copy of it and keeps the
-  three newest copies.
-- An older Hermes no longer opens data saved by a newer one: it explains
-  why, offers only Quit, and leaves your data exactly as it was, even
-  after a crash.
-- On Linux, in-app updates now install the .deb package.
+### Know which agent needs you
 
-## A crash stays in its pane
+- Hermes knows when each terminal agent needs approval, asks a question, finishes or fails, with nothing for you to set up.
+- Every session shows one clear status (working, needs approval, asked you, done, error, idle) as a word and a symbol, dimmed when Hermes is only guessing.
+- A badge in the title bar counts the agents blocked on you and opens an inbox of everything waiting, oldest first, where you can peek at each request before jumping to it.
+- Press ⌘I to jump straight to the agent that has waited longest, and press it again to visit the next one. On Windows and Linux that is Ctrl+Shift+I, and Ctrl+Shift+A opens the inbox.
+- Notifications arrive only when an agent is blocked on you or done, never for the session you are looking at, and your computer stays awake while an agent is working.
+- Away from your desk, Hermes can send a short message to a web address you set up (for example ntfy or Telegram) with only the agent, the task and its state, never your prompts or code, including for the session you left in view once you have been away a while.
+- The session header shows which model and permission mode each agent is using.
 
-- If something inside one pane fails, only that pane shows an error card
-  with **Reload pane** and **Close pane**; the other panes, the session
-  list and the running shells keep working, and Reload brings the pane
-  back with its scrollback.
-- A failure inside a single agent message shows an error card in that
-  message instead of blanking the conversation.
-- If the whole window's interface fails, it can be reloaded without
-  losing any session.
+### Start a task in seconds
 
-## Private by default
+- Press ⌘N, describe the task and press Enter: an agent starts in a terminal on its own new branch with your task as its first prompt.
+- The launcher keeps what you typed through a sign-in or a visit to Settings, remembers your usual agent and options for each project, and gives a repeated task the next free branch name instead of an error.
+- A new task's dependencies are ready in seconds when they match your main checkout, and parallel dev servers get their own ports.
+- A `.hermes/worktree.toml` file in your repository lists setup commands, files to copy such as `.env`, and a default check, and each new task runs it with a visible log.
+- First launch takes three steps: see which agents are installed and signed in, pick a repository, launch a first task.
+- Settings → Agents shows the same agent check at any time, with install and Sign in actions.
 
-- Usage analytics is off on a fresh install; nothing is sent unless you
-  opt in, and until then the analytics component is not even loaded.
-- Turning analytics on or off in Settings → Privacy takes effect at once,
-  without a restart.
-- If you do opt in, the three usage events (app started, session created,
-  feature used) are now actually sent; before this release none left the
-  app.
-- New **Delete Session Data…** action in a session's right-click menu
-  clears what Hermes keeps about that session: saved terminal output,
-  command history, token usage, pinned and remembered context, and agent
-  state. It asks first, and leaves the session and its repository alone.
-- A plugin can no longer read another plugin's stored data, use another
-  plugin's permissions, grant itself permissions, or see what else is
-  installed; installed plugins keep working unchanged.
+### Record, review, land
 
-## Ctrl+letter belongs to the terminal (Windows and Linux)
+- Every agent turn is saved in git, including changes made through shell commands, without touching your branch, staged changes or stash, and your own edits between turns are never charged to an agent.
+- A bar under the terminal shows what the last turn changed, with Diff and Restore; Restore shows a preview, says what it sets aside and offers Undo.
+- The Review Desk (⌘G, Ctrl+Shift+G on Windows and Linux) shows everything an agent changed, by turn or by file, and sends your line comments back to the agent that wrote those lines.
+- Revert a single turn after a preview, and see flags on risky changes such as lockfiles, CI workflows, secrets, new binaries and edits to an agent's own configuration.
+- The Land sheet commits on the branch, opens a pull request or merges locally in one step, drafts the commit message from the task and the turns, and can undo afterwards. It lands into the branch the task started from and never over an edit you have not committed.
+- Pull, Abort Merge and Discard keep your uncommitted work, and closing a task never deletes commits or unmerged branches without asking.
+- Hermes's own commits run your repository's hooks, and a refusal is shown exactly as the hook said it.
+- Your checks decide when an agent is done: the commands you list run at the end of each turn and before landing, a failing check shows on the session, and Claude is sent back to fix it, up to three times.
+- Sessions whose recent turns touched the same files show an overlap badge, so you know before merging.
 
-- Ctrl+A, Ctrl+D, Ctrl+E, Ctrl+W and the other Ctrl+letter keys now reach
-  the shell or agent in a focused terminal instead of running app
-  shortcuts; Ctrl+D ends input, it no longer splits the pane.
-- App shortcuts on Windows and Linux are now Ctrl+Shift+letter, like
-  Windows Terminal: Ctrl+Shift+D splits, Ctrl+Shift+W closes,
-  Ctrl+Shift+K opens the command palette. The old Ctrl+letter shortcuts
-  still work when no terminal has focus.
-- Shortcuts follow the letters printed on your keyboard (AZERTY, Dvorak,
-  …); the menus and the Keyboard Shortcuts panel show the right keys for
-  your platform.
-- The Keyboard Shortcuts panel and Settings → Shortcuts now list every
-  shortcut the app really has, in your interface language, and nothing
-  that doesn't exist; a shortcuts reference page is included in the docs.
-- macOS is unchanged.
+### Feature Tracks
 
-## Safer approvals in Agent view
+- Bigger work can follow guided phases (questions, research, design, structure, plan, implement) kept as short markdown files in your repository that you review in your own editor.
+- When a phase waits for your approval it appears in the inbox, and approving it moves the feature to the next phase. Only you can approve or skip a phase, and skipping asks first.
+- Any agent can drive a track from its own terminal, and quick tasks create no extra files.
 
-- An approval prompt no longer grabs keyboard focus: if the agent asks for
-  permission while you are typing, Enter sends your message and never
-  approves the command by accident.
-- **Always allow** now saves the rule to the current project's own Claude
-  settings instead of your global ones, so approving a command in one
-  project no longer approves it everywhere; the saved rules are listed
-  under Permissions in the Context tab.
-- Clicking Retry twice now restarts the agent once instead of starting two
-  agent processes for one session.
+### Agents survive restarts and updates
 
-## Faster start
+- On macOS and Linux, agents keep running while Hermes quits, updates or crashes, and you reattach to them exactly where they were, with their status reports still flowing.
+- Quitting while an agent is working, or a command is still running, asks whether to keep it running or stop it; with only queued tasks it says they are kept.
+- If Hermes's background service stops, your sessions stay listed with their output and come back when you press Restart.
 
-- Settings, the plugin manager, the code editor, the Agent view, the New
-  Session wizard, side panels and the welcome screens load the first time
-  they are needed, and only the language in use is loaded.
-- Terminal-only use starts no extra agent process at launch.
-- Hermes no longer slows down after days of use: the per-session activity
-  history is capped instead of growing without bound.
+## Everyday improvements
 
-## Hermes never types into your terminal
+- Each agent session shows which instruction files that agent loads, and one action links `CLAUDE.md` to `AGENTS.md` so every agent follows the same project rules.
+- A read-only view lists the MCP servers each agent sees in a project.
+- A context gauge shows how full each agent's context window is, for agents that report it.
+- When an agent hits its usage limit, the session says so with the reset time, and you can continue the task in another agent.
+- Spend is shown exactly where the agent reports it and, where it does not, as an estimate marked "(estimated)" or as "n/a"; an optional spending cap per session or feature acts only on reported spend.
+- Line up tasks with a limit on how many agents run at once; the next one starts when a slot frees up, and queued tasks survive a quit.
+- Many open terminals stay smooth, each agent's memory use is shown on its row, and a layout tiles the agents that are working.
+- Windows and Linux have session and pane shortcuts, Ctrl+Shift+C and V to copy and paste, and right-click Paste in the terminal, and menus show the keys that work on your system.
+- A very large paste arrives whole, and the session follows the folder you `cd` into in zsh and bash.
+- Dialogs keep the keyboard while they are open, and every new screen is translated and works with only a keyboard or with a screen reader.
+- Settings and the agent check say only what is true, including when an account refuses its default model.
+- Install on Windows with `winget install`.
+- The Linux AppImage is back, and the macOS and Linux installers are smaller.
+- Typing in a terminal stays responsive while Hermes checks which program is running, most noticeably on Windows.
+- In the Agent view, when Claude stops the view says why (could not start, signed out, exited, busy) and offers Retry or Sign in, and a stuck agent can be force-stopped.
 
-- The Manual / Assisted / Auto switch, the Autonomous settings tab and the
-  countdown that ran a predicted command are gone; nothing is ever typed
-  into your terminal on your behalf.
-- Inline suggestions and ghost text no longer appear over an agent CLI
-  (Claude Code, Codex, Gemini CLI or any program the shell started); at a
-  plain shell prompt they still work.
-- New **Hermes inline suggestions** toggle in Settings → General turns
-  Hermes suggestions off entirely and leaves your shell's own
-  autosuggestions in charge.
+## Safety and reliability
 
-## Also new
+- Each new task gets its own `hermes/<name>` branch, and a branch already in use elsewhere asks whether to reuse it, pick a new name or cancel, so two agents never share a checkout by accident.
+- Closing a session with uncommitted changes offers to commit them to the session's branch or archive them, and never stashes your work.
+- A restored session keeps its branch and its folder.
+- Hermes refuses to create a new task when less than 10 GB of disk is free and tells you why.
+- The worktree overview shows how much disk each worktree uses, removes build output on request and clears leftover worktree folders in one action.
+- Starting and tracking agents never changes your agents' own global settings.
+- Every new agent session starts with one safety default (write inside the project, ask before network access or other folders), and an agent running looser than that shows a warning.
+- A session you close just before quitting stays closed, even if Hermes is force-quit right after.
 
-- Plugin side panels and the Git and Files views have their own width
-  (resizable between 240 and 600 px) and a clear edge against the main
-  area; in narrow windows the main area always keeps room to work.
-- Editor font size shortcuts: Cmd/Ctrl+= grows, Cmd/Ctrl+- shrinks,
-  Cmd/Ctrl+0 resets; the size is remembered.
-- GitHub Copilot now means the current Copilot CLI, and its quick actions
-  are the CLI's own slash commands. Having only the retired `gh copilot`
-  extension no longer counts as Copilot being installed; the card shows
-  how to install the CLI.
-- SSH sessions now honour the jump host you configured, and leaving the
-  SSH user blank lets your `~/.ssh/config` decide, as `ssh myalias` would.
-- Agent-view sessions load `CLAUDE.md` from every folder attached to the
-  session.
-- Suggestions for starting a VS Code tunnel from the terminal.
-- `hermes-ide --self-test=report.json` checks an install (database,
-  bundled runtime, interface, a real shell) and writes a report you can
-  send in; it contains no user or host name.
-- The About dialog says Hermes IDE is not affiliated with Nous Research or
-  its Hermes Agent.
+## Retired, and what replaces them
 
-## Fixes
-
-- Each Claude session follows its own project's transcript; two sessions
-  in two projects no longer both show whichever project was used last.
-- The Workbench layout and session notes are back after a restart.
-- Closing a session that shares a checkout with another session no longer
-  deletes that checkout and its uncommitted work.
-- The branch picker really greys out branches other sessions have checked
-  out, and Next on the folder step waits until Hermes knows whether the
-  folder is a git repository, so a quick click can no longer skip the
-  branch step.
-- `:` intent commands (for example `:status`) run again; they had been
-  typing the raw text into the shell.
-- Shell history and shell-type detection reach the suggestions again, so
-  Hermes no longer draws ghost text on top of your shell's own
-  autosuggestions.
-- Splitting a pane that is not the focused one no longer shows the new
-  session in two panes.
-- Unsent image attachments in the agent composer survive switching to a
-  terminal session and back.
-- The working folder in the header updates even when the shell reports it
-  in two pieces, and a stray unfinished escape sequence no longer makes
-  Hermes hold long output in memory.
-- The context-file variable in the launch line uses the session shell's
-  own syntax, so it works in PowerShell and cmd.
-- Session labels, saved hosts and the file explorer no longer show a fake
-  `ssh@host` or a stray `@` when no SSH user is set.
-- Leftover shell-setup files that older versions left in the system temp
-  folder are cleaned up after an upgrade.
+- The four-step New Session wizard is no longer the default way to start: the ⌘N task launcher replaces it, and the full wizard (⌘⇧N) stays available for SSH, tmux and existing branches.
+- The four-step welcome wizard and the "awaiting first signal" screen are replaced by three-step onboarding; theme and privacy choices live in Settings.
+- Stash & Close is gone: closing a session commits its changes to the session's branch or archives them.
+- Gemini CLI is marked legacy; Antigravity CLI is now the main Google agent.
+- The "set up notifications" link and hand-copied setup snippets are gone: agents report their status automatically.
+- The "Task completed" notification and the needs-input indicator in the status bar are replaced by the attention inbox and its notifications.
+- The separate Git panels are replaced by the Review Desk, which keeps the log, stash and conflict views.
+- Rewinding Claude in the Agent view is replaced by restoring a recorded turn, which also covers changes made through shell commands.
+- The context budget meter is replaced by the real context gauge.
+- Hermes no longer edits your global Claude MCP settings; servers are added to the project's own MCP file.
