@@ -104,6 +104,8 @@ pub trait Host {
     /// The home folder (profile folders and the default Claude config live there).
     fn home(&self) -> Option<PathBuf>;
     fn now_ms(&self) -> i64;
+    /// A variable of Hermes's own environment, when set and not empty.
+    fn env(&self, name: &str) -> Option<String>;
 }
 
 /// The accounts to probe for an agent: its default profile, then the ones
@@ -247,6 +249,9 @@ pub fn discover(
         account_note: spec.and_then(|s| s.accounts.note.clone()),
         default_approval_mode_id: default_mode,
         checked_at: host.now_ms(),
+        default_profile_dir: spec
+            .and_then(|s| s.accounts.profile_env.as_deref())
+            .and_then(|name| host.env(name)),
     };
 
     // Installed, and which version.
@@ -532,6 +537,9 @@ impl Host for RealHost {
     fn now_ms(&self) -> i64 {
         crate::turn_ledger::now_ms()
     }
+    fn env(&self, name: &str) -> Option<String> {
+        std::env::var(name).ok().filter(|v| !v.is_empty())
+    }
 }
 
 // ─── Cache ───────────────────────────────────────────────────────────
@@ -645,6 +653,7 @@ pub(crate) mod tests {
         pub outputs: HashMap<String, (i32, String)>,
         pub files: HashMap<PathBuf, String>,
         pub ran: RefCell<Vec<String>>,
+        pub env: HashMap<String, String>,
     }
 
     impl FakeHost {
@@ -654,6 +663,7 @@ pub(crate) mod tests {
                 outputs: HashMap::new(),
                 files: HashMap::new(),
                 ran: RefCell::new(Vec::new()),
+                env: HashMap::new(),
             }
         }
         pub fn out(mut self, cmd: &str, code: i32, output: &str) -> Self {
@@ -702,6 +712,9 @@ pub(crate) mod tests {
         }
         fn now_ms(&self) -> i64 {
             1_800_000_000_000
+        }
+        fn env(&self, name: &str) -> Option<String> {
+            self.env.get(name).cloned()
         }
     }
 
@@ -945,6 +958,30 @@ pub(crate) mod tests {
             ("unknown", "free-text")
         );
         assert!(!caps.verified_on_real_install);
+    }
+
+    #[test]
+    fn the_default_profile_folder_comes_from_hermess_environment() {
+        let host = FakeHost::new(&[]);
+        let caps = discover(agent("codex"), &[], None, &none, &host);
+        assert_eq!(
+            caps.default_profile_dir, None,
+            "unset: the catalog's folder"
+        );
+        let mut host = FakeHost::new(&[]);
+        host.env
+            .insert("CODEX_HOME".into(), "/work-fixture/codex-home".into());
+        let caps = discover(agent("codex"), &[], None, &none, &host);
+        assert_eq!(
+            caps.default_profile_dir.as_deref(),
+            Some("/work-fixture/codex-home")
+        );
+        // Another agent's variable says nothing about Codex's.
+        let mut host = FakeHost::new(&[]);
+        host.env
+            .insert("CLAUDE_CONFIG_DIR".into(), "/work-fixture/c".into());
+        let caps = discover(agent("codex"), &[], None, &none, &host);
+        assert_eq!(caps.default_profile_dir, None);
     }
 
     #[test]

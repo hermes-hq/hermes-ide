@@ -22,16 +22,11 @@ import type { AgentAccount, AgentCapabilities, CheckedPreset, ChoiceIssue, Launc
 import { getAgent } from "../catalog/agentCatalog";
 import { useI18n } from "../i18n/I18nProvider";
 import { refreshDoctor } from "../launcher/doctorStore";
+import { tildePath } from "../utils/paths";
 import { isMac } from "../utils/platform";
 import { Button } from "./ui";
 
 type T = (key: string, values?: Record<string, string | number>) => string;
-
-/** A path under the home folder reads as ~/… */
-export function tildePath(path: string, home: string | null): string {
-	if (home && (path === home || path.startsWith(home + "/") || path.startsWith(home + "\\"))) return "~" + path.slice(home.length);
-	return path;
-}
 
 /** Who refused the models counted in the summary: the account the capabilities were read for. */
 function refusedBy(c: AgentCapabilities, count: number, t: T): string {
@@ -213,6 +208,7 @@ function AgentCard({
 	const [error, setError] = useState<string | null>(null);
 	const [notice, setNotice] = useState<string | null>(null);
 	const [removing, setRemoving] = useState<string | null>(null);
+	const removeButtons = useRef(new Map<string, HTMLButtonElement>());
 	const addButton = useRef<HTMLButtonElement>(null);
 	const agentName = caps.agentName ?? caps.agentId;
 	const taken = takenAccountLabel(caps.accounts, name);
@@ -268,6 +264,10 @@ function AgentCard({
 						)}
 						{a.id !== "default" && removing !== a.id && (
 							<Button
+								ref={(el) => {
+									if (el) removeButtons.current.set(a.id, el);
+									else removeButtons.current.delete(a.id);
+								}}
 								variant="link"
 								size="sm"
 								className="agents-settings-link agents-settings-remove"
@@ -283,7 +283,11 @@ function AgentCard({
 								agentName={agentName}
 								home={home}
 								t={t}
-								onCancel={() => setRemoving(null)}
+								onCancel={() => {
+									setRemoving(null);
+									// The keyboard goes back to this account's Remove.
+									requestAnimationFrame(() => removeButtons.current.get(a.id)?.focus());
+								}}
 								onRemove={async (signOut) => {
 									await onRemove(a.id, signOut);
 									setRemoving(null);
@@ -506,7 +510,7 @@ export function AgentsSettings({ onSignInAccount }: { onSignInAccount?: (agentId
 		<div className="agents-settings" data-loading={loading ? "true" : "false"}>
 			<div className="agents-settings-bar">
 				<p className="settings-hint">{t("agentsSettings.intro")}</p>
-				<Button size="sm" className="agents-settings-refresh" onClick={checkAgain} disabled={loading}>
+				<Button size="sm" className="agents-settings-refresh" onClick={checkAgain} disabled={loading} title={t("agentsSettings.refreshHint")}>
 					{t("agentsSettings.refresh")}
 				</Button>
 			</div>

@@ -135,6 +135,21 @@ fn watches() -> &'static Mutex<HashMap<String, Watch>> {
     W.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// What each watched launch asked for, until the CLI takes it (`taken`) or
+/// refuses it. Kept apart from the watch: the watch stops reading output
+/// after its window, but a first turn that finishes later still proves the
+/// model works (and forgets its earlier refusal).
+fn untaken() -> &'static Mutex<HashMap<String, SessionLaunch>> {
+    static U: OnceLock<Mutex<HashMap<String, SessionLaunch>>> = OnceLock::new();
+    U.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn forget_untaken(session_id: &str) {
+    if let Ok(mut u) = untaken().lock() {
+        u.remove(session_id);
+    }
+}
+
 pub fn start(session_id: &str, agent: &str, how: WatchStart) {
     let mode = e2e_mode();
     if signatures::for_agent(agent).is_empty() || mode.as_deref() == Some("off") {
@@ -160,6 +175,9 @@ pub fn start(session_id: &str, agent: &str, how: WatchStart) {
     } else {
         (given, Vec::new())
     };
+    if let Ok(mut u) = untaken().lock() {
+        u.insert(session_id.to_string(), how.launch.clone());
+    }
     if let Ok(mut w) = watches().lock() {
         w.insert(
             session_id.to_string(),
@@ -328,14 +346,19 @@ pub fn end(session_id: &str) {
     if let Ok(mut w) = watches().lock() {
         w.remove(session_id);
     }
+    forget_untaken(session_id);
 }
 
 /// The CLI took the launch (its first finished turn or tool call): the
-/// watch ends. Returns what the launch asked for when it was still being
-/// watched, i.e. no refusal was seen (a refusal ends the watch first), so
-/// the caller can forget an earlier refusal of that model.
+/// watch ends. Returns what the launch asked for, once per launch, when no
+/// refusal was seen (a refusal forgets it first), so the caller can forget
+/// an earlier refusal of that model. The watch's window does not matter: a
+/// first turn that finishes minutes after the start still counts.
 pub fn taken(session_id: &str) -> Option<SessionLaunch> {
-    watches().lock().ok()?.remove(session_id).map(|w| w.launch)
+    if let Ok(mut w) = watches().lock() {
+        w.remove(session_id);
+    }
+    untaken().lock().ok()?.remove(session_id)
 }
 
 /// The agent exited: read its last words for a moment longer, then stop.
@@ -496,6 +519,7 @@ fn scan(watches: &mut HashMap<String, Watch>, session_id: &str) -> Option<Found>
         launch: watch.launch.clone(),
     };
     watches.remove(session_id);
+    forget_untaken(session_id);
     Some(found)
 }
 
@@ -585,6 +609,41 @@ mod tests {
         assert_eq!(got.account_id.as_deref(), Some("work"));
         assert!(!is_watching("cap-taken"));
         assert!(taken("cap-taken").is_none(), "once per launch");
+    }
+
+    #[test]
+    fn a_first_turn_after_the_window_still_takes_the_launch() {
+        let dir = tempfile::tempdir().unwrap();
+        let launch = SessionLaunch {
+            model_id: Some("gpt-5.5".into()),
+            ..Default::default()
+        };
+        start(
+            "cap-late",
+            "codex",
+            how(dir.path().join("st"), "n", Duration::from_millis(1), launch),
+        );
+        std::thread::sleep(Duration::from_millis(20));
+        // Output after the window drops the watch...
+        assert!(observe("cap-late", b"thinking...\r\n").is_none());
+        assert!(!is_watching("cap-late"));
+        // ...but the turn that finishes later still says the model works.
+        let got = taken("cap-late").expect("taken after the window");
+        assert_eq!(got.model_id.as_deref(), Some("gpt-5.5"));
+        assert!(taken("cap-late").is_none(), "once per launch");
+        // A launch Hermes stopped (end) is never taken.
+        start(
+            "cap-ended",
+            "codex",
+            how(
+                dir.path().join("st2"),
+                "n",
+                Duration::from_secs(30),
+                SessionLaunch::default(),
+            ),
+        );
+        end("cap-ended");
+        assert!(taken("cap-ended").is_none());
     }
 
     #[test]

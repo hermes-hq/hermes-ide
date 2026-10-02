@@ -78,6 +78,8 @@ export interface AgentCapabilities {
 	defaultApprovalModeId?: string;
 	/** Epoch ms when the probes ran (the result is cached per CLI version and account). */
 	checkedAt?: number;
+	/** The folder the default profile uses when Hermes's environment sets the agent's profile variable (CODEX_HOME=…). */
+	defaultProfileDir?: string;
 }
 
 export type LaunchWhere =

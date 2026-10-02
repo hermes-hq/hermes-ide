@@ -13,7 +13,8 @@ const h = vi.hoisted(() => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: h.invoke }));
 vi.mock("@tauri-apps/api/path", () => ({ homeDir: vi.fn(async () => "/home-fixture") }));
 
-import { AgentsSettings, accountDetailText, choiceSummary, effortSummary, issueText, modelsSummary, tildePath } from "../components/AgentsSettings";
+import { AgentsSettings, accountDetailText, choiceSummary, effortSummary, issueText, modelsSummary } from "../components/AgentsSettings";
+import { tildePath } from "../utils/paths";
 import type { AgentCapabilities, CheckedPreset } from "../agent/capabilities/types";
 import { I18nProvider } from "../i18n/I18nProvider";
 import { translate, translateIn } from "../i18n/registry";

@@ -715,6 +715,7 @@ pub(crate) mod tests {
             account_note: None,
             default_approval_mode_id: "acceptEdits".into(),
             checked_at: 0,
+            default_profile_dir: None,
         }
     }
 

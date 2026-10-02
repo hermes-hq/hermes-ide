@@ -279,6 +279,9 @@ describe("the Search panel's empty state", () => {
     expect(searchBlocker(null, null)).toBe("no-session");
     expect(searchBlocker("s1", null)).toBe("no-project");
     expect(searchBlocker("s1", "p1")).toBeNull();
+    // While the session's projects load, nothing is missing yet.
+    expect(searchBlocker("s1", null, false)).toBe("loading");
+    expect(searchBlocker(null, null, false)).toBe("no-session");
     expect(t("search.noSession")).toBe("Open a session to search its files.");
     expect(t("search.noProject")).toBe("This session has no project. Add one to search its files.");
   });

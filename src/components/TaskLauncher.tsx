@@ -1419,8 +1419,14 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
           {menu === "model" && agentCaps && (
             <>
               <div className="task-launcher-menu-items">
-                {agentCaps.models.map((m) =>
-                  optionChip(
+                {agentCaps.models.map((m) => {
+                  // A refusal is said in the person's language (the backend's
+                  // reason is English).
+                  const refused = m.unavailableCode === "refused";
+                  const why = refused
+                    ? t(m.id === "default" ? "launcher.modelDefaultRefused" : "launcher.modelRefused")
+                    : m.unavailableReason;
+                  return optionChip(
                     m.id,
                     m.id === choice.modelId,
                     () => {
@@ -1428,19 +1434,19 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
                       closeMenu();
                     },
                     m.id === "default" ? t("launcher.modelDefault") : m.label,
-                    { "data-model-id": m.id, title: m.unavailableReason },
+                    { "data-model-id": m.id, title: why },
                     {
                       disabled: !m.available,
                       note: !m.available
-                        ? m.unavailableReason || t("launcher.modelUnavailable")
+                        ? why || t("launcher.modelUnavailable")
                         : m.id === "default"
-                          ? m.unavailableReason || t("launcher.modelDefaultNote")
+                          ? why || t("launcher.modelDefaultNote")
                           : m.efforts.length === 0
                             ? t("launcher.modelNoEffort")
                             : m.note || "",
                     },
-                  ),
-                )}
+                  );
+                })}
               </div>
               {agentCaps.modelSource === "free-text" && (
                 <Input

@@ -14,25 +14,34 @@ import type { Project } from "../types/project";
 
 export function useSessionProjects(sessionId: string | null) {
   const [projects, setProjects] = useState<Project[]>([]);
+  // The session whose projects `projects` holds. Until it is the active
+  // one, the list is not known yet (an empty list does not mean "none").
+  const [loadedFor, setLoadedFor] = useState<string | null>(null);
 
   // Fetch projects for active session
   useEffect(() => {
     if (!sessionId) {
       setProjects([]);
+      setLoadedFor(null);
       return;
     }
 
     // Listen for updates to this session's projects
     let cancelled = false;
+    const got = (r: Project[]) => {
+      if (cancelled) return;
+      setProjects(r);
+      setLoadedFor(sessionId);
+    };
 
     getSessionProjects(sessionId)
-      .then((r) => { if (!cancelled) setProjects(r); })
-      .catch(() => { if (!cancelled) setProjects([]); });
+      .then(got)
+      .catch(() => got([]));
     let unlisten: (() => void) | null = null;
     let unlistenGlobal: (() => void) | null = null;
 
     listen<Project[]>(`session-projects-updated-${sessionId}`, (event) => {
-      if (!cancelled) setProjects(event.payload);
+      got(event.payload);
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
     });
@@ -107,5 +116,7 @@ export function useSessionProjects(sessionId: string | null) {
     }
   }, [sessionId]);
 
-  return { projects, attach, detach };
+  /** The active session's projects have been read (false while they load). */
+  const loaded = !sessionId || loadedFor === sessionId;
+  return { projects, loaded, attach, detach };
 }

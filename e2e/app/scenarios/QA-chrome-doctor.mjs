@@ -2,7 +2,10 @@
 // Scenario QA-chrome-doctor: the agent doctor and Settings' agent tabs, as a
 // newcomer meets them, with a fake `claude` (signed out) and a `codex` that
 // is installed but cannot start (exit 127, "env: node: No such file or
-// directory", as an nvm-installed CLI without node on PATH). No real CLI.
+// directory", as an nvm-installed CLI without node on PATH; on Windows an
+// npm-style .cmd shim whose program is not on PATH, which cmd.exe answers
+// with "'…' is not recognized as an internal or external command" and exit
+// 9009). No real CLI.
 //
 //   1. ACC-09: the doctor calls Codex installed but failing to start, with
 //      its first line, never "signed out", and offers no Sign in for it; the
@@ -36,7 +39,12 @@ function startApp(f, evidenceDir, log, run, { first = false, env = {} } = {}) {
   const common = { runDir: join(evidenceDir, `run-${run}`), log, env: { ...fakeEnv(f), ...env }, flagDefaults: {} };
   return onWindows ? launchApp({ ...common, home: "real", resetData: first }) : launchApp({ ...common, home: "private", homeDir: f.home });
 }
-const BROKEN = "env: node: No such file or directory";
+// On Windows the shim runs a program that is on no PATH, so the words and
+// the exit code are cmd.exe's own, as with an npm shim and no node.
+const MISSING_NODE = "hermes-qa-missing-node";
+const BROKEN = onWindows
+  ? `'${MISSING_NODE}' is not recognized as an internal or external command`
+  : "env: node: No such file or directory";
 
 /** A row of the doctor, as a person and a screen reader meet it. */
 const doctorRow = (bridge, id) =>
@@ -65,7 +73,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, apps, onCleanup }) => {
   setFake(f, "auth", "claude", "out");
   // Codex is there but cannot start.
   if (onWindows) {
-    writeFileSync(join(f.fakeBin, "codex.cmd"), `@echo ${BROKEN} 1>&2\r\n@exit /b 127\r\n`);
+    writeFileSync(join(f.fakeBin, "codex.cmd"), `@ECHO off\r\n${MISSING_NODE} "%~dp0\\node_modules\\@openai\\codex\\bin\\codex.js" %*\r\n`);
   } else {
     writeFileSync(join(f.fakeBin, "codex"), `#!/bin/sh\necho "${BROKEN}" >&2\nexit 127\n`);
     chmodSync(join(f.fakeBin, "codex"), 0o755);
