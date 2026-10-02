@@ -69,8 +69,9 @@ import {
   setPaneSession, removePanesBySession,
 } from "./layoutTypes";
 import { tileLayout } from "./tileLayout";
-import { DirtyWorktreeDialog } from "../components/DirtyWorktreeDialog";
 import type { DirtyWorktreeChange } from "../components/DirtyWorktreeDialog";
+// Shown only when a closing session has work left: its code loads on demand.
+const DirtyWorktreeDialog = lazyView("DirtyWorktreeDialog", () => import("../components/DirtyWorktreeDialog").then((m) => m.DirtyWorktreeDialog));
 
 // ─── Re-export shared types for backward compatibility ──────────────
 export type {
@@ -3112,6 +3113,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace, convertSessionMode, switchAgentModel, switchAgentPermissionMode, switchAgentEffort, submitAgentMessage, sendAgentEnvelope, respawnAgent: (sessionId) => respawnAgent(sessionId, {}) }}>
       {children}
       {pendingDirtyClose && (
+        <Suspense fallback={null}>
         <DirtyWorktreeDialog
           sessionId={pendingDirtyClose.sessionId}
           sessionLabel={pendingDirtyClose.label}
@@ -3130,6 +3132,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           onCloseAnyway={handleDirtyCloseAnyway}
           onCancel={handleDirtyCancelClose}
         />
+        </Suspense>
       )}
       {pendingBranchConflict && (
         <Suspense fallback={null}>

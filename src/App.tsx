@@ -40,7 +40,6 @@ import { useTrackWatching } from "./track/useTrackWatching";
 import { attachedSessions, editorCommandFor, gateMovedLine, isAgentSession, submitLineBytes } from "./track/rules";
 import { getTrackState, hasTurnHistory, noteOwnApproval } from "./track/store";
 import { trackApprove } from "./track/api";
-import { promoteWithUndo } from "./track/promote";
 import { slugFromBranch } from "./track/rules";
 import { writeToSession } from "./api/sessions";
 import { utf8ToBase64 } from "./utils/encoding";
@@ -1317,6 +1316,7 @@ function AppContent() {
     const track = getTrackState(activeSession.working_directory);
     try {
       // An explicit palette command; its toast offers Undo like the Track panel.
+      const { promoteWithUndo } = await import("./track/promote");
       await promoteWithUndo(activeSession.working_directory, slugFromBranch(track.branch, activeSession.working_directory), "Light", toastStore, t);
       if (!ui.trackPanelOpen) dispatch({ type: "TOGGLE_TRACK" });
     } catch (e) {
