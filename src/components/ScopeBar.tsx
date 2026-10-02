@@ -13,6 +13,7 @@ import { homeDir } from "@tauri-apps/api/path";
 import { Badge } from "./ui/Badge";
 import { Button, IconButton } from "./ui/Button";
 import { Chip } from "./ui/Chip";
+import { tildePath } from "../utils/paths";
 
 const LANGUAGE_COLORS: Record<string, string> = {
   "JavaScript/TypeScript": "#f1e05a",
@@ -59,11 +60,9 @@ export function ScopeBar({ sessionId }: ScopeBarProps) {
         break;
       case "project-pill.copy-relative-path": {
         try {
-          const home = await homeDir();
-          const relative = project.path.startsWith(home)
-            ? "~/" + project.path.slice(home.length)
-            : project.path;
-          navigator.clipboard.writeText(relative);
+          // "~/proj" for a project under the home folder (never "~//proj",
+          // and not for a sibling folder whose name only starts the same), "/" separators.
+          navigator.clipboard.writeText(tildePath(project.path, await homeDir()));
         } catch {
           navigator.clipboard.writeText(project.path);
         }

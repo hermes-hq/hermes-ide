@@ -555,6 +555,32 @@ features:
       FIX-spawn-no-freeze-4:
         text: "While the AI tools check and the shell list run (held for 8 s) the app answers within 2.5 s, and both then answer"
         scenarios: [FIX-spawn-no-freeze.mjs]
+  QA-chrome:
+    # Bug fixes from the 2.0 QA pass (dialogs, Settings > Agents, the agent
+    # doctor, the Search and Usage panels, the light theme). Negative control
+    # (run by hand): each scenario ends in RESULT: FAIL on a build of main
+    # before the fix.
+    name: "Dialogs keep the keyboard; Settings, the doctor and the panels say what is true"
+    status: shipped
+    criteria:
+      QA-chrome-1:
+        text: "Settings, Keyboard Shortcuts and the Cost Dashboard, opened from the menu, take the keyboard from the terminal, keep Tab inside, close on Esc and give the keyboard back; nothing typed meanwhile reaches the shell"
+        scenarios: [QA-chrome-modal-keyboard.mjs]
+      QA-chrome-2:
+        text: "Esc while renaming a preset or naming an account cancels only that edit; an account name already taken (any case, or Default) is refused; Remove asks first, says what stays on disk and can run the CLI's own sign-out"
+        scenarios: [QA-chrome-agents-settings.mjs]
+      QA-chrome-3:
+        text: "A refused model is offered again once a launch with it finishes a turn, or after Check again; a refused default model (Codex's config) is named in the banner with where it is set, and the launcher no longer promises the default always works"
+        scenarios: [QA-chrome-refusals.mjs]
+      QA-chrome-4:
+        text: "An installed CLI that cannot start is reported as failing to start, never as signed out; the doctor's buttons name their agent, its columns are explained; Settings has Launch defaults and one Check again on Agents"
+        scenarios: [QA-chrome-doctor.mjs]
+      QA-chrome-5:
+        text: "The Search panel says whether a session or a project is missing (with Add project…) and is translated; the Usage panel names the session's agent and how to get usage"
+        scenarios: [QA-chrome-panels.mjs]
+      QA-chrome-6:
+        text: "In the Frosted Light theme the texts of the welcome, a session pane with a Claude task and Settings > Agents meet WCAG AA contrast"
+        scenarios: [QA-chrome-light-contrast.mjs]
   FIX-launcher-reopen:
     # A bug fix, not new 2.0 work. Negative control (run by hand): a build of
     # main before the fix fails the step (no launcher comes up).

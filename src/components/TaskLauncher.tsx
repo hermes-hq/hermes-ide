@@ -1434,7 +1434,7 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
                       note: !m.available
                         ? m.unavailableReason || t("launcher.modelUnavailable")
                         : m.id === "default"
-                          ? t("launcher.modelDefaultNote")
+                          ? m.unavailableReason || t("launcher.modelDefaultNote")
                           : m.efforts.length === 0
                             ? t("launcher.modelNoEffort")
                             : m.note || "",

@@ -133,6 +133,10 @@ pub struct AccountCaps {
     /// Add account.
     pub profile_dir: Option<String>,
     pub login: Option<Vec<String>>,
+    /// The CLI's own sign-out (`codex logout`), run in an account's profile
+    /// when the person removes it with "Remove and sign out".
+    #[serde(default)]
+    pub logout: Option<Vec<String>>,
     #[serde(default)]
     pub note: Option<String>,
 }

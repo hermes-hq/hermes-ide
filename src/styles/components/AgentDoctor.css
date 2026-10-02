@@ -60,6 +60,23 @@
   color: var(--warning-ink);
 }
 
+/* Installed but it cannot start: why, under its name. */
+.agent-doctor-broken {
+  display: block;
+  margin-top: var(--space-0-5);
+  font-size: var(--text-xs);
+  color: var(--warning-ink);
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+/* What the Status updates and Can resume columns mean, in one line. */
+.agent-doctor-legend {
+  margin: var(--space-1-5) 0 0;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
 .agent-doctor-none {
   margin: 0;
   padding: var(--space-2) calc(var(--space-1) * 2.5);

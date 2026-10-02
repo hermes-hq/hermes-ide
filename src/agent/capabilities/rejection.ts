@@ -24,6 +24,18 @@ export interface RejectionView {
 	actions: RejectionAction[];
 }
 
+/**
+ * The model a refusal names (Codex: "The model `X` does not exist…", "The
+ * 'X' model is not supported…"): what the CLI's own default resolved to
+ * when the launch passed no model. Mirror of `refused_model_name` in
+ * src-tauri/src/agent_caps/commands.rs.
+ */
+export function refusedModelName(message: string | null | undefined): string | null {
+	if (!message) return null;
+	const named = /[Tt]he model `([^`\s]+)`/.exec(message) ?? /[Tt]he ['"`]([^'"`\s]+)['"`] model\b/.exec(message);
+	return named ? named[1] : null;
+}
+
 /** The account's name for the title: its label, or `defaultLabel` for the CLI's own profile. */
 function accountLabel(caps: AgentCapabilities | null, accountId: string | null | undefined, defaultLabel: string): string {
 	const id = accountId || "default";
@@ -36,12 +48,14 @@ function accountLabel(caps: AgentCapabilities | null, accountId: string | null |
  * `caps`: the agent's capabilities (other accounts), or null while loading.
  */
 export function rejectionView(
-	event: Pick<LaunchRejectedEvent, "reason" | "suggestion">,
+	event: Pick<LaunchRejectedEvent, "reason" | "suggestion"> & { vendorMessage?: string },
 	agentName: string,
 	launch: SessionAgentLaunch | null | undefined,
 	caps: AgentCapabilities | null,
 	/** How the CLI's own profile is named in the title ("default"). */
 	defaultLabel = "default",
+	/** Where the CLI keeps its own default model for its default profile ("~/.codex/config.toml"). */
+	configPath: string | null = null,
 ): RejectionView {
 	const model = launch?.modelId ?? null;
 	const accountId = launch?.accountId ?? null;
@@ -58,7 +72,19 @@ export function rejectionView(
 				titleValues.model = model;
 				actions.push({ kind: "retry-default" });
 			} else {
-				titleKey = "launchRejected.titleDefaultModel";
+				// The CLI's own default (its config's model): name it, and where
+				// it is set, when the CLI's words say which model it was.
+				const resolved = refusedModelName(event.vendorMessage);
+				if (resolved && configPath && (accountId || "default") === "default") {
+					titleKey = "launchRejected.titleDefaultModelNamedConfig";
+					titleValues.model = resolved;
+					titleValues.config = configPath;
+				} else if (resolved) {
+					titleKey = "launchRejected.titleDefaultModelNamed";
+					titleValues.model = resolved;
+				} else {
+					titleKey = "launchRejected.titleDefaultModel";
+				}
 			}
 			for (const a of others.slice(0, 2)) actions.push({ kind: "use-account", accountId: a.id, label: a.id === "default" ? defaultLabel : a.label });
 			actions.push({ kind: "pick-model" });

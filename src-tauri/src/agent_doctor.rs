@@ -51,6 +51,10 @@ pub struct DoctorRow {
     pub retired_note: Option<String>,
     /// Shown only with the agentCatalog flag.
     pub beta: bool,
+    /// Installed but it cannot start (`--version` exited 126/127, or the
+    /// shell said "command not found" / "No such file or directory"): the
+    /// first line it printed. Its sign-in is then unknown, never "no".
+    pub broken: Option<String>,
 }
 
 /// What running a probe command gave.
@@ -98,6 +102,36 @@ pub fn version_at_least(version: &str, min: &str) -> bool {
         }
     }
     true
+}
+
+/// Longest startup error kept for a CLI that cannot start.
+const BROKEN_LINE_MAX: usize = 200;
+
+/// Why an installed CLI cannot start, from its `--version` run: exit 126
+/// (found but not executable) or 127 (its interpreter or a library is
+/// missing, e.g. `#!/usr/bin/env node` with no node on PATH), or the shell's
+/// "command not found" / "No such file or directory". Only when it printed
+/// no version: a CLI that answers with a version starts. The reason is its
+/// first non-empty line (a path, never an account), or the exit code.
+pub fn broken_reason(probe: &Probe, version: Option<&str>) -> Option<String> {
+    if version.is_some() {
+        return None;
+    }
+    let Probe::Exited { code, output } = probe else {
+        return None;
+    };
+    let lower = output.to_lowercase();
+    let says_missing =
+        lower.contains("command not found") || lower.contains("no such file or directory");
+    if !(matches!(code, 126 | 127) || says_missing) {
+        return None;
+    }
+    let line = output
+        .lines()
+        .map(str::trim)
+        .find(|l| !l.is_empty())
+        .map(|l| l.chars().take(BROKEN_LINE_MAX).collect::<String>());
+    Some(line.unwrap_or_else(|| format!("exit {code}")))
 }
 
 /// The catalog's confidence as the doctor names it.
@@ -186,6 +220,7 @@ pub fn diagnose(
             None
         },
         beta: agent.channel == "beta",
+        broken: None,
     };
     let Some(detect) = agent.detect.as_ref() else {
         return row;
@@ -197,8 +232,14 @@ pub fn diagnose(
         return row;
     };
     row.installed = true;
-    if let Probe::Exited { output, .. } = probe(&path, args, VERSION_TIMEOUT) {
-        row.version = parse_version(&output);
+    let version_run = probe(&path, args, VERSION_TIMEOUT);
+    if let Probe::Exited { output, .. } = &version_run {
+        row.version = parse_version(output);
+    }
+    row.broken = broken_reason(&version_run, row.version.as_deref());
+    if row.broken.is_some() {
+        // It cannot start, so it cannot say whether it is signed in either.
+        return row;
     }
     row.version_ok = match (&row.version, &row.min_version) {
         (Some(v), Some(min)) => Some(version_at_least(v, min)),
@@ -552,6 +593,53 @@ mod tests {
             }
         });
         assert_eq!(hang.signed_in, "unknown");
+    }
+
+    #[test]
+    fn an_installed_cli_that_cannot_start_is_broken_not_signed_out() {
+        let find = |name: &str| Some(PathBuf::from(format!("/fake/{name}")));
+        let ran = RefCell::new(0);
+        let row = diagnose(agent("codex"), &find, &|_, _, _| {
+            *ran.borrow_mut() += 1;
+            Probe::Exited {
+                code: 127,
+                output: "\nenv: node: No such file or directory\n".into(),
+            }
+        });
+        assert!(row.installed);
+        assert_eq!(row.signed_in, "unknown");
+        assert_eq!(
+            row.broken.as_deref(),
+            Some("env: node: No such file or directory")
+        );
+        assert_eq!(*ran.borrow(), 1, "no sign-in check after a failed start");
+        // The shell's words alone, whatever the exit code.
+        let p = Probe::Exited {
+            code: 1,
+            output: "zsh: command not found: codex".into(),
+        };
+        assert_eq!(
+            broken_reason(&p, None).as_deref(),
+            Some("zsh: command not found: codex")
+        );
+        // A silent 126: the exit code is the reason.
+        let p = Probe::Exited {
+            code: 126,
+            output: String::new(),
+        };
+        assert_eq!(broken_reason(&p, None).as_deref(), Some("exit 126"));
+        // A version means it starts; any other failure is not "broken".
+        let p = Probe::Exited {
+            code: 127,
+            output: "1.2.3".into(),
+        };
+        assert_eq!(broken_reason(&p, Some("1.2.3")), None);
+        let p = Probe::Exited {
+            code: 2,
+            output: "unknown option --version".into(),
+        };
+        assert_eq!(broken_reason(&p, None), None);
+        assert_eq!(broken_reason(&Probe::TimedOut, None), None);
     }
 
     #[test]
