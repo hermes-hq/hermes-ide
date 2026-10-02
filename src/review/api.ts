@@ -33,6 +33,8 @@ export interface RevertPreview {
   readonly clean: boolean;
   readonly message: string;
   readonly files: readonly ReviewFile[];
+  /** The turn's changes are gone already (reverted before): nothing to undo. */
+  readonly alreadyReverted?: boolean;
 }
 
 export interface RevertResult {

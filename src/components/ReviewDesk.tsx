@@ -39,7 +39,7 @@ import type { SessionData } from "../types/session";
 import { isNotAGitRepository, reviewDiff, reviewRevertPatch, reviewRevertPreview, reviewWriteFile, type ReviewDiff, type RevertPreview } from "../review/api";
 import { parsePatch, type DiffLine, type ParsedFile } from "../review/patch";
 import { riskFlagsFor, type RiskFlag } from "../review/riskFlags";
-import { commentsForSession, encodePaste, pasteLine, reviewMarkdown, type ReviewComment } from "../review/reviewModel";
+import { anchorContext, commentsForSession, encodePaste, pasteLine, relocateComment, reviewMarkdown, type AnchorLine, type ReviewComment } from "../review/reviewModel";
 import { deliveryReceiptAvailable, isBusy, sendReviewBack } from "../review/sendBack";
 import {
   addComment,
@@ -47,17 +47,20 @@ import {
   nextReviewNumber,
   removeComment,
   setDelivery,
+  setReverted,
   setViewed,
   useReviewState,
 } from "../review/reviewStore";
-import { getTurnDiffFor, listTurnsFor } from "../review/turnSource";
+import { getBetweenFor, getTurnDiffFor, listTurnsFor } from "../review/turnSource";
+import { agentDisplayName, getAgent } from "../catalog/agentCatalog";
+import { translatePlural } from "../i18n/plural";
 import { GitLogView } from "./GitLogView";
 import { GitStashSection } from "./GitStashSection";
 import { GitMergeBanner } from "./GitMergeBanner";
 import { getSessionStatus, useSessionStatus } from "../agent/status/attentionStore";
 import { WorktreeOverviewPanel } from "./WorktreeOverviewPanel";
 import { SessionWorktreeSetup } from "./WorktreeSetupSummary";
-import { openLandSheet } from "../land/LandSheetHost";
+import { isLandSheetOpen, LAND_SHEET_CLOSED_EVENT, openLandSheet, type LandSheetClosed } from "../land/LandSheetHost";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { GitConflictViewer } from "./GitConflictViewer";
 import { GitProjectSection } from "./GitProjectSection";
@@ -86,15 +89,25 @@ interface ReviewDeskProps {
 /** One turn of one session, with its patch parsed. */
 export interface TurnEntry {
   readonly sessionId: string;
+  /** The agent's name ("Claude Code"), never the session's task text. */
   readonly agentLabel: string;
   readonly turn: Turn;
   readonly patch: string;
   readonly files: readonly ParsedFile[];
+  /**
+   * "agent": what the turn changed. "between": what changed before turn
+   * `turn.n` that no turn made (the person's edits): never reverted as the
+   * agent's, never the owner of a file.
+   */
+  readonly kind: "agent" | "between";
 }
 
 type GroupBy = "file" | "turn";
 type Tab = "review" | "repository" | "worktrees";
-type Selection = { kind: "file"; path: string } | { kind: "turn"; sessionId: string; n: number };
+type Selection = { kind: "file"; path: string } | { kind: "turn"; sessionId: string; n: number; between: boolean };
+
+const isEntry = (sel: Selection | null, e: TurnEntry) =>
+  sel?.kind === "turn" && sel.sessionId === e.sessionId && sel.n === e.turn.n && sel.between === (e.kind === "between");
 
 interface CommentDraft {
   readonly sessionId: string;
@@ -103,6 +116,36 @@ interface CommentDraft {
   readonly side: "new" | "old";
   readonly line: number;
   readonly excerpt: string;
+  readonly before: readonly string[];
+  readonly after: readonly string[];
+}
+
+/** A file's diff lines as comments anchor on them. */
+function anchorLines(parsed: ParsedFile): AnchorLine[] {
+  const out: AnchorLine[] = [];
+  for (const h of parsed.hunks)
+    for (const l of h.lines) out.push(l.kind === "del" ? { side: "old", no: l.oldNo, text: l.text } : { side: "new", no: l.newNo, text: l.text });
+  return out;
+}
+
+/** A path with its folder shrinking first, so the file name stays readable. */
+function SplitPath({ path, className = "review-file-path" }: { path: string; className?: string }) {
+  const at = path.lastIndexOf("/");
+  return (
+    <span className={`${className} review-path-split`} title={path}>
+      {at >= 0 && <span className="review-path-dir">{path.slice(0, at + 1)}</span>}
+      <span className="review-path-base">{path.slice(at + 1)}</span>
+    </span>
+  );
+}
+
+/** "14:05", the local time of an epoch-ms instant. */
+function clock(at: number): string {
+  try {
+    return new Date(at).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  } catch {
+    return "";
+  }
 }
 
 export function normalizePath(p: string): string {
@@ -112,13 +155,38 @@ export function normalizePath(p: string): string {
 /** The turn (session and number) that last touched a path, for routing a comment made in the by-file view. */
 export function turnForPath(turns: readonly TurnEntry[], path: string): TurnEntry | null {
   let hit: TurnEntry | null = null;
-  for (const t of turns) if (t.files.some((f) => f.path === path)) hit = t;
+  for (const t of turns) if (t.kind === "agent" && t.files.some((f) => f.path === path)) hit = t;
   return hit;
 }
 
 function agentLabel(session: SessionData | undefined, fallback: string): string {
   if (!session) return fallback;
   return session.label || session.agent_name || session.ai_provider || fallback;
+}
+
+/** The agent's name as people know it ("Claude Code"); the session's label only when no agent is known. */
+export function agentName(session: SessionData | undefined, fallback: string): string {
+  if (!session) return fallback;
+  return agentDisplayName(session) ?? getAgent(session.ai_provider)?.name ?? (session.agent_name || session.ai_provider || session.label || fallback);
+}
+
+/**
+ * The name of each session's agent among these sessions: "Claude Code";
+ * when two run the same agent, each also carries its session's label
+ * (shortened), so comments and sends can still be told apart.
+ */
+export function agentNames(sessions: readonly SessionData[]): Map<string, string> {
+  const base = new Map(sessions.map((s) => [s.id, agentName(s, s.id.slice(0, 8))]));
+  const counts = new Map<string, number>();
+  for (const n of base.values()) counts.set(n, (counts.get(n) ?? 0) + 1);
+  const out = new Map<string, string>();
+  for (const s of sessions) {
+    const n = base.get(s.id) ?? s.id.slice(0, 8);
+    const label = (s.label ?? "").trim();
+    const short = label.length > 24 ? `${label.slice(0, 23)}…` : label;
+    out.set(s.id, (counts.get(n) ?? 0) > 1 && short && short !== n ? `${n} (${short})` : n);
+  }
+  return out;
 }
 
 /** Sessions events since the last look, for the receipt watcher. */
@@ -190,9 +258,13 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   // Only which sessions they are and their names matter here: a status
   // update (new session objects, many times a minute) must not reload the
   // review, which would hide the diff and an open comment while it loads.
-  const repoSessionsKey = sameFolder.map((s) => `${s.id}\u0000${agentLabel(s, s.id.slice(0, 8))}`).join("\u0001");
+  const folderNames = agentNames(sameFolder);
+  const repoSessionsKey = sameFolder.map((s) => `${s.id}\u0000${folderNames.get(s.id)}`).join("\u0001");
   // eslint-disable-next-line react-hooks/exhaustive-deps
   const repoSessions = useMemo(() => sameFolder, [repoSessionsKey]);
+  const names = useMemo(() => agentNames(repoSessions), [repoSessions]);
+  /** A session's agent, by name ("Claude Code"), for every label in the desk. */
+  const nameOf = useCallback((id: string) => names.get(id) ?? agentName(sessions.find((s) => s.id === id), id.slice(0, 8)), [names, sessions]);
 
   const load = useCallback(async () => {
     if (!repoPath) {
@@ -209,23 +281,41 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
       Promise.all(
         repoSessions.map(async (s) => {
           const list = await listTurnsFor(s.id);
+          const name = names.get(s.id) ?? agentName(s, s.id.slice(0, 8));
           const entries = await Promise.all(
             list.map(async (turn) => {
-              const td = await getTurnDiffFor(s.id, turn.n);
+              const [td, between] = await Promise.all([getTurnDiffFor(s.id, turn.n), getBetweenFor(s.id, turn.n)]);
               const patch = td?.patch ?? "";
-              return { sessionId: s.id, agentLabel: agentLabel(s, s.id.slice(0, 8)), turn, patch, files: parsePatch(patch) } satisfies TurnEntry;
+              const out: TurnEntry[] = [];
+              // What changed before this turn that no turn made: the person's own row.
+              if (between && between.patch.trim() !== "") {
+                out.push({
+                  sessionId: s.id,
+                  agentLabel: name,
+                  turn: { ...turn, startedAt: between.at, endedAt: between.at, diffstat: between.diffstat, degraded: false, checks: undefined },
+                  patch: between.patch,
+                  files: parsePatch(between.patch),
+                  kind: "between",
+                });
+              }
+              out.push({ sessionId: s.id, agentLabel: name, turn, patch, files: parsePatch(patch), kind: "agent" });
+              return out;
             }),
           );
-          return entries;
+          return entries.flat();
         }),
       ),
     ]);
     if (diffResult.ok) setDiff(diffResult.d);
     else if (isNotAGitRepository(diffResult.e)) setNoRepository(true);
     else setDiffError(String(diffResult.e));
-    setTurns(turnResult.flat().sort((a, b) => a.turn.startedAt - b.turn.startedAt || a.turn.n - b.turn.n));
+    setTurns(
+      turnResult
+        .flat()
+        .sort((a, b) => a.turn.startedAt - b.turn.startedAt || a.turn.n - b.turn.n || (a.kind === "between" ? -1 : b.kind === "between" ? 1 : 0)),
+    );
     setLoading(false);
-  }, [repoPath, repoSessions]);
+  }, [repoPath, repoSessions, names]);
 
   useEffect(() => {
     void load();
@@ -244,6 +334,9 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   // the review's totals cover the whole branch, not what is staged.
   const commitDraft = useMemo(() => {
     if (!diff) return "";
+    // Only a task's own branch (hermes/...) gets a drafted message: on a
+    // person's branch ("main") the branch name says nothing about the change.
+    if (!(diff.branch ?? "").startsWith("hermes/")) return "";
     const input: DraftInput = {
       branch: diff.branch ?? "",
       label: focused ? agentLabel(focused, focused.id.slice(0, 8)) : "",
@@ -266,12 +359,12 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
       if (selection?.kind === "file" && files.some((f) => f.file.path === selection.path)) return;
       setSelection(files.length > 0 ? { kind: "file", path: files[0].file.path } : null);
     } else {
-      if (selection?.kind === "turn" && turns.some((e) => e.sessionId === selection.sessionId && e.turn.n === selection.n)) return;
-      setSelection(turns.length > 0 ? { kind: "turn", sessionId: turns[0].sessionId, n: turns[0].turn.n } : null);
+      if (selection?.kind === "turn" && turns.some((e) => isEntry(selection, e))) return;
+      setSelection(turns.length > 0 ? { kind: "turn", sessionId: turns[0].sessionId, n: turns[0].turn.n, between: turns[0].kind === "between" } : null);
     }
   }, [loading, groupBy, files, turns, selection]);
 
-  const selectedTurn = selection?.kind === "turn" ? turns.find((e) => e.sessionId === selection.sessionId && e.turn.n === selection.n) ?? null : null;
+  const selectedTurn = selection?.kind === "turn" ? turns.find((e) => isEntry(selection, e)) ?? null : null;
   const selectedFile = selection?.kind === "file" ? files.find((f) => f.file.path === selection.path) ?? null : null;
 
   const move = useCallback(
@@ -283,9 +376,9 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
         setSelection({ kind: "file", path: next.file.path });
       } else {
         if (turns.length === 0) return;
-        const i = Math.max(0, turns.findIndex((e) => selection?.kind === "turn" && e.sessionId === selection.sessionId && e.turn.n === selection.n));
+        const i = Math.max(0, turns.findIndex((e) => isEntry(selection, e)));
         const next = turns[(i + delta + turns.length) % turns.length];
-        setSelection({ kind: "turn", sessionId: next.sessionId, n: next.turn.n });
+        setSelection({ kind: "turn", sessionId: next.sessionId, n: next.turn.n, between: next.kind === "between" });
       }
     },
     [groupBy, files, turns, selection],
@@ -295,19 +388,23 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
     (delta: number) => {
       if (turns.length === 0) return;
       setGroupBy("turn");
-      const i = Math.max(0, turns.findIndex((e) => selection?.kind === "turn" && e.sessionId === selection.sessionId && e.turn.n === selection.n));
+      const i = Math.max(0, turns.findIndex((e) => isEntry(selection, e)));
       const next = turns[(i + delta + turns.length) % turns.length];
-      setSelection({ kind: "turn", sessionId: next.sessionId, n: next.turn.n });
+      setSelection({ kind: "turn", sessionId: next.sessionId, n: next.turn.n, between: next.kind === "between" });
     },
     [turns, selection],
   );
 
   const startComment = useCallback(
-    (path: string, line: DiffLine, entry: TurnEntry | null) => {
-      const routed = entry ?? turnForPath(turns, path);
+    (path: string, line: DiffLine, entry: TurnEntry | null, parsed: ParsedFile) => {
+      const routed = entry && entry.kind === "agent" ? entry : turnForPath(turns, path);
       const side: "new" | "old" = line.kind === "del" ? "old" : "new";
       const no = side === "old" ? line.oldNo : line.newNo;
       if (no === null) return;
+      // Kept with the comment so it finds its line again after the next turn.
+      const lines = anchorLines(parsed);
+      const index = lines.findIndex((l) => l.side === side && l.no === no);
+      const context = index >= 0 ? anchorContext(lines, index) : { before: [], after: [] };
       setDraft({
         sessionId: routed?.sessionId ?? sessionId,
         turnN: routed?.turn.n ?? null,
@@ -315,6 +412,8 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
         side,
         line: no,
         excerpt: line.text,
+        before: context.before,
+        after: context.after,
       });
       setDraftText("");
       setTimeout(() => draftRef.current?.focus(), 0);
@@ -339,7 +438,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   const runSend = useCallback(
     async (sid: string, n: number, comments: readonly ReviewComment[]) => {
       const session = sessions.find((s) => s.id === sid);
-      const label = agentLabel(session, sid.slice(0, 8));
+      const label = nameOf(sid);
       const content = reviewMarkdown({ n, agentLabel: label, repoPath, branch: diff?.branch ?? null, comments });
       if (session?.mode === "agent") {
         // A structured agent gets a message: the line goes to its composer,
@@ -359,7 +458,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
         (state) => setDelivery(repoPath, n, sid, state, review.deliveries[n]?.filePath ?? null),
       ).then((out) => setDelivery(repoPath, n, sid, out.state, out.filePath));
     },
-    [sessions, repoPath, diff?.branch, dispatch, review.deliveries],
+    [sessions, repoPath, diff?.branch, dispatch, review.deliveries, nameOf],
   );
 
   const send = useCallback(
@@ -390,9 +489,12 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
 
   const openRevert = useCallback(
     async (entry: TurnEntry) => {
+      if (entry.kind !== "agent") return;
       setRevert({ entry, preview: null, error: null, busy: false });
       try {
         const preview = await reviewRevertPreview(repoPath, entry.patch);
+        // Reverted before (from here or by hand): say so instead of a conflict.
+        setReverted(repoPath, entry.sessionId, entry.turn.n, !!preview.alreadyReverted);
         setRevert((r) => (r && r.entry === entry ? { ...r, preview } : r));
       } catch (e) {
         setRevert((r) => (r && r.entry === entry ? { ...r, error: String(e) } : r));
@@ -406,18 +508,18 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
     setRevert({ ...revert, busy: true });
     try {
       const result = await reviewRevertPatch(repoPath, revert.entry.patch);
-      if (result.ok) {
-        setNotice(
-          result.method === "3way"
-            ? t("review.revertedThreeWay", { n: revert.entry.turn.n })
-            : t("review.reverted", { n: revert.entry.turn.n }),
-        );
+      const n = revert.entry.turn.n;
+      if (result.ok || result.method === "already") {
+        setReverted(repoPath, revert.entry.sessionId, n, true);
+        setNotice(result.method === "already" ? t("review.alreadyReverted", { n }) : result.method === "3way" ? t("review.revertedThreeWay", { n }) : t("review.reverted", { n }));
         setRevert(null);
         setReloadTick((x) => x + 1);
       } else {
+        setNotice(t("review.revertFailed", { n, message: result.message }));
         setRevert({ ...revert, busy: false, error: result.message });
       }
     } catch (e) {
+      setNotice(t("review.revertFailed", { n: revert.entry.turn.n, message: String(e) }));
       setRevert({ ...revert, busy: false, error: String(e) });
     }
   }, [revert, repoPath, t]);
@@ -431,6 +533,8 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   // Keyboard: never while typing, never while the revert sheet is open.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      // The Land sheet over the desk has the keys (Esc closes the sheet, not the desk).
+      if (isLandSheetOpen()) return;
       const target = e.target as HTMLElement | null;
       const typing = !!target && (target.tagName === "TEXTAREA" || target.tagName === "INPUT" || target.isContentEditable);
       if (e.key === "Escape") {
@@ -480,7 +584,19 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [onClose, move, moveTurn, send, openRevert, selectedTurn, draft, revert]);
 
+  // The Land sheet opened from here: Cancel brings the person back to the
+  // desk; the desk closes only once a land or an archive went through.
+  useEffect(() => {
+    const onClosed = (e: Event) => {
+      const detail = (e as CustomEvent<LandSheetClosed>).detail;
+      if (detail?.sessionId === sessionId && detail.landed) onClose();
+    };
+    window.addEventListener(LAND_SHEET_CLOSED_EVENT, onClosed);
+    return () => window.removeEventListener(LAND_SHEET_CLOSED_EVENT, onClosed);
+  }, [sessionId, onClose]);
+
   const viewedSet = useMemo(() => new Set(review.viewed), [review.viewed]);
+  const revertedSet = useMemo(() => new Set(review.reverted), [review.reverted]);
   const commentsFor = (path: string) => review.comments.filter((c) => c.path === path);
 
   const renderFile = (parsed: ParsedFile | null, file: { path: string; isBinary: boolean; truncated: boolean; status: string }, entry: TurnEntry | null) => {
@@ -488,15 +604,39 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
     if (!parsed) return <div className="review-empty">{t("review.noTextDiff")}</div>;
     if (file.isBinary) return <div className="review-empty">{t("review.binaryFile")}</div>;
     if (file.truncated) return <div className="review-empty">{t("review.truncated")}</div>;
+    // Each comment finds its line again by its text and the lines around
+    // it (the next turn may have moved it); one whose line is gone is shown
+    // on top, marked outdated.
+    const lines = anchorLines(parsed);
+    const placed = new Map<string, { at: number | null; c: ReviewComment }>();
+    for (const c of comments) placed.set(c.id, { at: relocateComment(c, lines), c });
+    const outdated = [...placed.values()].filter((p) => p.at === null).map((p) => p.c);
+    const renderComment = (c: ReviewComment, isOutdated: boolean) => (
+      <div className={`review-comment${isOutdated ? " review-comment-outdated" : ""}`} key={c.id} data-session={c.sessionId} data-turn={c.turnN ?? ""} data-sent={sentOf(c.id) ?? ""} data-outdated={isOutdated ? "1" : "0"}>
+        {isOutdated && (
+          <span className="review-comment-outdated-badge" title={t("review.outdatedTitle", { line: c.line, excerpt: c.excerpt.trim().slice(0, 80) })}>
+            {t("review.outdated")}
+          </span>
+        )}
+        <span className="review-comment-route">
+          {t("review.toAgent", { agent: nameOf(c.sessionId) })}
+          {c.turnN !== null ? ` · T${c.turnN}` : ""}
+          {sentOf(c.id) !== null ? ` · ${t("review.sentAs", { n: sentOf(c.id) ?? 0 })}` : ""}
+        </span>
+        <span className="review-comment-text">{c.text}</span>
+        {sentOf(c.id) === null && <CloseButton className="review-comment-remove" onClick={() => removeComment(repoPath, c.id)} label={t("review.removeComment")} />}
+      </div>
+    );
     return (
       <div className="review-hunks">
+        {outdated.map((c) => renderComment(c, true))}
         {parsed.hunks.map((h, hi) => (
           <div className="review-hunk" key={hi}>
             <div className="review-hunk-header">{h.header}</div>
             {h.lines.map((line, li) => {
               const side: "new" | "old" = line.kind === "del" ? "old" : "new";
               const no = side === "old" ? line.oldNo : line.newNo;
-              const here = comments.filter((c) => c.side === side && c.line === no);
+              const here = comments.filter((c) => c.side === side && no !== null && placed.get(c.id)?.at === no);
               const isDraft = draft && draft.path === file.path && draft.side === side && draft.line === no;
               return (
                 <div key={li}>
@@ -508,32 +648,20 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                     role="button"
                     tabIndex={-1}
                     title={t("review.commentOnLine")}
-                    onClick={() => startComment(file.path, line, entry)}
+                    onClick={() => startComment(file.path, line, entry, parsed)}
                   >
                     <span className="review-line-no">{line.oldNo ?? ""}</span>
                     <span className="review-line-no">{line.newNo ?? ""}</span>
                     <span className="review-line-mark">{line.kind === "add" ? "+" : line.kind === "del" ? "-" : " "}</span>
                     <span className="review-line-text">{line.text}</span>
                   </div>
-                  {here.map((c) => (
-                    <div className="review-comment" key={c.id} data-session={c.sessionId} data-turn={c.turnN ?? ""} data-sent={sentOf(c.id) ?? ""}>
-                      <span className="review-comment-route">
-                        {t("review.toAgent", { agent: agentLabel(sessions.find((s) => s.id === c.sessionId), c.sessionId.slice(0, 8)) })}
-                        {c.turnN !== null ? ` · T${c.turnN}` : ""}
-                        {sentOf(c.id) !== null ? ` · ${t("review.sentAs", { n: sentOf(c.id) ?? 0 })}` : ""}
-                      </span>
-                      <span className="review-comment-text">{c.text}</span>
-                      {sentOf(c.id) === null && (
-                        <CloseButton className="review-comment-remove" onClick={() => removeComment(repoPath, c.id)} label={t("review.removeComment")} />
-                      )}
-                    </div>
-                  ))}
+                  {here.map((c) => renderComment(c, false))}
                   {isDraft && (
                     <div className="review-comment-editor">
                       <Textarea
                         ref={draftRef}
                         value={draftText}
-                        placeholder={t("review.commentPlaceholder", { agent: agentLabel(sessions.find((s) => s.id === draft.sessionId), draft.sessionId.slice(0, 8)) })}
+                        placeholder={t("review.commentPlaceholder", { agent: nameOf(draft.sessionId) })}
                         onChange={(e) => setDraftText(e.target.value)}
                         onKeyDown={(e) => {
                           if ((e.metaKey || e.ctrlKey) && e.key === "Enter") saveComment();
@@ -622,12 +750,12 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
         {[...bySession.entries()].map(([sid, list]) => {
           const unsent = list.filter((c) => sentOf(c.id) === null);
           const session = sessions.find((s) => s.id === sid);
-          const label = agentLabel(session, sid.slice(0, 8));
+          const label = nameOf(sid);
           const gone = !session || session.phase === "destroyed";
           return (
             <div className="review-send" key={sid} data-session={sid} data-unsent={unsent.length}>
               <span className="review-send-label">
-                {t("review.commentsFor", { count: unsent.length, agent: label })}
+                {translatePlural("review.commentsToSend", unsent.length, { agent: label })}
               </span>
               <Button
                 size="sm"
@@ -689,7 +817,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
               ...(isFeatureFlagEnabled("diskGuard") ? [{ value: "worktrees" as const, label: t("review.tabWorktrees") }] : []),
             ]}
           />
-          <LandButtons sessionId={sessionId} onLand={onClose} />
+          <LandButtons sessionId={sessionId} />
           <CloseButton className="review-close" onClick={onClose} label={t("common.close")} title={ESC_KEY} />
         </header>
 
@@ -708,13 +836,13 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                 ]}
               />
               <span className="review-summary" data-files={files.length} data-flags={flagCount} data-viewed={review.viewed.filter((p) => files.some((f) => f.file.path === p)).length}>
-                {t("review.summary", { files: files.length, add: totals.add, del: totals.del })}
+                {translatePlural("review.summaryFiles", files.length, { add: totals.add, del: totals.del })}
                 {" · "}
                 {t("review.viewedCount", { viewed: review.viewed.filter((p) => files.some((f) => f.file.path === p)).length, files: files.length })}
                 {flagCount > 0 && (
                   <>
                     {" · "}
-                    <span className="review-summary-flags">{t("review.flagCount", { count: flagCount })}</span>
+                    <span className="review-summary-flags">{translatePlural("review.riskFlags", flagCount)}</span>
                   </>
                 )}
               </span>
@@ -744,7 +872,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                     >
                       <ViewedBox checked={viewedSet.has(file.path)} label={t("review.viewed")} onChange={(v) => setViewed(repoPath, file.path, v)} />
                       <span className={`review-file-status review-file-status-${file.status}`}>{file.status[0].toUpperCase()}</span>
-                      <span className="review-file-path">{file.path}</span>
+                      <SplitPath path={file.path} />
                       <span className="review-file-stat">
                         <span className="review-add">+{file.additions}</span> <span className="review-del">−{file.deletions}</span>
                       </span>
@@ -753,22 +881,29 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                   ))}
                 {!loading && groupBy === "turn" && turns.length === 0 && <div className="review-empty">{t("review.noTurns")}</div>}
                 {!loading && groupBy === "turn" &&
-                  turns.map((entry) => (
-                    <div
-                      key={`${entry.sessionId}:${entry.turn.n}`}
-                      className={`review-turn-row${selection?.kind === "turn" && selection.sessionId === entry.sessionId && selection.n === entry.turn.n ? " review-row-selected" : ""}`}
-                      data-session={entry.sessionId}
-                      data-turn={entry.turn.n}
-                      onClick={() => setSelection({ kind: "turn", sessionId: entry.sessionId, n: entry.turn.n })}
-                    >
-                      <span className="review-turn-n">T{entry.turn.n}</span>
-                      <span className="review-turn-agent">{entry.agentLabel}</span>
-                      <span className="review-file-stat">
-                        {entry.turn.diffstat.files} {t("review.filesShort")} · <span className="review-add">+{entry.turn.diffstat.insertions}</span>{" "}
-                        <span className="review-del">−{entry.turn.diffstat.deletions}</span>
-                      </span>
-                    </div>
-                  ))}
+                  turns.map((entry) => {
+                    const between = entry.kind === "between";
+                    const reverted = !between && revertedSet.has(`${entry.sessionId}:${entry.turn.n}`);
+                    return (
+                      <div
+                        key={`${entry.sessionId}:${between ? "b" : "t"}${entry.turn.n}`}
+                        className={`review-turn-row${isEntry(selection, entry) ? " review-row-selected" : ""}`}
+                        data-session={entry.sessionId}
+                        data-turn={entry.turn.n}
+                        data-kind={entry.kind}
+                        data-reverted={reverted ? "1" : "0"}
+                        onClick={() => setSelection({ kind: "turn", sessionId: entry.sessionId, n: entry.turn.n, between })}
+                      >
+                        <span className="review-turn-n">{between ? "·" : `T${entry.turn.n}`}</span>
+                        <span className="review-turn-agent">{between ? t("review.betweenTurns") : `${entry.agentLabel} · ${clock(entry.turn.startedAt)}`}</span>
+                        {reverted && <span className="review-turn-reverted">{t("review.turnReverted")}</span>}
+                        <span className="review-file-stat">
+                          {translatePlural("review.fileCount", entry.turn.diffstat.files)} · <span className="review-add">+{entry.turn.diffstat.insertions}</span>{" "}
+                          <span className="review-del">−{entry.turn.diffstat.deletions}</span>
+                        </span>
+                      </div>
+                    );
+                  })}
               </nav>
 
               <section className="review-main" aria-live="polite">
@@ -776,7 +911,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                 {!loading && groupBy === "file" && selectedFile && (
                   <>
                     <div className="review-main-head">
-                      <span className="review-main-path">{selectedFile.file.path}</span>
+                      <SplitPath path={selectedFile.file.path} className="review-main-path" />
                       {flagBadges(selectedFile.file.path)}
                       {(() => {
                         const owner = turnForPath(turns, selectedFile.file.path);
@@ -790,18 +925,22 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                   <>
                     <div className="review-main-head">
                       <span className="review-main-path">
-                        T{selectedTurn.turn.n} · {selectedTurn.agentLabel}
+                        {selectedTurn.kind === "between" ? t("review.betweenTurnsBefore", { n: selectedTurn.turn.n }) : `T${selectedTurn.turn.n} · ${selectedTurn.agentLabel}`}
                       </span>
-                      <Button size="sm" className="review-revert-btn" onClick={() => void openRevert(selectedTurn)}>
-                        {t("review.revertTurn", { n: selectedTurn.turn.n })}
-                      </Button>
+                      {selectedTurn.kind === "agent" && revertedSet.has(`${selectedTurn.sessionId}:${selectedTurn.turn.n}`) && <span className="review-turn-reverted">{t("review.turnReverted")}</span>}
+                      {/* The person's own edits are never reverted as a turn. */}
+                      {selectedTurn.kind === "agent" && (
+                        <Button size="sm" className="review-revert-btn" onClick={() => void openRevert(selectedTurn)}>
+                          {t("review.revertTurn", { n: selectedTurn.turn.n })}
+                        </Button>
+                      )}
                     </div>
                     {selectedTurn.files.length === 0 && <div className="review-empty">{t("review.noChangeTurn")}</div>}
                     {selectedTurn.files.map((pf) => (
                       <div className="review-turn-file" key={pf.path} data-path={pf.path}>
                         <div className="review-turn-file-head">
                           <ViewedBox checked={viewedSet.has(pf.path)} label={t("review.viewed")} onChange={(v) => setViewed(repoPath, pf.path, v)} />
-                          <span className="review-file-path">{pf.path}</span>
+                          <SplitPath path={pf.path} />
                           <span className="review-file-stat">
                             <span className="review-add">+{pf.additions}</span> <span className="review-del">−{pf.deletions}</span>
                           </span>
@@ -846,8 +985,16 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
               {!revert.preview && !revert.error && <div className="review-empty">{t("review.loading")}</div>}
               {revert.preview && (
                 <>
-                  <p className={`review-revert-clean review-revert-clean-${revert.preview.clean ? "yes" : "no"}`} data-clean={revert.preview.clean ? "1" : "0"}>
-                    {revert.preview.clean ? t("review.revertClean") : t("review.revertNotClean", { message: revert.preview.message })}
+                  <p
+                    className={`review-revert-clean review-revert-clean-${revert.preview.clean ? "yes" : "no"}`}
+                    data-clean={revert.preview.clean ? "1" : "0"}
+                    data-already={revert.preview.alreadyReverted ? "1" : "0"}
+                  >
+                    {revert.preview.alreadyReverted
+                      ? t("review.alreadyReverted", { n: revert.entry.turn.n })
+                      : revert.preview.clean
+                        ? t("review.revertClean")
+                        : t("review.revertNotClean", { message: revert.preview.message })}
                   </p>
                   <ul className="review-revert-files">
                     {revert.preview.files.map((f) => (
@@ -866,7 +1013,7 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                 <Button disabled={revert.busy} onClick={() => setRevert(null)}>
                   {t("common.cancel")}
                 </Button>
-                <Button variant="danger-solid" className="review-revert-confirm" disabled={!revert.preview || revert.preview.files.length === 0 || revert.busy} onClick={() => void confirmRevert()}>
+                <Button variant="danger-solid" className="review-revert-confirm" disabled={!revert.preview || revert.preview.files.length === 0 || !!revert.preview.alreadyReverted || revert.busy} onClick={() => void confirmRevert()}>
                   {revert.busy ? t("review.reverting") : t("review.revertConfirm", { n: revert.entry.turn.n })}
                 </Button>
               </div>
@@ -881,9 +1028,10 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
 /**
  * The Land sheet's entry point (landSheet flag), which lived in the git
  * panel this desk replaces: one button per project the session works on in
- * a worktree of its own. The desk closes before the sheet opens.
+ * a worktree of its own. The sheet opens over the desk: Cancel brings the
+ * person back to it, and it closes once a land or an archive went through.
  */
-function LandButtons({ sessionId, onLand }: { sessionId: string; onLand: () => void }) {
+function LandButtons({ sessionId }: { sessionId: string }) {
   const { t } = useI18n();
   const [landable, setLandable] = useState<GitProjectStatus[]>([]);
   useEffect(() => {
@@ -906,10 +1054,7 @@ function LandButtons({ sessionId, onLand }: { sessionId: string; onLand: () => v
           variant="primary"
           className="review-land-btn"
           data-project-id={project.project_id}
-          onClick={() => {
-            onLand();
-            openLandSheet(sessionId, project.project_id);
-          }}
+          onClick={() => openLandSheet(sessionId, project.project_id)}
           title={t("review.landTitle")}
         >
           {landable.length === 1 ? t("review.land") : t("review.landProject", { project: project.project_name })}

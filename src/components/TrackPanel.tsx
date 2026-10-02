@@ -5,24 +5,29 @@
  * and offers the person's actions on it:
  *
  *   ⌘⏎ / Ctrl+⏎  approve the waiting gate       o   preview the phase file here
- *   ⇧O           open it in $EDITOR in a split   r   send my edits back to the writer
- *   s            skip the phase
+ *   ⇧O           open it in $EDITOR in a split   r   send my edits back to the agent
+ *   ⇧S           skip the phase (asks first)
  *
  * Keys work while the panel has focus (click it or tab to it); the same
  * actions are in the command palette. The panel never types into a terminal
- * on its own: `r` sends one tagged line because the person pressed it.
+ * on its own: `r` sends one tagged line because the person pressed it, and
+ * only ever to a session that runs an agent (a plain shell would run it).
  */
 import "../styles/components/TrackPanel.css";
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import type { SessionData } from "../types/session";
 import { useTrack, noteOwnApproval, phaseFileOf, hasTurnHistory, type TrackFeatureState } from "../track/store";
-import { trackApprove, trackFilePath, trackPromote, trackReadFile, trackSkip, trackWriteReview } from "../track/api";
-import { attachedSessions, PHASE_LINE_CAP, slugFromBranch, TRACK_PHASES } from "../track/rules";
+import { trackApprove, trackFilePath, trackPromotePlan, trackReadFile, trackSkip, trackWriteReview } from "../track/api";
+import { attachedSessions, isAgentSession, PHASE_LINE_CAP, skippedPhases, slugFromBranch, TRACK_PHASES } from "../track/rules";
+import { promoteWithUndo } from "../track/promote";
 import { subscribeSessionEvents } from "../agent/contract/sessionEventStore";
 import { FEATURE_TRACKS, type FeatureTrack } from "../agent/contract/featureFrontMatter";
+import { agentDisplayName, getAgent } from "../catalog/agentCatalog";
 import { useToastStore } from "../hooks/useToastStore";
 import { useI18n } from "../i18n/I18nProvider";
+import { translatePlural } from "../i18n/plural";
 import { fmt } from "../utils/platform";
+import { formatBytes } from "../utils/jsonSummary";
 import { Button, CloseButton, Select } from "./ui";
 
 interface TrackPanelProps {
@@ -52,6 +57,12 @@ function useTurnHistoryOf(sessionIds: readonly string[]): string {
   return useSyncExternalStore(subscribe, snapshot, snapshot);
 }
 
+/** The agent's name as people know it ("Claude Code"), never the task text. */
+function agentNameOf(s: SessionData | null): string | null {
+  if (!s) return null;
+  return agentDisplayName(s) ?? getAgent(s.ai_provider)?.name ?? s.ai_provider ?? null;
+}
+
 export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWriter, onClose }: TrackPanelProps) {
   const { t } = useI18n();
   const worktree = session.working_directory;
@@ -60,14 +71,19 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
   const feature: TrackFeatureState | undefined = state.features.find((f) => f.slug === state.slug) ?? (state.features.length === 1 ? state.features[0] : undefined);
   const inWorktree = useMemo(() => attachedSessions(sessions, worktree), [sessions, worktree]);
   const withHistory = useTurnHistoryOf(useMemo(() => inWorktree.map((s) => s.id), [inWorktree]));
-  const attached = useMemo(() => {
+  const hasHistory = useMemo(() => {
     const has = new Set(withHistory === "" ? [] : withHistory.split("\u0000"));
-    return attachedSessions(inWorktree, worktree, (id) => has.has(id));
-  }, [inWorktree, worktree, withHistory]);
-  const writer = attached[0] ?? null;
+    return (id: string) => has.has(id);
+  }, [withHistory]);
+  const attached = useMemo(() => attachedSessions(inWorktree, worktree, hasHistory), [inWorktree, worktree, hasHistory]);
+  // The writer is the agent driving the feature; a plain shell never is.
+  const writer = attached[0] && isAgentSession(attached[0], hasHistory) ? attached[0] : null;
+  const writerName = agentNameOf(writer) ?? t("track.theAgent");
   const role = writer ? (writer.id === session.id ? "writer" : "reader") : "none";
   const [preview, setPreview] = useState<{ name: string; text: string } | null>(null);
   const [promoteTrack, setPromoteTrack] = useState<FeatureTrack>("Light");
+  const [promotePlan, setPromotePlan] = useState<readonly string[] | null>(null);
+  const [confirmSkip, setConfirmSkip] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const meta = feature?.meta ?? null;
@@ -76,9 +92,14 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
   const cap = meta ? PHASE_LINE_CAP[meta.phase] : undefined;
   const waiting = meta?.gate === "waiting";
   const slug = feature?.slug ?? null;
+  const phases = meta ? TRACK_PHASES[meta.track] : [];
+  const doneIdx = meta ? (meta.phase === "done" ? phases.length : phases.indexOf(meta.phase)) : -1;
+  const nextPhase = meta && doneIdx >= 0 && doneIdx < phases.length - 1 ? phases[doneIdx + 1] : "done";
+  const skipped = useMemo(() => new Map(skippedPhases(feature?.featureText ?? "").map((s) => [s.phase, s.when])), [feature?.featureText]);
 
   useEffect(() => {
     setPreview(null);
+    setConfirmSkip(false);
   }, [slug, meta?.phase]);
 
   const say = useCallback((message: string, type: "info" | "success" | "warning" | "error" = "info") => toast.addToast({ message, type, duration: 4000 }), [toast]);
@@ -97,7 +118,14 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
     }
   }, [slug, waiting, busy, worktree, say, t]);
 
+  /** ⇧S / Skip: ask first; a skip is never one stray key away. */
+  const askSkip = useCallback(() => {
+    if (!slug || !meta || meta.phase === "done" || busy) return;
+    setConfirmSkip(true);
+  }, [slug, meta, busy]);
+
   const skip = useCallback(async () => {
+    setConfirmSkip(false);
     if (!slug || !meta || meta.phase === "done" || busy) return;
     setBusy(true);
     try {
@@ -124,15 +152,18 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
     }
   }, [slug, phaseFile, phaseFileInfo, preview, worktree, say]);
 
-  const openInEditor = useCallback(async () => {
-    if (!slug) return;
-    const name = phaseFile && phaseFileInfo ? phaseFile : "feature.md";
-    try {
-      onOpenInEditorSplit(await trackFilePath(worktree, slug, name));
-    } catch (e) {
-      say(String(e), "error");
-    }
-  }, [slug, phaseFile, phaseFileInfo, worktree, onOpenInEditorSplit, say]);
+  const openInEditor = useCallback(
+    async (fileName?: string) => {
+      if (!slug) return;
+      const name = fileName ?? (phaseFile && phaseFileInfo ? phaseFile : "feature.md");
+      try {
+        onOpenInEditorSplit(await trackFilePath(worktree, slug, name));
+      } catch (e) {
+        say(String(e), "error");
+      }
+    },
+    [slug, phaseFile, phaseFileInfo, worktree, onOpenInEditorSplit, say],
+  );
 
   const sendEdits = useCallback(async () => {
     if (!slug || !feature || busy) return;
@@ -142,34 +173,49 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
       return;
     }
     if (!writer) {
-      say(t("track.noWriter"), "warning");
+      say(t("track.noAgent"), "warning");
       return;
     }
     setBusy(true);
     try {
       const review = await trackWriteReview(worktree, slug, name, feature.baseline[name] ?? null);
       await onSendToWriter(writer.id, review.line);
-      say(t("track.sentEdits", { path: review.path, count: review.changedLines, writer: writer.label || t("track.theWriter") }), "success");
+      say(t("track.sentEdits", { path: review.path, count: review.changedLines, writer: writerName }), "success");
     } catch (e) {
       say(String(e), "error");
     } finally {
       setBusy(false);
     }
-  }, [slug, feature, busy, phaseFile, phaseFileInfo, writer, worktree, onSendToWriter, say, t]);
+  }, [slug, feature, busy, phaseFile, phaseFileInfo, writer, writerName, worktree, onSendToWriter, say, t]);
+
+  const promoteSlug = slugFromBranch(state.branch, worktree);
+
+  /** "Make it a feature": say what it writes first. */
+  const askPromote = useCallback(async () => {
+    if (busy) return;
+    if (promoteTrack === "Quick") {
+      say(t("track.quickNoFolder", { slug: promoteSlug }), "info");
+      return;
+    }
+    try {
+      setPromotePlan(await trackPromotePlan(worktree, promoteSlug, promoteTrack));
+    } catch (e) {
+      say(String(e), "error");
+    }
+  }, [busy, promoteTrack, promoteSlug, worktree, say, t]);
 
   const promote = useCallback(async () => {
+    setPromotePlan(null);
     if (busy) return;
     setBusy(true);
     try {
-      const out = await trackPromote(worktree, slugFromBranch(state.branch, worktree), promoteTrack, null);
-      const made = out.created ? t("track.featureCreated", { slug: out.slug, track: promoteTrack }) : t("track.quickNoFolder", { slug: out.slug });
-      say(out.branch ? `${made} — ${out.branch}` : made, "success");
+      await promoteWithUndo(worktree, promoteSlug, promoteTrack, toast, t);
     } catch (e) {
       say(String(e), "error");
     } finally {
       setBusy(false);
     }
-  }, [busy, worktree, state.branch, promoteTrack, say, t]);
+  }, [busy, worktree, promoteSlug, promoteTrack, toast, say, t]);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLElement>) => {
@@ -177,6 +223,12 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
       if (target.tagName === "SELECT" || target.tagName === "INPUT" || target.tagName === "TEXTAREA") return;
       // The track picker (a combobox) takes letters for type-ahead.
       if (target.getAttribute("role") === "combobox") return;
+      if (e.key === "Escape" && (confirmSkip || promotePlan)) {
+        e.preventDefault();
+        setConfirmSkip(false);
+        setPromotePlan(null);
+        return;
+      }
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
         void approve();
@@ -189,16 +241,15 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
       } else if (e.key === "r" && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
         void sendEdits();
-      } else if (e.key === "s" && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      } else if (e.key === "S" && e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey) {
         e.preventDefault();
-        void skip();
+        askSkip();
       }
     },
-    [approve, openPreview, openInEditor, sendEdits, skip],
+    [approve, openPreview, openInEditor, sendEdits, askSkip, confirmSkip, promotePlan],
   );
 
-  const phases = meta ? TRACK_PHASES[meta.track] : [];
-  const doneIdx = meta ? (meta.phase === "done" ? phases.length : phases.indexOf(meta.phase)) : -1;
+  const roleText = role === "writer" ? t("track.roleAgent", { agent: writerName }) : role === "reader" ? t("track.roleViewing", { agent: writerName }) : t("track.roleNoAgent");
 
   return (
     <aside
@@ -209,6 +260,7 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
       data-gate={meta?.gate ?? ""}
       data-track={meta?.track ?? ""}
       data-role={role}
+      data-writer={writer?.id ?? ""}
       data-error={feature?.error ? "true" : "false"}
       aria-label={t("track.ariaLabel")}
       tabIndex={0}
@@ -218,7 +270,9 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
         <span className="track-title">{t("track.title")}</span>
         {slug && <span className="track-slug mono">{slug}</span>}
         {meta && <span className="track-kind">{meta.track}</span>}
-        <span className={`track-role track-role-${role}`}>{role === "writer" ? t("track.roleWriter") : role === "reader" ? t("track.roleReader", { writer: writer?.label || t("track.theWriter") }) : t("track.roleNone")}</span>
+        <span className={`track-role track-role-${role}`} title={roleText}>
+          {roleText}
+        </span>
         <CloseButton className="track-close" onClick={onClose} label={t("track.close")} />
       </header>
 
@@ -226,34 +280,67 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
 
       {!feature && (
         <section className="track-empty" data-testid="track-empty">
-          <p>{t("track.empty")}</p>
+          <p>{t("track.noPlanYet")}</p>
           <p className="text-muted">{t("track.emptyHint")}</p>
           <div className="track-promote">
+            <span className="track-promote-label">{t("track.planSize")}</span>
             <Select<FeatureTrack>
               size="sm"
               className="track-select"
               value={promoteTrack}
-              onChange={setPromoteTrack}
-              aria-label={t("app.track")}
+              onChange={(v) => {
+                setPromoteTrack(v);
+                setPromotePlan(null);
+              }}
+              aria-label={t("track.planSize")}
               options={FEATURE_TRACKS.map((kind) => ({
                 value: kind,
                 label: kind,
                 detail: kind === "Quick" ? t("track.quickHint") : kind === "Light" ? t("track.lightHint") : t("track.fullHint"),
               }))}
             />
-            <Button size="sm" variant="primary" className="track-make-feature" onClick={() => void promote()} disabled={busy}>
+          </div>
+          {!promotePlan && (
+            <Button size="sm" variant="primary" className="track-make-feature" onClick={() => void askPromote()} disabled={busy}>
               {t("track.makeFeature")}
             </Button>
-          </div>
-          <p className="text-muted mono">{`hermes/${slugFromBranch(state.branch, worktree)}`}</p>
+          )}
+          {promotePlan && (
+            <div className="track-confirm" role="alertdialog" aria-label={t("track.makeFeature")} data-testid="track-promote-confirm">
+              <p>{translatePlural("track.promoteConfirm", promotePlan.length)}</p>
+              <ul className="track-confirm-files mono">
+                {promotePlan.map((p) => (
+                  <li key={p}>{p}</li>
+                ))}
+              </ul>
+              <div className="track-confirm-actions">
+                <Button size="sm" variant="quiet" className="track-promote-cancel" onClick={() => setPromotePlan(null)}>
+                  {t("common.cancel")}
+                </Button>
+                <Button size="sm" variant="primary" className="track-promote-create" onClick={() => void promote()} disabled={busy} autoFocus>
+                  {t("track.create")}
+                </Button>
+              </div>
+            </div>
+          )}
+          <p className="text-muted mono">{`hermes/${promoteSlug}`}</p>
         </section>
       )}
 
-      {feature?.error && (
+      {feature && feature.tooLarge !== null && (
+        <section className="track-error" data-testid="track-too-large" role="alert">
+          <p>{t("track.tooLarge", { size: formatBytes(feature.tooLarge) })}</p>
+          <Button size="sm" className="track-open-error" onClick={() => void openInEditor("feature.md")}>
+            {t("track.openInEditor")}
+          </Button>
+        </section>
+      )}
+
+      {feature?.error && feature.tooLarge === null && (
         <section className="track-error" data-testid="track-error" role="alert">
           <p>{t("track.unreadable", { line: feature.error.line })}</p>
           <p className="text-muted">{feature.error.message}</p>
-          <Button size="sm" className="track-open-error" onClick={() => void openInEditor()}>
+          <Button size="sm" className="track-open-error" onClick={() => void openInEditor("feature.md")}>
             {t("track.open")}
           </Button>
         </section>
@@ -263,13 +350,16 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
         <>
           <ol className="track-phases" aria-label={t("track.phases")}>
             {phases.map((p, i) => {
-              const cls = i < doneIdx ? "done" : i === doneIdx ? (waiting ? "waiting" : "current") : "upcoming";
+              const wasSkipped = i < doneIdx && skipped.has(p);
+              const cls = wasSkipped ? "skipped" : i < doneIdx ? "done" : i === doneIdx ? (waiting ? "waiting" : "current") : "upcoming";
+              const when = skipped.get(p) ?? null;
+              const title = wasSkipped ? (when ? t("track.skippedTitle", { when }) : t("track.skippedTitleNoTime")) : undefined;
               return (
-                <li key={p} className={`track-phase track-phase-${cls}`} data-phase={p} data-state={cls}>
+                <li key={p} className={`track-phase track-phase-${cls}`} data-phase={p} data-state={cls} title={title} aria-label={wasSkipped ? `${t("track.phaseSkipped", { phase: p })} — ${title}` : undefined}>
                   <span className="track-phase-mark" aria-hidden="true">
-                    {cls === "done" ? "✓" : cls === "waiting" ? "◆" : cls === "current" ? "›" : "·"}
+                    {cls === "skipped" ? "–" : cls === "done" ? "✓" : cls === "waiting" ? "◆" : cls === "current" ? "›" : "·"}
                   </span>
-                  <span className="track-phase-name">{p}</span>
+                  <span className="track-phase-name">{wasSkipped ? t("track.phaseSkipped", { phase: p }) : p}</span>
                   {p === meta.phase && phaseFileInfo && (
                     <span className="track-phase-lines mono">
                       {phaseFileInfo.lines}
@@ -319,13 +409,27 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
             <Button size="sm" variant="quiet" className="track-open-editor" onClick={() => void openInEditor()}>
               {t("track.editorSplit")} <kbd>⇧O</kbd>
             </Button>
-            <Button size="sm" variant="quiet" className="track-send-edits" onClick={() => void sendEdits()} disabled={!phaseFileInfo || busy}>
+            <Button size="sm" variant="quiet" className="track-send-edits" onClick={() => void sendEdits()} disabled={!phaseFileInfo || busy} title={writer ? undefined : t("track.noAgent")}>
               {t("track.sendEdits")} <kbd>r</kbd>
             </Button>
-            <Button size="sm" variant="quiet" className="track-skip" onClick={() => void skip()} disabled={meta.phase === "done" || busy}>
-              {t("track.skip")} <kbd>s</kbd>
+            <Button size="sm" variant="quiet" className="track-skip" onClick={askSkip} disabled={meta.phase === "done" || busy}>
+              {t("track.skip")} <kbd>⇧S</kbd>
             </Button>
           </div>
+
+          {confirmSkip && meta.phase !== "done" && (
+            <div className="track-confirm" role="alertdialog" aria-label={t("track.skip")} data-testid="track-skip-confirm">
+              <p>{t("track.skipConfirm", { phase: meta.phase, next: nextPhase })}</p>
+              <div className="track-confirm-actions">
+                <Button size="sm" variant="quiet" className="track-skip-cancel" onClick={() => setConfirmSkip(false)}>
+                  {t("common.cancel")}
+                </Button>
+                <Button size="sm" variant="danger-solid" className="track-skip-confirm" onClick={() => void skip()} disabled={busy} autoFocus>
+                  {t("track.skipPhase", { phase: meta.phase })}
+                </Button>
+              </div>
+            </div>
+          )}
 
           {preview && (
             <pre className="track-preview mono" data-testid="track-preview" data-file={preview.name}>
@@ -337,7 +441,7 @@ export function TrackPanel({ session, sessions, onOpenInEditorSplit, onSendToWri
         </>
       )}
 
-      <footer className="track-foot text-muted">{t("track.footer", { shortcut: fmt("{mod}⏎") })}</footer>
+      {feature && <footer className="track-foot text-muted">{t("track.footer", { shortcut: fmt("{mod}⏎") })}</footer>}
     </aside>
   );
 }

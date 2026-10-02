@@ -56,7 +56,8 @@ const GH_SIGN_IN_COMMAND = "gh auth login";
 interface LandSheetProps {
   sessionId: string;
   projectId: string;
-  onClose: () => void;
+  /** `landed`: a land or an archive went through and was not undone. */
+  onClose: (landed?: boolean) => void;
 }
 
 function errorText(e: unknown): string {
@@ -96,6 +97,11 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
   const [outcome, setOutcome] = useState<LandOutcome | null>(null);
   const [archived, setArchived] = useState<ArchivePlan | null>(null);
   const [undone, setUndone] = useState<UndoOutcome | null>(null);
+  // Closing tells whoever opened the sheet whether a land or an archive went
+  // through (and was not undone): the Review Desk under it closes only then.
+  const doneRef = useRef(false);
+  doneRef.current = (outcome?.status === "landed" || !!archived) && !undone;
+  const close = useCallback(() => onClose(doneRef.current), [onClose]);
   const [checks, setChecks] = useState<PrCheck[] | null>(null);
   const [checksError, setChecksError] = useState<string | null>(null);
   const [note, setNote] = useState<string | null>(null);
@@ -165,12 +171,12 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busyRef.current) {
         e.stopPropagation();
-        onClose();
+        close();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
+  }, [close]);
 
   // ── Actions ─────────────────────────────────────────────────────────
   const archiveNow = useCallback(
@@ -332,7 +338,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                   base: preview.base && <code className="land-sheet-branch">{preview.base.name}</code>,
                 })}
           </span>
-          <CloseButton className="land-sheet-x" onClick={onClose} disabled={busy !== null} label={t("common.close")} />
+          <CloseButton className="land-sheet-x" onClick={close} disabled={busy !== null} label={t("common.close")} />
         </div>
 
         <div className="land-sheet-body">
@@ -592,7 +598,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
               </Button>
               <span className="land-sheet-spacer" />
               {/* A failing Done-When check makes Cancel the primary and Land a secondary "Land anyway". */}
-              <Button variant={failing ? "primary" : "secondary"} className="land-sheet-cancel" onClick={onClose} disabled={busy !== null}>
+              <Button variant={failing ? "primary" : "secondary"} className="land-sheet-cancel" onClick={() => onClose(false)} disabled={busy !== null}>
                 {t("common.cancel")}
               </Button>
               <Button
@@ -614,7 +620,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
                 </Button>
               )}
               <span className="land-sheet-spacer" />
-              <Button variant="primary" className="land-sheet-close" disabled={busy !== null} onClick={onClose}>
+              <Button variant="primary" className="land-sheet-close" disabled={busy !== null} onClick={close}>
                 {t("common.close")}
               </Button>
             </>

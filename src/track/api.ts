@@ -21,6 +21,10 @@ export interface TrackFeatureSnapshot {
   readonly slug: string;
   readonly featureText: string;
   readonly featureModifiedAt: number;
+  /** feature.md's size in bytes. */
+  readonly featureSize?: number;
+  /** feature.md is too large to read whole: featureText is only its start. */
+  readonly featureTruncated?: boolean;
   readonly questionsText: string | null;
   readonly files: readonly TrackFileInfo[];
 }
@@ -50,6 +54,20 @@ export interface PromoteOutcome {
   readonly featureFile: string | null;
   /** What happened to the `hermes/<slug>` branch, or null outside a repository. */
   readonly branch: string | null;
+  /** Every file written, so Undo removes exactly those. */
+  readonly written: readonly WrittenFile[];
+}
+
+export interface WrittenFile {
+  /** Relative to the worktree. */
+  readonly path: string;
+  readonly hash: string;
+}
+
+export interface UndoPromoteOutcome {
+  readonly removed: readonly string[];
+  /** Changed since they were written: kept. */
+  readonly kept: readonly string[];
 }
 
 export function trackWatch(sessionId: string, worktreePath: string): Promise<TrackWorktreeSnapshot> {
@@ -74,6 +92,16 @@ export function trackRevertGate(worktreePath: string, slug: string, phase: strin
 
 export function trackPromote(worktreePath: string, slug: string, track: string, title: string | null): Promise<PromoteOutcome> {
   return invoke<PromoteOutcome>("track_promote", { worktreePath, slug, track, title });
+}
+
+/** The files "Make it a feature" would write now (for its confirmation). */
+export function trackPromotePlan(worktreePath: string, slug: string, track: string): Promise<string[]> {
+  return invoke<string[]>("track_promote_plan", { worktreePath, slug, track });
+}
+
+/** Undo "Make it a feature": removes the files it wrote that nobody changed since. */
+export function trackUndoPromote(worktreePath: string, written: readonly WrittenFile[]): Promise<UndoPromoteOutcome> {
+  return invoke<UndoPromoteOutcome>("track_undo_promote", { worktreePath, written });
 }
 
 export function trackReadFile(worktreePath: string, slug: string, name: string): Promise<string> {

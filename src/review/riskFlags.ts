@@ -13,7 +13,9 @@ export type RiskFlagKind =
   | "secret"
   | "new_binary"
   | "postinstall"
-  | "curl_pipe_sh";
+  | "curl_pipe_sh"
+  | "checks_changed"
+  | "agent_config";
 
 export interface RiskFlag {
   readonly kind: RiskFlagKind;
@@ -62,6 +64,78 @@ const SECRET_PATTERNS: readonly { re: RegExp; what: string }[] = [
 ];
 
 const CURL_PIPE_SH = /\b(?:curl|wget)\b[^\n|]*\|\s*(?:sudo\s+)?(?:ba|z|da|k)?sh\b/;
+
+/**
+ * Files that steer an agent: its settings, permissions and hooks, its MCP
+ * servers, its standing instructions. An agent that edits them changes what
+ * it (or the next agent) may do without asking.
+ */
+const AGENT_CONFIG_PATH = /(^|\/)(\.claude\/|\.codex\/|\.agents\/|\.gemini\/)|(^|\/)(\.mcp\.json|AGENTS\.md|CLAUDE\.md|CLAUDE\.local\.md|GEMINI\.md)$/;
+
+/** The two sides of a file's diff as far as the hunks show them. */
+function sides(file: ParsedFile): { before: string[]; after: string[]; changed: { side: "old" | "new"; index: number }[] } {
+  const before: string[] = [];
+  const after: string[] = [];
+  const changed: { side: "old" | "new"; index: number }[] = [];
+  for (const h of file.hunks) {
+    for (const l of h.lines) {
+      if (l.kind !== "add") before.push(l.text);
+      if (l.kind !== "del") after.push(l.text);
+      if (l.kind === "del") changed.push({ side: "old", index: before.length - 1 });
+      if (l.kind === "add") changed.push({ side: "new", index: after.length - 1 });
+    }
+  }
+  return { before, after, changed };
+}
+
+/** The done_when commands in a fragment, and the lines that hold them; null when it has none. */
+function doneWhenIn(lines: readonly string[], toml: boolean): { count: number; from: number; to: number } | null {
+  for (let i = 0; i < lines.length; i++) {
+    const m = toml ? /^\s*done_when\s*=\s*(.*)$/.exec(lines[i]) : /^done_when:\s*(.*)$/.exec(lines[i]);
+    if (!m) continue;
+    const rest = m[1].replace(/\s+#.*$/, "").trim();
+    if (rest.startsWith("[")) {
+      // Inline (possibly over several lines in TOML).
+      let text = rest;
+      let j = i;
+      while (!text.includes("]") && j + 1 < lines.length) text += lines[++j];
+      const inner = text.slice(1, text.indexOf("]") >= 0 ? text.indexOf("]") : undefined);
+      const items = toml ? inner.match(/"(?:[^"\\]|\\.)*"|'[^']*'/g) ?? [] : inner.split(",").filter((x) => x.trim() !== "");
+      return { count: items.length, from: i, to: j };
+    }
+    if (rest === "" && !toml) {
+      let j = i;
+      while (j + 1 < lines.length && /^\s*-\s/.test(lines[j + 1])) j++;
+      return { count: j - i, from: i, to: j };
+    }
+    return { count: 0, from: i, to: i };
+  }
+  return null;
+}
+
+function commands(n: number): string {
+  return n === 1 ? "1 command" : `${n} commands`;
+}
+
+/** The checks-changed flag of worktree.toml or a feature.md, when its done_when moved. */
+function checksFlag(file: ParsedFile, path: string, toml: boolean): RiskFlag | null {
+  // A new file only adds checks; nothing that held the agent was taken away.
+  if (file.status === "added") return null;
+  const { before, after, changed } = sides(file);
+  const was = doneWhenIn(before, toml);
+  const now = doneWhenIn(after, toml);
+  const inside = (region: { from: number; to: number } | null, side: "old" | "new") =>
+    !!region && changed.some((c) => c.side === side && c.index >= region.from && c.index <= region.to);
+  const touched = inside(was, "old") || inside(now, "new") || (was === null) !== (now === null) || (was !== null && now !== null && was.count !== now.count);
+  if (!touched) return null;
+  const a = was?.count ?? 0;
+  const b = now?.count ?? 0;
+  return {
+    kind: "checks_changed",
+    label: "checks changed",
+    detail: a !== b ? `done_when went from ${commands(a)} to ${commands(b)} in ${path}` : `done_when changed in ${path}: the checks that gate Land`,
+  };
+}
 
 function basename(path: string): string {
   const i = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
@@ -113,6 +187,21 @@ export function riskFlagsFor(file: ParsedFile): RiskFlag[] {
   }
   if (/^\.github\/workflows\/[^/]+\.ya?ml$/.test(path) || /^\.gitlab-ci\.ya?ml$/.test(path) || /^\.circleci\//.test(path) || /^\.buildkite\//.test(path)) {
     flags.push({ kind: "workflow", label: "CI workflow", detail: `${path} changed: it runs with the repository's secrets` });
+  }
+  if (path === ".hermes/worktree.toml" || path.endsWith("/.hermes/worktree.toml")) {
+    flags.push(
+      checksFlag(file, path, true) ?? {
+        kind: "agent_config",
+        label: "agent config",
+        detail: `${path} changed: it sets what runs in every new worktree`,
+      },
+    );
+  } else if (/(^|\/)\.hermes\/features\/[^/]+\/feature\.md$/.test(path)) {
+    const flag = checksFlag(file, path, false);
+    if (flag) flags.push(flag);
+  }
+  if (AGENT_CONFIG_PATH.test(path)) {
+    flags.push({ kind: "agent_config", label: "agent config", detail: `${path} changed: it steers what an agent may do` });
   }
   if (AUTH_CRYPTO_PATH.test(path)) {
     flags.push({ kind: "auth_crypto", label: "auth / crypto", detail: `${path} is on an authentication or cryptography path` });

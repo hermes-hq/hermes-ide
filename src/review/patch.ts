@@ -57,12 +57,17 @@ function parseHunks(lines: readonly string[]): DiffHunk[] {
   let current: { header: string; oldStart: number; newStart: number; lines: DiffLine[] } | null = null;
   let oldNo = 0;
   let newNo = 0;
+  // What the hunk header says is left of the hunk, per side.
+  let oldLeft = 0;
+  let newLeft = 0;
   for (const line of lines) {
     const m = HUNK_RE.exec(line);
     if (m) {
       if (current) hunks.push(current);
       oldNo = Number(m[1]);
       newNo = Number(m[3]);
+      oldLeft = m[2] === undefined ? 1 : Number(m[2]);
+      newLeft = m[4] === undefined ? 1 : Number(m[4]);
       current = { header: line, oldStart: oldNo, newStart: newNo, lines: [] };
       continue;
     }
@@ -71,13 +76,20 @@ function parseHunks(lines: readonly string[]): DiffHunk[] {
     if (line.startsWith("+")) {
       current.lines.push({ kind: "add", oldNo: null, newNo, text: line.slice(1) });
       newNo++;
+      newLeft--;
     } else if (line.startsWith("-")) {
       current.lines.push({ kind: "del", oldNo, newNo: null, text: line.slice(1) });
       oldNo++;
-    } else {
+      oldLeft--;
+    } else if (line.startsWith(" ") || (line === "" && oldLeft > 0 && newLeft > 0)) {
+      // A context line; an empty one counts only while the header expects
+      // more (some tools strip its leading space). The empty string after
+      // the patch's final newline is not a line of the file.
       current.lines.push({ kind: "context", oldNo, newNo, text: line.startsWith(" ") ? line.slice(1) : line });
       oldNo++;
       newNo++;
+      oldLeft--;
+      newLeft--;
     }
   }
   if (current) hunks.push(current);

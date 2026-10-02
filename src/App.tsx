@@ -39,7 +39,8 @@ import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusI
 import { useTrackWatching } from "./track/useTrackWatching";
 import { editorCommandFor } from "./track/rules";
 import { getTrackState, noteOwnApproval } from "./track/store";
-import { trackApprove, trackPromote } from "./track/api";
+import { trackApprove } from "./track/api";
+import { promoteWithUndo } from "./track/promote";
 import { slugFromBranch } from "./track/rules";
 import { writeToSession } from "./api/sessions";
 import { utf8ToBase64 } from "./utils/encoding";
@@ -1137,9 +1138,8 @@ function AppContent() {
     if (!activeSession) return;
     const track = getTrackState(activeSession.working_directory);
     try {
-      const out = await trackPromote(activeSession.working_directory, slugFromBranch(track.branch, activeSession.working_directory), "Light", null);
-      const made = t("track.featureCreated", { slug: out.slug, track: "Light" });
-      toastStore.addToast({ message: out.branch ? `${made} — ${out.branch}` : made, type: "success", duration: 4000 });
+      // An explicit palette command; its toast offers Undo like the Track panel.
+      await promoteWithUndo(activeSession.working_directory, slugFromBranch(track.branch, activeSession.working_directory), "Light", toastStore, t);
       if (!ui.trackPanelOpen) dispatch({ type: "TOGGLE_TRACK" });
     } catch (e) {
       toastStore.addToast({ message: String(e), type: "error", duration: 5000 });

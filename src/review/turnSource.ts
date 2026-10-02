@@ -8,6 +8,7 @@
 // accident: a session with no injected turns always asks the backend.
 
 import { getTurnDiff, listTurns, type Turn, type TurnDiff } from "../agent/contract/turns";
+import { turnLedgerBetween, type BetweenTurns } from "../agent/turns/turnLedgerApi";
 
 export interface InjectedTurn {
   readonly turn: Turn;
@@ -47,6 +48,16 @@ export async function getTurnDiffFor(sessionId: string, n: number): Promise<Turn
   }
   try {
     return await getTurnDiff(sessionId, n);
+  } catch {
+    return null;
+  }
+}
+
+/** What changed before turn `n` that no turn made (the person's edits), or null. */
+export async function getBetweenFor(sessionId: string, n: number): Promise<BetweenTurns | null> {
+  if (injected.has(sessionId) || n < 2) return null;
+  try {
+    return await turnLedgerBetween(sessionId, n);
   } catch {
     return null;
   }

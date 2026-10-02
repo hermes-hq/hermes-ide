@@ -7,12 +7,31 @@ const LandSheet = lazyView("LandSheet", () => import("./LandSheet").then((m) => 
 
 /** Window event that opens the Land sheet for a session's worktree. */
 export const OPEN_LAND_SHEET_EVENT = "hermes:open-land-sheet";
+/**
+ * Window event sent when the Land sheet closes: `{ sessionId, landed }`.
+ * `landed` is true only after a land or an archive went through (and was
+ * not undone); the Review Desk the sheet was opened from stays open under
+ * it and closes only then — Cancel or Close brings the person back to it.
+ */
+export const LAND_SHEET_CLOSED_EVENT = "hermes:land-sheet-closed";
+
+export interface LandSheetClosed {
+  readonly sessionId: string;
+  readonly landed: boolean;
+}
 
 interface Target {
   sessionId: string;
   projectId: string;
   /** Bumps on every open so reopening starts fresh. */
   key: number;
+}
+
+let openFor: string | null = null;
+
+/** Whether a Land sheet is open (the desk under it leaves its keys alone). */
+export function isLandSheetOpen(): boolean {
+  return openFor !== null;
 }
 
 export function openLandSheet(sessionId: string, projectId: string): void {
@@ -33,6 +52,7 @@ export function LandSheetHost() {
     const onOpen = (e: Event) => {
       const detail = (e as CustomEvent<{ sessionId?: unknown; projectId?: unknown }>).detail;
       if (typeof detail?.sessionId !== "string" || typeof detail?.projectId !== "string") return;
+      openFor = detail.sessionId;
       setTarget((prev) => ({
         sessionId: detail.sessionId as string,
         projectId: detail.projectId as string,
@@ -50,7 +70,12 @@ export function LandSheetHost() {
         key={target.key}
         sessionId={target.sessionId}
         projectId={target.projectId}
-        onClose={() => setTarget(null)}
+        onClose={(landed?: boolean) => {
+          openFor = null;
+          setTarget(null);
+          const detail: LandSheetClosed = { sessionId: target.sessionId, landed: landed === true };
+          window.dispatchEvent(new CustomEvent(LAND_SHEET_CLOSED_EVENT, { detail }));
+        }}
       />
     </Suspense>
   );

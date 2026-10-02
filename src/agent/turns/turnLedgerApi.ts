@@ -24,12 +24,25 @@ export interface RestorePreview {
   /** What restoring would change: the worktree now against the turn's tree. */
   readonly patch: string;
   readonly diffstat: Diffstat;
+  /** Files with edits no turn made: a restore sets them aside (Undo brings them back). */
+  readonly setAside?: readonly string[];
 }
 
 export interface RestoreResult {
   readonly n: number;
   /** Paths written or removed. */
   readonly files: number;
+  /** The number of the set-aside state Undo goes back to. */
+  readonly setAside?: number;
+}
+
+/** What changed before turn `before` that no turn made (the person's edits). */
+export interface BetweenTurns {
+  readonly before: number;
+  readonly patch: string;
+  readonly diffstat: Diffstat;
+  /** When the previous turn ended (epoch ms). */
+  readonly at: number;
 }
 
 /** Tell the backend whether the flag is on (read once at startup). */
@@ -50,6 +63,16 @@ export function reportTurnEnded(sessionId: string, at: number, exact: boolean): 
 /** What restoring to turn `n` would change; null when there is no such turn. */
 export function previewRestoreTurn(sessionId: string, n: number): Promise<RestorePreview | null> {
   return invoke<RestorePreview | null>("preview_restore_turn", { sessionId, n });
+}
+
+/** Undo restore `k`: the worktree goes back to what it set aside. */
+export function undoRestoreTurn(sessionId: string, k: number): Promise<RestoreResult> {
+  return invoke<RestoreResult>("undo_restore_turn", { sessionId, k });
+}
+
+/** The changes no turn made before turn `n`, or null. */
+export function turnLedgerBetween(sessionId: string, n: number): Promise<BetweenTurns | null> {
+  return invoke<BetweenTurns | null>("turn_ledger_between", { sessionId, n });
 }
 
 /** Make the worktree exactly the tree of turn `n`. */

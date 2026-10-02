@@ -196,6 +196,23 @@
   white-space: nowrap;
   color: var(--text-1);
 }
+/* Middle truncation: the folder gives way, the file name stays readable. */
+.review-file-path.review-path-split {
+  display: flex;
+  text-overflow: clip;
+}
+.review-path-dir {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+}
+.review-path-base {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
 .review-row-selected .review-file-path {
   color: var(--text-0);
 }
@@ -222,6 +239,8 @@
   white-space: nowrap;
 }
 .review-flag[data-kind="secret"],
+.review-flag[data-kind="checks_changed"],
+.review-flag[data-kind="agent_config"],
 .review-flag[data-kind="curl_pipe_sh"],
 .review-flag[data-kind="new_binary"],
 .review-flag[data-kind="postinstall"] {
@@ -330,6 +349,36 @@
   padding-right: var(--space-3);
   overflow: hidden;
   text-overflow: ellipsis;
+  /* A review shows the exact characters: != vs !==, => vs >=. */
+  font-variant-ligatures: none;
+  font-feature-settings:
+    "liga" 0,
+    "calt" 0;
+}
+
+/* Changes no turn made (the person's edits, a restore): a row of their own,
+ * which has no Revert. */
+.review-turn-row[data-kind="between"] .review-turn-n {
+  color: var(--text-3);
+}
+.review-turn-row[data-kind="between"] .review-turn-agent {
+  font-style: italic;
+  color: var(--text-2);
+}
+.review-turn-reverted {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}
+
+/* A comment whose line is gone from the diff since it was written. */
+.review-comment-outdated-badge {
+  font-size: var(--text-2xs);
+  padding: 0 var(--space-1);
+  border: var(--control-border-width) solid var(--border);
+  border-radius: var(--radius-pill);
+  color: var(--text-2);
+  white-space: nowrap;
 }
 
 .review-comment {

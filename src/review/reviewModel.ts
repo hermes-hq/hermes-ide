@@ -17,8 +17,57 @@ export interface ReviewComment {
   readonly line: number;
   /** The line's text at the time of the comment, for the review file. */
   readonly excerpt: string;
+  /** Up to two lines above and below it (same side), to find it again. */
+  readonly before?: readonly string[];
+  readonly after?: readonly string[];
   readonly text: string;
   readonly createdAt: number;
+}
+
+/** One line of a file's diff as the desk shows it. */
+export interface AnchorLine {
+  readonly side: "new" | "old";
+  /** Its number on that side (null: none). */
+  readonly no: number | null;
+  readonly text: string;
+}
+
+/** Lines of context kept around a commented line. */
+export const ANCHOR_CONTEXT = 2;
+
+/** The context of line `index` among `lines` of one side: what a comment keeps. */
+export function anchorContext(lines: readonly AnchorLine[], index: number): { before: string[]; after: string[] } {
+  const side = lines[index]?.side;
+  const same = lines.map((l, i) => ({ l, i })).filter((x) => x.l.side === side);
+  const at = same.findIndex((x) => x.i === index);
+  if (at < 0) return { before: [], after: [] };
+  return {
+    before: same.slice(Math.max(0, at - ANCHOR_CONTEXT), at).map((x) => x.l.text),
+    after: same.slice(at + 1, at + 1 + ANCHOR_CONTEXT).map((x) => x.l.text),
+  };
+}
+
+/**
+ * Where a comment sits in a file's diff now: the line (on its side) with
+ * the comment's text whose surroundings match best, nearest to where it was
+ * on a tie. Line numbers move when the next turn inserts lines above; the
+ * text and its context do not. Null when the line is gone (outdated).
+ */
+export function relocateComment(c: Pick<ReviewComment, "side" | "line" | "excerpt" | "before" | "after">, lines: readonly AnchorLine[]): number | null {
+  const same = lines.filter((l) => l.side === c.side && l.no !== null);
+  let best: { no: number; score: number; distance: number } | null = null;
+  for (let i = 0; i < same.length; i++) {
+    if (same[i].text !== c.excerpt) continue;
+    let score = 0;
+    const before = c.before ?? [];
+    const after = c.after ?? [];
+    for (let k = 1; k <= before.length; k++) if (same[i - k]?.text === before[before.length - k]) score++;
+    for (let k = 0; k < after.length; k++) if (same[i + 1 + k]?.text === after[k]) score++;
+    const no = same[i].no as number;
+    const distance = Math.abs(no - c.line);
+    if (!best || score > best.score || (score === best.score && distance < best.distance)) best = { no, score, distance };
+  }
+  return best?.no ?? null;
 }
 
 /** The marker a person pastes; the agent's prompt event brings it back. */

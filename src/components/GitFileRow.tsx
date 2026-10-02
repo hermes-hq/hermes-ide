@@ -40,8 +40,10 @@ export const GitFileRow = memo(function GitFileRow({
   return (
     <div className="git-file-row" data-path={file.path} data-area={file.area} onClick={() => onClick?.(file)} onContextMenu={(e) => { if (onContextMenu) { e.preventDefault(); e.stopPropagation(); onContextMenu(e, file); } }}>
       <span className={`git-file-status ${info.className}`}>{info.letter}</span>
+      {/* The folder gives way first, so the file name stays readable. */}
       <span className="git-file-path" title={file.path}>
-        {file.path}
+        {file.path.includes("/") && <span className="git-file-dir">{file.path.slice(0, file.path.lastIndexOf("/") + 1)}</span>}
+        <span className="git-file-base">{file.path.slice(file.path.lastIndexOf("/") + 1)}</span>
       </span>
       <div className="git-file-actions">
         {onOpen && (
