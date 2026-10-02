@@ -519,6 +519,15 @@ impl TurnTracker {
         }
     }
 
+    /// Forget a turn that never was (the CLI refused the launch at the
+    /// message that seemed to start it).
+    pub fn abandon(&mut self) {
+        if self.running {
+            self.running = false;
+            self.last = self.last.saturating_sub(1);
+        }
+    }
+
     /// The running turn failed (a usage limit stopped it, for one): its
     /// `turn_failed`, or None when no turn runs.
     pub fn fail_running(
@@ -652,6 +661,14 @@ mod tests {
         assert_eq!(kinds(&t.frame(mapped)), ["turn_start:1", "status:Working"]);
         assert!(t.fail_running(2, None, "limit".into()).is_some());
         assert_eq!(t.current(), None);
+        // A refused launch's prompt started no turn: the next one is turn 2.
+        through(&mut t, "UserPromptSubmit", serde_json::json!({}));
+        t.abandon();
+        assert_eq!(t.current(), None);
+        assert_eq!(
+            through(&mut t, "UserPromptSubmit", serde_json::json!({})),
+            ["turn_start:2", "status:Working"]
+        );
     }
 
     const LINE: &str = r#"{"v":1,"ts":1790000000,"session":"s1","agent":"claude","nonce":"n-abc","event":"PermissionRequest","payload":{"tool_name":"Bash"}}"#;

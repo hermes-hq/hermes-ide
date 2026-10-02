@@ -2467,6 +2467,8 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 // told as a `limit` event and a `limited` status; its plain
                 // meaning (an error for the rate-limited stop, an attention
                 // for a quota notice) is not sent as well.
+                // The CLI refused the launch at this message: no turn runs.
+                let mut refused = false;
                 if !replaying
                     && record.nonce == nonce
                     && crate::agent_caps::watch::PROMPT_SENT_EVENTS.contains(&record.event.as_str())
@@ -2475,6 +2477,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     // is over, and its answer may already be a refusal.
                     if let Some(found) = crate::agent_caps::watch::message_sent(&session_id) {
                         crate::agent_caps::commands::on_rejected(&app, &session_id, found);
+                        refused = true;
                     }
                 }
                 if record.nonce == nonce && ran_a_tool(&record.event) {
@@ -2488,7 +2491,16 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 if !is_limit {
                     let mut named_model = false;
                     let mapped = map_signal_record(&record, &nonce, confidence, &source);
-                    for event in turns.frame(mapped) {
+                    let mut framed = turns.frame(mapped);
+                    if refused {
+                        // A refused launch took no turn (a turn start would
+                        // also clear the refusal the person must see).
+                        turns.abandon();
+                        framed.retain(|e| {
+                            !matches!(e, crate::contract::SessionEvent::TurnStart { .. })
+                        });
+                    }
+                    for event in framed {
                         let event = identity.merge(event, &mut named_model);
                         match &event {
                             crate::contract::SessionEvent::Status { status, .. } => {
