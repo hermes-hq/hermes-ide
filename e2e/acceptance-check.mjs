@@ -75,6 +75,8 @@ if (errors.length) {
   console.log("");
   for (const e of errors) console.log(`ACCEPTANCE GATE: ${e}`);
   console.log(`\nACCEPTANCE GATE: FAIL (${errors.length} problem${errors.length === 1 ? "" : "s"})`);
-  process.exit(1);
+  // exitCode, not exit(): stdout to a pipe is async, and exit() drops whatever is past the first 64 KB.
+  process.exitCode = 1;
+} else {
+  console.log("\nACCEPTANCE GATE: PASS");
 }
-console.log("\nACCEPTANCE GATE: PASS");
