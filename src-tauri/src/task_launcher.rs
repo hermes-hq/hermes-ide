@@ -165,7 +165,7 @@ pub async fn task_repo_probe(path: String, branch: Option<String>) -> Result<Rep
 pub const DONE_WHEN_FILE: &str = "done-when.json";
 
 /// Keeps the launcher's checks for the task in `checkout` (a linked
-/// worktree) next to its git data, as `{"commands": [...]}`, which `hi
+/// worktree) next to its git data, as `{"v": 1, "done_when": [...]}`, which `hi
 /// check` reads for that worktree. Returns the file's path.
 pub fn write_done_when(checkout: &Path, commands: &[String]) -> Result<PathBuf, String> {
     let repo = Repository::open(checkout)
@@ -178,7 +178,8 @@ pub fn write_done_when(checkout: &Path, commands: &[String]) -> Result<PathBuf, 
     let dir = repo.path().join("hermes");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let file = dir.join(DONE_WHEN_FILE);
-    let body = serde_json::json!({ "commands": commands });
+    // The shape `hi check` and the Stop hook read (hi's task_done_when).
+    let body = serde_json::json!({ "v": 1, "done_when": commands });
     std::fs::write(&file, format!("{body}\n")).map_err(|e| e.to_string())?;
     Ok(file)
 }
@@ -373,7 +374,7 @@ mod tests {
             serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
         assert_eq!(
             body,
-            serde_json::json!({ "commands": ["npm test", "cargo test"] })
+            serde_json::json!({ "v": 1, "done_when": ["npm test", "cargo test"] })
         );
         // Nothing in the checkout itself.
         assert!(!wt_path.join(".hermes").exists());

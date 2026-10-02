@@ -21,7 +21,9 @@ await runLauncherQa("QA-launcher-checks-kept", async ({ bridge, fx, log, check, 
   await openLauncher(bridge);
   await typeInto(bridge, ".task-launcher-task", "Add an add function");
   await expandOptions(bridge);
-  // The repository's own check (npm test) is listed; a second one is added.
+  // The repository's own check (npm test) is listed once the repository was
+  // read; a second one is added.
+  await bridge.waitFor("the repository's check", `return e2e.all(".task-launcher-check-input").some((c) => c.value === "npm test");`, { timeoutMs: 20_000 });
   await bridge.click(".task-launcher-check-add");
   await bridge.waitFor("the new check field", `return e2e.all(".task-launcher-check-input").length === 2;`);
   await bridge.eval(`
@@ -44,7 +46,7 @@ await runLauncherQa("QA-launcher-checks-kept", async ({ bridge, fx, log, check, 
   const file = join(gitDir, "hermes", "done-when.json");
   const body = existsSync(file) ? JSON.parse(readFileSync(file, "utf8")) : null;
   log(`  ${file}: ${JSON.stringify(body)}`);
-  check(JSON.stringify(body?.commands) === JSON.stringify(["npm test", CHECK]), "the task's checks are kept in the worktree's git folder, in order");
+  check(JSON.stringify(body?.done_when) === JSON.stringify(["npm test", CHECK]), "the task's checks are kept in the worktree's git folder, in order");
   const status = execFileSync("git", ["-C", wt.worktreePath, "status", "--porcelain"], { encoding: "utf8" }).trim();
   check(!/done-when/.test(status), "and nothing new appears in the checkout for git to commit");
   await bridge.screenshot(join(evidenceDir, "01-launched.png"));
