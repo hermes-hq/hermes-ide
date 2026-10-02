@@ -362,8 +362,10 @@ mod tests {
             ],
         )
         .unwrap();
+        // git reports the resolved folder (/private/var/... for /var/... on macOS).
+        let worktrees = main.canonicalize().unwrap().join(".git").join("worktrees");
         assert!(
-            file.starts_with(main.join(".git").join("worktrees")),
+            file.canonicalize().unwrap().starts_with(&worktrees),
             "{file:?}"
         );
         assert!(file.ends_with(Path::new("hermes").join(DONE_WHEN_FILE)));
