@@ -4,7 +4,8 @@
 // (src-tauri/src/agent_caps/choice.rs), for the launcher to apply while a
 // person switches agent, account or model: an unavailable model falls back
 // to "default", an effort the model does not take moves to the nearest one
-// it does, a missing or signed-out account to the active one, an approval
+// it does, a missing or signed-out account to the active one (offered, not
+// launchable until the person takes it or signs in), an approval
 // mode the agent lacks to its safety default. Tested against the same
 // cases as the Rust side (src/agent/capabilities/__tests__).
 
@@ -79,7 +80,8 @@ export function reconcileChoice(
 		const params = { account: account?.label ?? choice.accountId, agent: name, using: active?.label ?? "" };
 		issues.push({ field: "account", message: active ? `${why}; using ${active.label}` : why, was: choice.accountId, now: active?.id ?? null, code, params });
 		if (active) out.accountId = active.id;
-		else launchable = false;
+		// Offered, never taken on its own: the launch waits for a sign-in or an explicit choice.
+		launchable = false;
 	}
 
 	// Model: listed and available, else default.

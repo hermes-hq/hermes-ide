@@ -77,28 +77,23 @@
   font-variant-numeric: tabular-nums;
 }
 
-.task-queue-label {
+/* The task (its whole text on hover) and, under it, the agent and the folder. */
+.task-queue-text {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.task-queue-label,
+.task-queue-where {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.task-queue-btn {
-  font-size: var(--text-2xs);
-  background: none;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  color: var(--text-2);
-  padding: 0 var(--space-1);
-  cursor: pointer;
-}
-
-.task-queue-btn:hover {
-  color: var(--text-1);
-  border-color: var(--text-3);
-}
+.task-queue-label { color: var(--text-1); }
+.task-queue-where { color: var(--text-3); font-size: var(--text-2xs); }
 
 /* Settings > Limits */
 

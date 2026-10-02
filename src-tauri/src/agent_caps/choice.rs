@@ -5,7 +5,8 @@
 //!   on every read (`reconcile`): an unavailable model becomes "default"
 //!   (which always works: the flag is omitted), an effort the model does not
 //!   take moves to the nearest one it does, a removed or signed-out account
-//!   becomes the active one, a mode the agent lacks becomes its safety
+//!   is replaced by the active one but the choice is then not launchable (an
+//!   account is never swapped without asking), a mode the agent lacks becomes its safety
 //!   default. Each change is flagged with a plain reason; a choice that
 //!   cannot be repaired is marked not launchable.
 //! - `validate` checks a choice before launch (effort above all: Claude
@@ -181,10 +182,14 @@ pub fn reconcile(
             Some(&choice.account_id),
             active.map(|a| a.id.as_str()),
         ));
-        match active {
-            Some(a) => out.account_id = a.id.clone(),
-            None => launchable = false,
+        // Another account may be offered in its place, but a choice is never
+        // launched on an account the person did not pick: client work must
+        // not run through a personal subscription because a sign-in expired.
+        // The launcher waits for a sign-in or an explicit "use … this time".
+        if let Some(a) = active {
+            out.account_id = a.id.clone();
         }
+        launchable = false;
     }
 
     let model = match find_model(caps, &choice.model_id) {
@@ -380,7 +385,9 @@ pub fn validate(choice: &LaunchChoice, caps: &AgentCapabilities) -> LaunchValida
     LaunchValidation::ok()
 }
 
-/// Quote one word for the preview line the way a POSIX shell would need it.
+/// Quote one word for the preview line the way a POSIX shell would need it:
+/// single quotes, which keep `$`, `` ` `` and `\` as they are (a `'` inside
+/// is written `'\''`).
 fn shell_word(w: &str) -> String {
     if !w.is_empty()
         && w.chars()
@@ -388,7 +395,19 @@ fn shell_word(w: &str) -> String {
     {
         return w.to_string();
     }
-    format!("\"{}\"", w.replace('\\', "\\\\").replace('"', "\\\""))
+    format!("'{}'", w.replace('\'', "'\\''"))
+}
+
+/// The task as the preview shows it: its first line, and how many more
+/// there are ("'Fix the login…' (+2 lines)"); the launch passes all of it.
+fn task_word(task: &str) -> String {
+    let mut lines = task.lines().map(str::trim).filter(|l| !l.is_empty());
+    let first = lines.next().unwrap_or("");
+    match lines.count() {
+        0 => shell_word(first),
+        1 => format!("{} (+1 line)", shell_word(&format!("{first}…"))),
+        n => format!("{} (+{n} lines)", shell_word(&format!("{first}…"))),
+    }
 }
 
 /// Fill `{name}` in an argument template.
@@ -474,8 +493,7 @@ pub fn preview(
     parts.extend(model_args.iter().map(|a| shell_word(a)));
     let task = task.trim();
     if !task.is_empty() && agent.terminal.initial_prompt.is_some() {
-        let first_line = task.lines().next().unwrap_or("").trim();
-        parts.push(shell_word(first_line));
+        parts.push(task_word(task));
     }
     if agent.id == "claude" {
         for c in &choice.channels {
@@ -887,6 +905,8 @@ pub(crate) mod tests {
             r.issues[0].message,
             "Work is signed out; using Default profile"
         );
+        // Offered, never taken on its own: not launchable as it is.
+        assert!(!r.launchable);
 
         let mut c = choice();
         c.approval_mode_id = "plan".into();
@@ -970,8 +990,14 @@ pub(crate) mod tests {
         };
         assert_eq!(
             preview(claude, &c, Some(&env), "Fix the flaky login test on CI\nmore detail", Some("/home-fixture")),
-            "CLAUDE_CONFIG_DIR=~/.claude-work caffeinate -i claude --permission-mode acceptEdits --model opus --effort high \"Fix the flaky login test on CI\" --channels plugin:your-plugin"
+            "CLAUDE_CONFIG_DIR=~/.claude-work caffeinate -i claude --permission-mode acceptEdits --model opus --effort high 'Fix the flaky login test on CI…' (+1 line) --channels plugin:your-plugin"
         );
+        // One line: as it is, quoted the way a shell takes it ($ and ` kept, ' escaped).
+        assert_eq!(
+            preview(claude, &c, None, "Don't touch $HOME", None),
+            "caffeinate -i claude --permission-mode acceptEdits --model opus --effort high 'Don'\\''t touch $HOME' --channels plugin:your-plugin"
+        );
+        assert!(preview(claude, &c, None, "a\n\nb\nc", None).contains("'a…' (+2 lines)"));
         let codex = crate::agent_catalog::agent("codex").unwrap();
         let mut c = choice();
         c.agent_id = "codex".into();
@@ -980,7 +1006,7 @@ pub(crate) mod tests {
         c.effort = Some("medium".into());
         assert_eq!(
             preview(codex, &c, None, "Add ru locale", None),
-            "codex --sandbox workspace-write --ask-for-approval on-request -m gpt-5.6-luna -c \"model_reasoning_effort=\\\"medium\\\"\" \"Add ru locale\""
+            "codex --sandbox workspace-write --ask-for-approval on-request -m gpt-5.6-luna -c 'model_reasoning_effort=\"medium\"' 'Add ru locale'"
         );
         let mut c = choice();
         c.model_id = "default".into();

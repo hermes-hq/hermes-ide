@@ -31,6 +31,33 @@ pub struct RepoProbe {
     /// The branch checked out in the main checkout (None when detached or
     /// not a repository): what a new branch is cut from by default.
     pub current_branch: Option<String>,
+    /// Something is at the path (so "not a repository" can say "no folder
+    /// here" when there is nothing at all).
+    pub exists: bool,
+    /// What is at the path is a folder.
+    pub is_dir: bool,
+    /// The repository has a commit: a new worktree needs one to start from.
+    pub has_commits: bool,
+    /// The path as it was read: trimmed, a leading `~` as the home folder.
+    pub resolved: String,
+}
+
+/// A path as typed: surrounding spaces trimmed, and `~` or `~/…` (`~\…` on
+/// Windows) read as the home folder, the way a shell would.
+pub fn resolve_typed_path(raw: &str, home: Option<&Path>) -> PathBuf {
+    let typed = raw.trim();
+    if let Some(home) = home {
+        if typed == "~" {
+            return home.to_path_buf();
+        }
+        if let Some(rest) = typed
+            .strip_prefix("~/")
+            .or_else(|| typed.strip_prefix("~\\"))
+        {
+            return home.join(rest);
+        }
+    }
+    PathBuf::from(typed)
 }
 
 fn main_checkout(repo: &Repository) -> Option<PathBuf> {
@@ -43,15 +70,40 @@ fn main_checkout(repo: &Repository) -> Option<PathBuf> {
 }
 
 pub fn probe_repo(path: &Path, branch: Option<&str>) -> RepoProbe {
-    let Ok(repo) = Repository::discover(path) else {
+    let meta = std::fs::metadata(path).ok();
+    let exists = meta.is_some();
+    let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
+    let resolved = path.to_string_lossy().to_string();
+    // Only a folder is looked up: git would otherwise find the repository
+    // around a path that does not exist (or a file in it).
+    let found = if is_dir {
+        Repository::discover(path).ok()
+    } else {
+        None
+    };
+    let Some(repo) = found else {
         return RepoProbe {
             git_root: None,
             branch_exists: false,
             local_branches: Vec::new(),
             worktree_toml: None,
             current_branch: None,
+            exists,
+            is_dir,
+            has_commits: false,
+            resolved,
         };
     };
+    // An unborn HEAD (git init, nothing committed yet): nothing to cut a branch from.
+    let has_commits = repo
+        .head()
+        .ok()
+        .and_then(|h| h.peel_to_commit().ok())
+        .is_some()
+        || repo
+            .branches(Some(BranchType::Local))
+            .map(|mut it| it.next().is_some())
+            .unwrap_or(false);
     let root = main_checkout(&repo);
     // Taken also when only the letter case differs (see BranchClash).
     let branch_exists = branch
@@ -90,14 +142,50 @@ pub fn probe_repo(path: &Path, branch: Option<&str>) -> RepoProbe {
         local_branches,
         worktree_toml,
         current_branch,
+        exists,
+        is_dir,
+        has_commits,
+        resolved,
     }
 }
 
 #[tauri::command]
 pub async fn task_repo_probe(path: String, branch: Option<String>) -> Result<RepoProbe, String> {
-    tokio::task::spawn_blocking(move || probe_repo(Path::new(&path), branch.as_deref()))
-        .await
-        .map_err(|e| e.to_string())
+    tokio::task::spawn_blocking(move || {
+        let path = resolve_typed_path(&path, crate::platform::home_dir().as_deref());
+        probe_repo(&path, branch.as_deref())
+    })
+    .await
+    .map_err(|e| e.to_string())
+}
+
+/// The file a worktree's task checks are kept in, inside that worktree's own
+/// git folder (`<git-dir>/hermes/done-when.json`): never in the repository,
+/// so nothing is committed, and each worktree has its own.
+pub const DONE_WHEN_FILE: &str = "done-when.json";
+
+/// Keeps the launcher's checks for the task in `checkout` (a linked
+/// worktree) next to its git data, as `{"commands": [...]}`, which `hi
+/// check` reads for that worktree. Returns the file's path.
+pub fn write_done_when(checkout: &Path, commands: &[String]) -> Result<PathBuf, String> {
+    let repo = Repository::open(checkout)
+        .map_err(|_| "the task's folder is not a git checkout".to_string())?;
+    let commands: Vec<String> = commands
+        .iter()
+        .map(|c| c.trim().to_string())
+        .filter(|c| !c.is_empty())
+        .collect();
+    let dir = repo.path().join("hermes");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let file = dir.join(DONE_WHEN_FILE);
+    let body = serde_json::json!({ "commands": commands });
+    std::fs::write(&file, format!("{body}\n")).map_err(|e| e.to_string())?;
+    Ok(file)
+}
+
+#[tauri::command]
+pub fn task_write_done_when(checkout: String, commands: Vec<String>) -> Result<String, String> {
+    write_done_when(Path::new(&checkout), &commands).map(|p| p.to_string_lossy().to_string())
 }
 
 /// A feature slug is one branch-name component: lowercase letters, digits
@@ -213,6 +301,82 @@ mod tests {
         assert!(file.exists());
         assert!(dir.path().join(".hermes/phases/questions.md").exists());
         assert!(dir.path().join(".claude/commands/hermes-phase.md").exists());
+    }
+
+    #[test]
+    fn a_typed_path_is_trimmed_and_tilde_is_the_home_folder() {
+        let home = Path::new("/home/test");
+        assert_eq!(
+            resolve_typed_path("  ~/code/demo ", Some(home)),
+            home.join("code/demo")
+        );
+        assert_eq!(resolve_typed_path("~", Some(home)), home.to_path_buf());
+        assert_eq!(resolve_typed_path("~\\code", Some(home)), home.join("code"));
+        // Only a leading "~" alone or followed by a separator (not ~user).
+        assert_eq!(
+            resolve_typed_path("~other/x", Some(home)),
+            PathBuf::from("~other/x")
+        );
+        assert_eq!(
+            resolve_typed_path("/srv/~/x", Some(home)),
+            PathBuf::from("/srv/~/x")
+        );
+        assert_eq!(resolve_typed_path("~/x", None), PathBuf::from("~/x"));
+    }
+
+    #[test]
+    fn missing_paths_files_and_empty_repositories_are_told_apart() {
+        let dir = tempfile::tempdir().unwrap();
+        let missing = probe_repo(&dir.path().join("projcets").join("demo"), None);
+        assert!(!missing.exists && !missing.is_dir && missing.git_root.is_none());
+        std::fs::write(dir.path().join("notes.txt"), "x").unwrap();
+        let file = probe_repo(&dir.path().join("notes.txt"), None);
+        assert!(file.exists && !file.is_dir && file.git_root.is_none());
+        let empty = dir.path().join("fresh");
+        std::fs::create_dir_all(&empty).unwrap();
+        Repository::init(&empty).unwrap();
+        let p = probe_repo(&empty, None);
+        assert!(p.exists && p.is_dir && p.git_root.is_some());
+        assert!(!p.has_commits, "git init with nothing committed");
+        let full = dir.path().join("full");
+        std::fs::create_dir_all(&full).unwrap();
+        repo_with_commit(&full);
+        assert!(probe_repo(&full, None).has_commits);
+        assert_eq!(probe_repo(&full, None).resolved, full.to_string_lossy());
+    }
+
+    #[test]
+    fn the_task_checks_are_kept_in_the_worktrees_git_folder_not_the_repository() {
+        let dir = tempfile::tempdir().unwrap();
+        let main = dir.path().join("main");
+        std::fs::create_dir_all(&main).unwrap();
+        let repo = repo_with_commit(&main);
+        let wt_path = dir.path().join("wt");
+        repo.worktree("wt", &wt_path, None).unwrap();
+        let file = write_done_when(
+            &wt_path,
+            &[
+                "  npm test ".to_string(),
+                String::new(),
+                "cargo test".to_string(),
+            ],
+        )
+        .unwrap();
+        assert!(
+            file.starts_with(main.join(".git").join("worktrees")),
+            "{file:?}"
+        );
+        assert!(file.ends_with(Path::new("hermes").join(DONE_WHEN_FILE)));
+        let body: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&file).unwrap()).unwrap();
+        assert_eq!(
+            body,
+            serde_json::json!({ "commands": ["npm test", "cargo test"] })
+        );
+        // Nothing in the checkout itself.
+        assert!(!wt_path.join(".hermes").exists());
+        let plain = tempfile::tempdir().unwrap();
+        assert!(write_done_when(plain.path(), &["x".to_string()]).is_err());
     }
 
     #[test]

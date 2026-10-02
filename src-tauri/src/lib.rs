@@ -817,6 +817,7 @@ pub fn run() {
             task_launcher::task_repo_probe,
             task_launcher::task_write_feature_file,
             task_launcher::task_track_prompt,
+            task_launcher::task_write_done_when,
             // Session management
             pty::create_session,
             pty::ssh_list_directory,
@@ -1080,6 +1081,7 @@ pub fn run() {
             // the answer to "keep running or stop?" on quit.
             session_host::session_host_status,
             session_host::session_host_quit,
+            session_host::session_host_set_queued,
             session_host::session_host_stop_all,
             // Fleet controls (2.0: spend caps, task queue) — see fleet.rs.
             fleet::fleet_agent_load,

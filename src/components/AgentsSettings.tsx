@@ -205,6 +205,8 @@ function PresetRow({ preset, t, onChanged }: { preset: CheckedPreset; t: T; onCh
 		try {
 			await renameLaunchPreset(preset.id, name);
 			setEditing(false);
+			// The rename went through: an earlier refusal no longer applies.
+			setError(null);
 			onChanged();
 		} catch (e) {
 			setError(e instanceof Error ? e.message : String(e));

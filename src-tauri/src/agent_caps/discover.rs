@@ -578,7 +578,29 @@ pub fn peek(agent_id: &str) -> Option<AgentCapabilities> {
         .map(|(_, c)| c.caps.clone())
 }
 
-pub fn store_cached(caps: &AgentCapabilities, requested_account: &str) {
+/// How many times each agent's cached results were forgotten. A probe that
+/// started before the last time (it read the accounts as they were then)
+/// is not cached: an account added meanwhile would otherwise stay missing
+/// until the result aged out.
+fn generations() -> &'static Mutex<HashMap<String, u64>> {
+    static GENERATIONS: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+    GENERATIONS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// The agent's cache generation now; pass it to `store_cached` after the probe.
+pub fn generation(agent_id: &str) -> u64 {
+    generations()
+        .lock()
+        .map(|g| g.get(agent_id).copied().unwrap_or(0))
+        .unwrap_or(0)
+}
+
+/// Keeps a probe's result, unless the agent's results were forgotten since
+/// the probe started (`started_at`, from `generation`).
+pub fn store_cached(caps: &AgentCapabilities, requested_account: &str, started_at: u64) {
+    if generation(&caps.agent_id) != started_at {
+        return;
+    }
     if let Ok(mut map) = cache().lock() {
         map.insert(
             (caps.agent_id.clone(), requested_account.to_string()),
@@ -591,8 +613,11 @@ pub fn store_cached(caps: &AgentCapabilities, requested_account: &str) {
 }
 
 /// Forget an agent's cached results (an account was added or removed, a
-/// model was refused).
+/// model was refused), and any probe of it still running.
 pub fn invalidate(agent_id: &str) {
+    if let Ok(mut g) = generations().lock() {
+        *g.entry(agent_id.to_string()).or_insert(0) += 1;
+    }
     if let Ok(mut map) = cache().lock() {
         map.retain(|(a, _), _| a != agent_id);
     }
@@ -922,6 +947,26 @@ pub(crate) mod tests {
                 .iter()
                 .any(|c| c == "codex debug models --bundled @CODEX_HOME=/p/.codex-two"),
             "the list runs in the active account's profile"
+        );
+    }
+
+    #[test]
+    fn a_probe_overtaken_by_an_account_change_is_not_cached() {
+        // A made-up agent id so no other test shares this cache entry.
+        let host = FakeHost::new(&["codex"]).out("codex login status", 0, "Logged in\n");
+        let mut caps = discover(agent("codex"), &[], None, &none, &host);
+        caps.agent_id = "qa-generation-agent".into();
+        let started = generation(&caps.agent_id);
+        invalidate(&caps.agent_id); // an account was added while the probe ran
+        store_cached(&caps, "default", started);
+        assert!(
+            peek(&caps.agent_id).is_none(),
+            "the stale result is dropped"
+        );
+        store_cached(&caps, "default", generation(&caps.agent_id));
+        assert!(
+            peek(&caps.agent_id).is_some(),
+            "a probe started after it is kept"
         );
     }
 }

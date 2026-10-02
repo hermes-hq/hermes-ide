@@ -10,7 +10,12 @@ import { ListRow } from "./ui/ListRow";
 
 interface CommandPaletteProps {
   onClose: () => void;
+  /** In the sidebar's order, which is the order ⌘1–⌘9 switch to (their labels here follow it). */
   sessions: SessionData[];
+  /** Ends the session in view, through the usual close checks. */
+  onCloseSession?: () => void;
+  /** The same, said for a session that has its own worktree (the close asks what to do with its changes). */
+  onCloseSessionRemoveWorktree?: () => void;
   /** The session in view: its row is marked as the current one. */
   activeSessionId?: string | null;
   onSelectSession: (id: string) => void;
@@ -51,7 +56,7 @@ interface Command {
 }
 
 export function CommandPalette({
-  onClose, sessions, activeSessionId, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
+  onClose, sessions, onCloseSession, onCloseSessionRemoveWorktree, activeSessionId, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -61,6 +66,8 @@ export function CommandPalette({
 
   const commands: Command[] = useMemo(() => [
     { id: "new", label: t("palette.newSession"), category: t("app.session"), shortcut: shortcutLabel("file.new-session"), action: () => { onNewSession(); onClose(); } },
+    ...(onCloseSession ? [{ id: "close-session", label: t("palette.closeSession"), category: t("app.session"), shortcut: shortcutLabel("session.close-session"), action: () => { onClose(); onCloseSession(); } }] : []),
+    ...(onCloseSessionRemoveWorktree ? [{ id: "close-session-worktree", label: t("palette.closeSessionRemoveWorktree"), category: t("app.session"), action: () => { onClose(); onCloseSessionRemoveWorktree(); } }] : []),
     { id: "ctx", label: t("palette.toggleContext"), category: t("app.view"), shortcut: shortcutLabel("view.context-panel"), action: () => { onToggleContext(); onClose(); } },
     { id: "sidebar", label: t("palette.toggleSidebar"), category: t("app.view"), shortcut: shortcutLabel("view.toggle-sidebar"), action: () => { onToggleSessions(); onClose(); } },
     { id: "settings", label: t("app.settings"), category: t("app.app"), shortcut: fmt("{mod},"), action: () => { onOpenSettings(); onClose(); } },
@@ -108,7 +115,7 @@ export function CommandPalette({
   // currentLanguage is intentionally in the deps: t() is referentially stable,
   // so without it the memoized labels would never update on a language switch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [sessions, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
+  ], [sessions, onCloseSession, onCloseSessionRemoveWorktree, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.filter((c) => !c.hidden);

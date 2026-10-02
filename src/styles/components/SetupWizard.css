@@ -61,9 +61,28 @@
 .setup-repo-row { display: flex; gap: var(--space-2); }
 .setup-repo-input { flex: 1; }
 
-.setup-repo-state { font-size: var(--text-xs); }
+.setup-repo-state { font-size: var(--text-xs); overflow-wrap: anywhere; }
 .setup-repo-state.ok { color: var(--success-ink); }
 .setup-repo-state.bad { color: var(--warning-ink); }
+.setup-repo-resolved { color: var(--text-2); font-family: var(--font-code); }
+
+/* "Finish setup first": a menu key pressed behind the unfinished welcome. */
+.setup-nudge { color: var(--warning-ink); font-size: var(--text-xs); }
+.setup-dialog--nudge { border-color: var(--warning-ink); }
+
+/* Finish with a task typed: start it, keep it for ⌘N, or drop it. */
+.setup-ask {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  border: var(--control-border-width) solid var(--chip-selected-border);
+  background: var(--chip-selected-bg);
+  color: var(--text-0);
+}
+.setup-ask-actions { display: flex; gap: var(--space-2); }
 
 .setup-footer {
   display: flex;

@@ -55,6 +55,7 @@ their definitions so it can never drift from what the app actually does.
 | Action | macOS | Windows / Linux | Notes |
 |---|---|---|---|
 | Copy Context | ⌘⇧C | Ctrl+Shift+C |  |
+| Close Session | ⌘⇧W | Ctrl+Shift+Q |  |
 | Focus Composer | ⌘⇧J | Ctrl+Shift+J | Agent sessions only |
 | Switch to Session 1–9 | ⌘1-9 | Ctrl+1-9 |  |
 | Jump to Next Waiting Agent | ⌘I | Ctrl+Shift+I | Oldest first, repeat to cycle |

@@ -4,6 +4,7 @@ import { ensureListener, registerMenuBarHandler } from "./nativeMenuBridge";
 import { PLATFORM, OS_VERSION } from "../utils/platform";
 import { trackFeatureUsed } from "../utils/analytics";
 import { clearTerminal } from "../terminal/TerminalPool";
+import { closeTopOverlay, topOverlay } from "../state/overlays";
 
 const TRACKED_ACTIONS: Record<string, string> = {
   "view.git-panel": "git_panel",
@@ -18,6 +19,14 @@ const TRACKED_ACTIONS: Record<string, string> = {
   "view.split-vertical": "split_pane",
   "file.file-explorer": "file_explorer",
 };
+
+/** Window keys that do nothing while an overlay is open (they act on panes and sessions behind it). */
+const OVERLAY_BLOCKED_ACTIONS = new Set([
+  "file.new-session-tab",
+  "view.split-horizontal",
+  "view.split-vertical",
+  "session.close-session",
+]);
 
 // ─── Menu Bar Action → React Dispatch Bridge ────────────────────────
 
@@ -67,6 +76,18 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
       const trackedFeature = TRACKED_ACTIONS[actionId];
       if (trackedFeature) trackFeatureUsed(trackedFeature);
 
+      // An overlay (the launcher, the palette, Settings…) is in front: the
+      // window keys act on it, never on the workspace hidden behind it.
+      // ⌘W closes it (the launcher keeps its draft); the keys that would
+      // add, split or end a pane or a session do nothing.
+      if (topOverlay()) {
+        if (actionId === "file.close-pane") {
+          closeTopOverlay();
+          return;
+        }
+        if (OVERLAY_BLOCKED_ACTIONS.has(actionId)) return;
+      }
+
       switch (actionId) {
         // ── File menu ──
         case "file.new-session":
@@ -84,6 +105,9 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
           } else if (activeSessionId) {
             requestCloseSession(activeSessionId);
           }
+          break;
+        case "session.close-session":
+          if (activeSessionId) requestCloseSession(activeSessionId);
           break;
         case "file.file-explorer":
           dispatch({ type: "TOGGLE_FILE_EXPLORER" });

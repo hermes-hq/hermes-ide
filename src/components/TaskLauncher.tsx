@@ -34,24 +34,39 @@ import {
   PRESET_SHORTCUTS,
   defaultChoice,
   effortsFor,
+  historyForm,
+  presetNamed,
   rememberedForm,
   sameCombo,
   switchAgent,
   uniquePresetName,
   withoutDanger,
 } from "../launcher/choice";
-import { clearLauncherDraft, isDraftWorthKeeping, saveLauncherDraft, setPendingSuggestion, takeLauncherDraft, takePendingSuggestion } from "../launcher/draft";
+import {
+  clearLauncherDraft,
+  isDraftWorthKeeping,
+  markOfferedThisSession,
+  saveLauncherDraft,
+  setPendingSuggestion,
+  takeLauncherDraft,
+  takePendingSuggestion,
+  wasOfferedThisSession,
+} from "../launcher/draft";
 import { overlayOpened } from "../state/overlays";
+import { useFocusTrap } from "../hooks/useFocusTrap";
 import {
   TASK_LAUNCHES_KEY,
   agentTakesFirstPrompt,
+  autoTaskBranch,
   blockingRows,
   canLaunch,
   doneWhenFromToml,
   formatBytes,
+  isAddedAccount,
   parseTaskLaunches,
   pickDefaultAgent,
   secondAgentBranch,
+  shortTaskId,
   taskBranch,
   taskLabel,
   type BlockingRow,
@@ -103,8 +118,11 @@ export interface TaskLauncherProps {
   onStartOver?: () => void;
   /** Opens the full creator (SSH, tmux). */
   onOpenAdvanced?: () => void;
-  /** Opens a terminal running the agent, where it signs in. */
-  onSignIn: (agentId: string) => void;
+  /**
+   * Opens a terminal where the agent signs in: in the profile of `accountId`
+   * when it is an account Hermes added, else the CLI's own default profile.
+   */
+  onSignIn: (agentId: string, accountId?: string | null) => void;
   /** Opens Settings > Agents (accounts and presets). */
   onManageAccounts?: () => void;
   /** The repository of the active session, when there is one. */
@@ -113,9 +131,27 @@ export interface TaskLauncherProps {
   inline?: boolean;
   /** Test seam: the capability/usual/preset backend (the capability commands otherwise). */
   backend?: LauncherBackend;
+  /** Changes when ⌘N is pressed again on the open sheet: the task field takes the keyboard back. */
+  focusNonce?: number;
+  /** Inline: the task text to start with (the welcome keeps it across its steps). */
+  initialTask?: string;
+  /** Inline: what the launcher can do now, for the screen around it. */
+  controlRef?: React.MutableRefObject<TaskLauncherControl | null>;
+  /** Inline: told each time the task text or whether Launch is possible changes. */
+  onStateChange?: (state: { task: string; canLaunch: boolean }) => void;
+}
+
+/** What a screen embedding the inline launcher can ask of it. */
+export interface TaskLauncherControl {
+  /** Launches what is in the launcher now (as its Launch button). */
+  launch(): Promise<void>;
+  /** Keeps what is in the launcher as the ⌘N sheet's draft. */
+  keepAsDraft(): void;
 }
 
 const PROBE_DELAY_MS = 200;
+/** A model id to show as an example in the "type a model id" field, per agent. */
+const MODEL_EXAMPLE: Record<string, string> = { claude: "claude-sonnet-4-5" };
 const RECENT_COUNT = 3;
 type Menu = null | "agent" | "project" | "where" | "approval" | "model" | "effort";
 type WhereKind = LaunchChoice["where"]["kind"];
@@ -158,7 +194,21 @@ function onMenuKeys(e: React.KeyboardEvent<HTMLElement>) {
   items[next]?.focus();
 }
 
-export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, onSignIn, onManageAccounts, defaultRepo, inline = false, backend: backendProp }: TaskLauncherProps) {
+export function TaskLauncher({
+  onLaunch,
+  onClose,
+  onStartOver,
+  onOpenAdvanced,
+  onSignIn,
+  onManageAccounts,
+  defaultRepo,
+  inline = false,
+  backend: backendProp,
+  focusNonce,
+  initialTask,
+  controlRef,
+  onStateChange,
+}: TaskLauncherProps) {
   const { t } = useI18n();
   const doctor = useAgentDoctor();
   const byId = useMemo(() => doctorById(doctor.rows), [doctor.rows]);
@@ -175,12 +225,19 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   const agentIds = useMemo(() => agents.map((a) => a.id), [agents]);
 
   // ── state ────────────────────────────────────────────────────────
-  const [task, setTask] = useState("");
+  const [task, setTask] = useState(initialTask ?? "");
   const [choice, setChoice] = useState<LaunchChoice | null>(null);
   const [repoPath, setRepoPath] = useState(defaultRepo ?? "");
   const [probe, setProbe] = useState<{ path: string; result: RepoProbe } | null>(null);
   const [branch, setBranch] = useState("");
-  const [branchEdited, setBranchEdited] = useState(false);
+  const [branchEdited, setBranchEditedState] = useState(false);
+  // Also read by the branch effect, which can run in the same flush as a
+  // draft coming back (its closure would still see "not edited").
+  const branchEditedRef = useRef(false);
+  const setBranchEdited = useCallback((v: boolean) => {
+    branchEditedRef.current = v;
+    setBranchEditedState(v);
+  }, []);
   const [checks, setChecks] = useState<string[]>([]);
   const [checksEdited, setChecksEdited] = useState(false);
   const [expanded, setExpanded] = useState(false);
@@ -188,7 +245,20 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   const [modePrefs, setModePrefs] = useState<SessionModeByProvider>({});
   const [viewMode, setViewMode] = useState<SessionMode>("terminal");
   const [caps, setCaps] = useState<Record<string, AgentCapabilities>>({});
+  // An added account's own capabilities (its models, its refusals), by "agent\naccount".
+  const [accountCaps, setAccountCaps] = useState<Record<string, AgentCapabilities>>({});
+  // An agent whose sign-in is being checked again (Check again, back from a sign-in).
+  const [rechecking, setRechecking] = useState<string | null>(null);
   const [presets, setPresets] = useState<CheckedPreset[]>([]);
+  // The preset form's answer when its name cannot be used (taken).
+  const [presetError, setPresetError] = useState<string | null>(null);
+  // A stored choice (a preset, the usual combination) on an account that is
+  // signed out or gone: kept on that account, and Launch waits for a sign-in
+  // or for "Use the default profile this time" (never swapped on its own).
+  const [accountHold, setAccountHold] = useState<{ source: string; agentId: string; was: string; now: string | null; gone: boolean } | null>(null);
+  // The project switched to usually runs another combination (the person had already changed this one).
+  const [otherUsual, setOtherUsual] = useState<{ repo: string; choice: LaunchChoice } | null>(null);
+  const [probeAgain, setProbeAgain] = useState(0);
   // The preset the person applied and the choice it gave: its chip stays the
   // selected one while the choice is that one, also after a fallback made it
   // equal to another preset. Any other change of the choice ends it.
@@ -222,6 +292,8 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   const [projectsLoaded, setProjectsLoaded] = useState(!!defaultRepo);
   const taskRef = useRef<HTMLTextAreaElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
+  // The modal overlay (the sheet and its backdrop): Tab stays inside it.
+  const sheetWrapRef = useRef<HTMLDivElement>(null);
   const chipRefs = useRef<Partial<Record<Exclude<Menu, null>, HTMLButtonElement | null>>>({});
   const menuRef = useRef<HTMLDivElement>(null);
   const userTouched = useRef(false);
@@ -231,7 +303,20 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   const viewFromDraft = useRef<{ agentId: string; mode: SessionMode } | null>(null);
   // Where the current choice came from ("usual" or a preset's name) until the person changes it.
   const choiceSource = useRef<string | null>(null);
+  // The repository the usual combination was read for (a project switch reads the new one's).
+  const usualFor = useRef<string | null>(null);
+  const usualSeq = useRef(0);
+  // An account picked by the person: its own models are checked once they are read.
+  const accountPicked = useRef<string | null>(null);
+  // The branch of a task with nothing to name it after: hermes/task-<id>, one id per sheet.
+  const [fallbackId] = useState(() => shortTaskId());
+  const latestTask = useRef(task);
+  latestTask.current = task;
 
+  /** The task field takes the keyboard (after the focused control went away). */
+  const focusTask = useCallback(() => {
+    requestAnimationFrame(() => taskRef.current?.focus());
+  }, []);
 
   // ── one-time reads ──────────────────────────────────────────────
   useEffect(() => {
@@ -272,8 +357,12 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   // Capabilities of every agent, again when the doctor answers. An agent
   // whose capabilities cannot be read is not guessed at: the launcher says
   // so and offers to try again.
+  // When each agent's capabilities were last read afresh (Check again): an
+  // answer from the cache that started before that never replaces them.
+  const freshAt = useRef<Record<string, number>>({});
   useEffect(() => {
     let cancelled = false;
+    const startedAt = Date.now();
     void Promise.all(
       agentIds.map((id) =>
         backend.capabilities(id).then(
@@ -290,7 +379,11 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
         // The Custom agent has no capabilities to read: its command is typed.
         else if (getAgent(e.id)?.custom !== true) errors[e.id] = e.error ?? "";
       }
-      setCaps(next);
+      setCaps((prev) => {
+        const out = { ...next };
+        for (const [id, at] of Object.entries(freshAt.current)) if (at >= startedAt && prev[id]) out[id] = prev[id];
+        return out;
+      });
       setCapsErrors(errors);
       setCapsLoaded(true);
     });
@@ -298,6 +391,39 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
       cancelled = true;
     };
   }, [backend, agentIds, doctor.rows, capsAttempt]);
+
+  /** The capabilities for an agent on an account: an added account's own once read, else the agent's. */
+  const capsOf = useCallback(
+    (agentId: string, accountId: string | null | undefined): AgentCapabilities | undefined =>
+      (isAddedAccount(accountId) ? accountCaps[`${agentId}\n${accountId}`] : undefined) ?? caps[agentId],
+    [caps, accountCaps],
+  );
+
+  /**
+   * Check again: the doctor and the agent's capabilities read afresh (not
+   * from the cache), so a sign-in that just happened in a terminal shows at
+   * once. Also when the welcome comes back from a sign-in.
+   */
+  const recheck = useCallback(
+    async (agentId: string, accountId?: string | null) => {
+      setRechecking(agentId);
+      try {
+        const [, fresh, ofAccount] = await Promise.all([
+          refreshDoctor(),
+          backend.capabilities(agentId, null, true).catch(() => null),
+          isAddedAccount(accountId) ? backend.capabilities(agentId, accountId, true).catch(() => null) : Promise.resolve(null),
+        ]);
+        if (fresh) {
+          freshAt.current[agentId] = Date.now();
+          setCaps((c) => ({ ...c, [agentId]: fresh }));
+        }
+        if (ofAccount && isAddedAccount(accountId)) setAccountCaps((c) => ({ ...c, [`${agentId}\n${accountId}`]: ofAccount }));
+      } finally {
+        setRechecking((cur) => (cur === agentId ? null : cur));
+      }
+    },
+    [backend],
+  );
 
   // Projects, most used first (every launch is a session of its project).
   useEffect(() => {
@@ -348,23 +474,22 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
       setChecksEdited(draft.checksEdited);
       setExpanded(draft.expanded);
       if (draft.viewMode) viewFromDraft.current = { agentId: draft.choice.agentId, mode: draft.viewMode };
+      // The draft's choice is the person's own: a project switch only offers that project's usual.
+      userTouched.current = true;
+      usualFor.current = draft.repoPath.trim() || null;
       setRestored(true);
       setReadyState(true);
       return;
     }
     defaultAgentRef.current = () => pickDefaultAgent(lastUsed, agentIds.filter((id) => id !== "custom"), byIdRef.current) ?? agentIds[0];
+    usualFor.current = repoPathRef.current.trim() || null;
     void backend
-      .usual(repoPathRef.current.trim() || null)
+      .usual(usualFor.current)
       .catch(() => null)
       .then((usual) => {
         if (userTouched.current) return;
         if (usual && usual.source !== "catalog") {
-          choiceSource.current = "usual";
-          // Skip all is never picked for the person, not even as their usual.
-          const safe = withoutDanger(usual.choice, caps, (id) => freshChoice(id).approvalModeId);
-          setChoice(safe.choice);
-          setDangerDropped(safe.dropped);
-          setFallbacks(usual.issues.length || !usual.launchable ? { source: "usual", list: usual.issues, launchable: usual.launchable } : null);
+          applyStored(usual, "usual", true);
         } else {
           const agentId = usual?.choice.agentId ?? defaultAgentRef.current();
           setChoice(freshChoice(agentId));
@@ -388,10 +513,52 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
     [caps, defaultMode, globalSuffix],
   );
 
-  /** "Claude Code · opus": the agent and the model as the chips say them. */
+  /**
+   * A stored choice (the usual combination of a repository, a preset)
+   * checked against what the agents can do now, as the launcher's choice.
+   * `fromHistory`: the usual combination, which never starts in Skip all and
+   * never on the current checkout (only a preset or a click does). An
+   * account that is signed out or gone is not swapped for another: the
+   * choice stays on it and Launch waits (accountHold).
+   */
+  const applyStored = (checked: { choice: LaunchChoice; issues: LauncherIssue[]; launchable: boolean }, source: string, fromHistory: boolean) => {
+    let next = checked.choice;
+    let dropped = false;
+    if (fromHistory) {
+      // Skip all is never picked for the person, not even as their usual.
+      const safe = withoutDanger(historyForm(next), caps, (id) => freshChoice(id).approvalModeId);
+      next = safe.choice;
+      dropped = safe.dropped;
+    }
+    // An added account only: the CLI's own profile signed out is the usual "signed out" row.
+    const held = checked.issues.find(
+      (i) => i.field === "account" && !i.alsoOn && isAddedAccount(i.was) && (i.code.startsWith("accountSignedOut") || i.code.startsWith("accountGone")),
+    );
+    let issues = checked.issues;
+    if (held?.was) {
+      next = { ...next, accountId: held.was };
+      issues = issues.filter((i) => i !== held);
+      setAccountHold({ source, agentId: next.agentId, was: held.was, now: held.now, gone: held.code.startsWith("accountGone") });
+    } else {
+      setAccountHold(null);
+    }
+    choiceSource.current = source;
+    setChoice(next);
+    setDangerDropped(dropped);
+    const launchable = checked.launchable || (!!held && !checked.issues.some((i) => i.field === "agent"));
+    setFallbacks(issues.length || !launchable ? { source, list: issues, launchable } : null);
+    return next;
+  };
+
+  /** "Claude Code · opus", "Claude Code · Work · opus": the agent, the account when it is an added one, and the model, as the chips say them. */
   const defaultPresetName = useCallback(
-    (c: LaunchChoice) => `${getAgent(c.agentId)?.name ?? c.agentId} · ${c.modelId === "default" ? t("launcher.modelDefault") : c.modelId}`,
-    [t],
+    (c: LaunchChoice) => {
+      const agent = getAgent(c.agentId)?.name ?? c.agentId;
+      const model = c.modelId === "default" ? t("launcher.modelDefault") : c.modelId;
+      const account = isAddedAccount(c.accountId) ? (caps[c.agentId]?.accounts.find((a) => a.id === c.accountId)?.label ?? c.accountId) : null;
+      return account ? `${agent} · ${account} · ${model}` : `${agent} · ${model}`;
+    },
+    [t, caps],
   );
 
   // The Settings prefix of the chosen agent(s) is part of the choice, read-only here.
@@ -414,10 +581,9 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
     setViewMode(preferredSessionMode(modePrefs, choice?.agentId ?? null));
   }, [choice?.agentId, modePrefs]);
 
-  // The branch follows the task until the person types their own.
-  useEffect(() => {
-    if (!branchEdited) setBranch(taskBranch(task));
-  }, [task, branchEdited]);
+  // The branch follows the task until the person types their own, skipping
+  // names the repository already has (the same task again gets -2, -3…).
+  // Set below, once the repository's branches are known.
 
   // Is the folder a repository, which branches exist, what is "done"?
   useEffect(() => {
@@ -440,7 +606,8 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [repoPath]);
+    // probeAgain: after a launch that stays open, the branch it made is taken now.
+  }, [repoPath, probeAgain]);
 
   const probed = probe && probe.path === repoPath.trim() ? probe.result : null;
   const gitRoot = repoPath.trim() ? (probed ? probed.git_root : undefined) : undefined;
@@ -448,9 +615,87 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   const branchSet = useMemo(() => new Set(localBranches), [localBranches]);
   const currentBranch = probed?.current_branch ?? "";
   const doneWhen = useMemo(() => doneWhenFromToml(probed?.worktree_toml), [probed]);
+  // What is at the path: missing, a file, a repository without a commit (older backends say nothing).
+  const folder = useMemo(
+    () => (probed ? { exists: probed.exists !== false, isDir: probed.is_dir !== false, hasCommits: probed.has_commits !== false } : null),
+    [probed],
+  );
+  // "~/code/app" read as the folder it names, shown under the typed path.
+  const resolvedPath = probed?.resolved && probed.resolved !== repoPath.trim() ? probed.resolved : null;
   useEffect(() => {
     if (!checksEdited) setChecks(doneWhen.commands);
   }, [doneWhen, checksEdited]);
+
+  useEffect(() => {
+    if (branchEdited || branchEditedRef.current) return;
+    const auto = autoTaskBranch(task, localBranches, fallbackId);
+    setBranch((cur) => (branchEditedRef.current ? cur : auto));
+  }, [task, branchEdited, localBranches, fallbackId]);
+
+  // Another project: its usual combination, when the person has not made
+  // this one their own; when they have, the launcher only says what the
+  // project usually runs, with a way to use that.
+  const choiceRef = useRef(choice);
+  choiceRef.current = choice;
+  useEffect(() => {
+    if (!ready || !gitRoot) return;
+    if (usualFor.current && samePath(usualFor.current, gitRoot)) return;
+    usualFor.current = gitRoot;
+    const seq = ++usualSeq.current;
+    setOtherUsual(null);
+    void backend
+      .usual(gitRoot)
+      .catch(() => null)
+      .then((usual) => {
+        if (seq !== usualSeq.current || !usual || usual.source !== "repo") return;
+        const current = choiceRef.current;
+        if (!userTouched.current) {
+          applyStored(usual, "usual", true);
+          return;
+        }
+        if (current && !sameCombo(historyForm(usual.choice), historyForm(current))) setOtherUsual({ repo: baseName(gitRoot), choice: usual.choice });
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gitRoot, ready, backend]);
+
+  // An added account's own capabilities (its models can differ from the
+  // default profile's: a model refused on one account works on another).
+  const accountKeys = useMemo(() => {
+    const keys: string[] = [];
+    if (choice && isAddedAccount(choice.accountId)) keys.push(`${choice.agentId}\n${choice.accountId}`);
+    if (choice?.alsoOn && isAddedAccount(choice.alsoOn.accountId)) keys.push(`${choice.alsoOn.agentId}\n${choice.alsoOn.accountId}`);
+    return keys;
+  }, [choice]);
+  useEffect(() => {
+    let cancelled = false;
+    for (const key of accountKeys) {
+      if (accountCaps[key]) continue;
+      const [agentId, accountId] = key.split("\n");
+      void backend
+        .capabilities(agentId, accountId)
+        .then((c) => {
+          if (!cancelled) setAccountCaps((cur) => ({ ...cur, [key]: c }));
+        })
+        .catch(() => {});
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [accountKeys, accountCaps, backend]);
+
+  // The person picked an account: its own models, checked as soon as they are known.
+  useEffect(() => {
+    const key = accountPicked.current;
+    if (!key || !choice || `${choice.agentId}\n${choice.accountId}` !== key) return;
+    const c = accountCaps[key];
+    if (!c) return;
+    accountPicked.current = null;
+    const checked = reconcileChoice({ ...choice, alsoOn: undefined }, c, null);
+    const changed = checked.issues.filter((i) => i.field === "model" || i.field === "effort");
+    if (changed.length === 0) return;
+    setChoice((cur) => (cur ? { ...cur, modelId: checked.choice.modelId, effort: checked.choice.effort } : cur));
+    setFallbacks({ source: "account", list: changed, launchable: true });
+  }, [accountCaps, choice]);
 
   // A new worktree cut from a branch this repository does not have (a
   // preset or the usual combination from another repository, a draft, a
@@ -517,26 +762,32 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   };
   const pickModel = (modelId: string) => {
     if (!choice) return;
-    const efforts = effortsFor(caps[choice.agentId], modelId);
+    const efforts = effortsFor(capsOf(choice.agentId, choice.accountId), modelId);
     update({ modelId, effort: choice.effort && efforts.includes(choice.effort) ? choice.effort : null });
   };
+  const pickAccount = (accountId: string) => {
+    if (!choice) return;
+    update({ accountId });
+    setAccountHold(null);
+    accountPicked.current = isAddedAccount(accountId) ? `${choice.agentId}\n${accountId}` : null;
+  };
 
-  const applyPreset = useCallback((preset: CheckedPreset) => {
+  const applyPreset = (preset: CheckedPreset) => {
     userTouched.current = true;
+    setOtherUsual(null);
     // Checked again against what the agents can do now.
-    const agentCaps = caps[preset.choice.agentId];
-    const checked = agentCaps
-      ? reconcileChoice(preset.choice, agentCaps, preset.choice.alsoOn ? caps[preset.choice.alsoOn.agentId] ?? null : null)
+    const presetCaps = caps[preset.choice.agentId];
+    const checked = presetCaps
+      ? reconcileChoice(preset.choice, presetCaps, preset.choice.alsoOn ? caps[preset.choice.alsoOn.agentId] ?? null : null)
       : { choice: preset.effective, issues: preset.issues, launchable: preset.launchable };
-    choiceSource.current = preset.name;
-    setChoice(checked.choice);
-    setApplied({ id: preset.id, choice: checked.choice });
-    setFallbacks(checked.issues.length || !checked.launchable ? { source: preset.name, list: checked.issues, launchable: checked.launchable } : null);
+    const next = applyStored(checked, preset.name, false);
+    setApplied({ id: preset.id, choice: next });
     setMenu(null);
-  }, [caps]);
+    focusTask();
+  };
 
   // ── derived ─────────────────────────────────────────────────────
-  const agentCaps = choice ? caps[choice.agentId] : undefined;
+  const agentCaps = choice ? capsOf(choice.agentId, choice.accountId) : undefined;
   const isCustom = !!choice && getAgent(choice.agentId)?.custom === true;
   const where: LaunchChoice["where"] = useMemo(() => choice?.where ?? { kind: "new-worktree", baseBranch: "", branch: "" }, [choice?.where]);
 
@@ -551,7 +802,7 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
         createBranch: w.kind === "new-worktree",
         baseBranch: w.kind === "new-worktree" ? w.baseBranch : "",
         worktree: w.kind !== "current-checkout",
-        launch: backend.sessionLaunch(c, caps[c.agentId]),
+        launch: backend.sessionLaunch(c, capsOf(c.agentId, c.accountId)),
         choice: c,
       };
     };
@@ -561,25 +812,40 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
     const list = [mk(main, mainBranch, hasAgentView(effective.agentId) ? viewMode : "terminal")];
     if (effective.alsoOn) {
       // The second agent always gets its own new branch (two agents never share a checkout).
-      const alsoBranch = secondAgentBranch(where.kind === "existing-branch" ? where.branch : mainBranch || taskBranch(task), effective.alsoOn.agentId);
+      const alsoBranch = secondAgentBranch(where.kind === "existing-branch" ? where.branch : mainBranch || taskBranch(task, fallbackId), effective.alsoOn.agentId);
       const also: LaunchChoice = { ...effective.alsoOn, where: { kind: "new-worktree", baseBranch: where.kind === "new-worktree" ? where.baseBranch : where.kind === "existing-branch" ? where.branch : "", branch: alsoBranch } };
       list.push(mk(also, alsoBranch, "terminal"));
     }
     return list;
-  }, [effective, branch, viewMode, caps, where, task, backend]);
+  }, [effective, branch, viewMode, capsOf, where, task, backend, fallbackId]);
+
+  /** Whether the account an agent runs on is signed in, as the capability backend says (undefined: not known). */
+  const accountSignedIn = useCallback(
+    (agentId: string, accountId: string | null | undefined): boolean | undefined => capsOf(agentId, accountId)?.accounts.find((x) => x.id === accountId)?.signedIn,
+    [capsOf],
+  );
+  // A held account (see accountHold) that still cannot run: its own row says so and Launch waits.
+  const holdActive =
+    !!accountHold &&
+    !!choice &&
+    choice.agentId === accountHold.agentId &&
+    choice.accountId === accountHold.was &&
+    (accountHold.gone || accountSignedIn(choice.agentId, choice.accountId) === false || !capsOf(choice.agentId, choice.accountId)?.accounts.some((x) => x.id === accountHold.was));
 
   const rows = useMemo(() => {
+    const judged = (a: PlannedAgent) => ({ id: a.id, branch: a.branch, accountId: a.choice.accountId, accountSignedIn: accountSignedIn(a.id, a.choice.accountId) });
     const all = blockingRows({
-      agents: plannedAgents.filter((a) => a.createBranch).map((a) => ({ id: a.id, branch: a.branch })),
+      agents: plannedAgents.filter((a) => a.createBranch).map(judged),
       doctor: byId,
       repoPath,
       gitRoot,
       branches: localBranches,
       disk: disk ? { freeBytes: disk.free_bytes, requiredBytes: disk.required_bytes, belowThreshold: disk.below_threshold } : null,
+      folder,
     });
     // Agents that do not create a branch are still judged for install / sign-in.
     const extra = blockingRows({
-      agents: plannedAgents.filter((a) => !a.createBranch).map((a) => ({ id: a.id, branch: "" })),
+      agents: plannedAgents.filter((a) => !a.createBranch).map((a) => ({ ...judged(a), branch: "" })),
       doctor: byId,
       repoPath: "x",
       gitRoot: null,
@@ -588,14 +854,15 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
     }).filter((r) => r.kind === "not-installed" || r.kind === "signed-out");
     const out: BlockingRow[] = [...all, ...extra.filter((r) => r.kind !== "not-installed" || getAgent(r.agentId)?.custom !== true)];
     if (where.kind === "existing-branch" && gitRoot && !branchSet.has(where.branch)) out.push({ kind: "bad-branch", branch: where.branch });
-    // An account the capability backend knows is signed out (the doctor only sees the default profile).
-    for (const a of plannedAgents) {
-      const account = caps[a.id]?.accounts.find((x) => x.id === a.choice.accountId);
-      if (account && !account.signedIn && !out.some((r) => r.kind === "signed-out" && r.agentId === a.id)) out.push({ kind: "signed-out", agentId: a.id });
-    }
     const newWorktree = plannedAgents.some((a) => a.worktree);
-    return out.filter((r) => !(r.kind === "not-installed" && getAgent(r.agentId)?.custom) && (r.kind !== "low-disk" || newWorktree));
-  }, [plannedAgents, byId, repoPath, gitRoot, branchSet, localBranches, disk, where, caps]);
+    return out.filter(
+      (r) =>
+        !(r.kind === "not-installed" && getAgent(r.agentId)?.custom) &&
+        (r.kind !== "low-disk" || newWorktree) &&
+        // The held account's own row (below) says it, with what to do.
+        !(holdActive && r.kind === "signed-out" && r.agentId === accountHold?.agentId && r.accountId === accountHold?.was),
+    );
+  }, [plannedAgents, byId, repoPath, gitRoot, branchSet, localBranches, disk, where, folder, accountSignedIn, holdActive, accountHold]);
 
   const customMissing = isCustom && !choice?.extraArgs.trim();
   // A base branch the repository lacks, until the effect above has replaced it: never launched.
@@ -607,21 +874,26 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   }, [plannedAgents, capsErrors]);
   const validation = useMemo(() => {
     for (const a of plannedAgents) {
-      const v = validateChoice(a.choice, caps[a.id]);
+      const v = validateChoice(a.choice, capsOf(a.id, a.choice.accountId));
+      // A held account that is gone has its own row.
+      if (!v.ok && holdActive && v.field === "account" && a.id === accountHold?.agentId) continue;
       if (!v.ok) return { field: v.field, value: v.message };
     }
     return null;
-  }, [plannedAgents, caps]);
+  }, [plannedAgents, capsOf, holdActive, accountHold]);
   // A stored choice that could not be made launchable is judged live by the
   // rows above (agent missing, account signed out), with today's answers.
-  const canGo = !!choice && ready && canLaunch(task, gitRoot, rows) && plannedAgents.length > 0 && !launching && !customMissing && !validation && !capsError && !staleBase;
+  const canGo =
+    !!choice && ready && canLaunch(task, gitRoot, rows) && plannedAgents.length > 0 && !launching && !customMissing && !validation && !capsError && !staleBase && !holdActive;
+  // Why Launch is not possible, for the Launch button's description.
+  const blocked = rows.length > 0 || holdActive || !!validation || customMissing || !!capsError || failed;
 
   useEffect(() => {
     if (!effective) return;
     let cancelled = false;
     const place =
       where.kind === "new-worktree"
-        ? t("launcher.previewWorktree", { branch: branch.trim() || taskBranch(task), base: where.baseBranch || currentBranch || "HEAD" })
+        ? t("launcher.previewWorktree", { branch: branch.trim() || taskBranch(task, fallbackId), base: where.baseBranch || currentBranch || "HEAD" })
         : where.kind === "existing-branch"
           ? t("launcher.previewExisting", { branch: where.branch })
           : t("launcher.previewCurrent", { repo: baseName(repoPath) || "—", branch: currentBranch || "HEAD" });
@@ -634,8 +906,11 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
     return () => {
       cancelled = true;
     };
-  }, [effective, backend, task, where, branch, currentBranch, repoPath, t]);
+  }, [effective, backend, task, where, branch, currentBranch, repoPath, t, fallbackId]);
   const previewLine = previewLineState;
+  // The launch adds a pointer to the session's project context after the
+  // task (an agent that takes the task on its command line): said, not hidden.
+  const contextNote = !!task.trim() && plannedAgents.some((a) => a.mode === "terminal" && agentTakesFirstPrompt(a.id));
 
   // ── actions ─────────────────────────────────────────────────────
   // The draft is kept whenever the sheet goes away without a launch: Esc,
@@ -713,10 +988,9 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
       // a new one with the next task).
       forgetDraft.current = !next;
       setRestored(false);
-      if (offer) {
-        // Offered once: recorded now, so the question never comes back for
-        // this combination, whether it is answered, dismissed or ignored.
-        void backend.dismissSuggestion(remembered, gitRoot).catch((err) => console.warn("[TaskLauncher] could not record the offer:", err));
+      // Asked once per app session; never again only after "No, don't ask again" (or once it is a preset).
+      if (offer && !wasOfferedThisSession(remembered)) {
+        markOfferedThisSession(remembered);
         const name = uniquePresetName(defaultPresetName(remembered), presets);
         if (next || inline) {
           setSuggest(remembered);
@@ -729,29 +1003,76 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
       }
       if (next) {
         setLaunched((l) => [...l, { label: taskLabel(trimmed), queued: result === "queued" }]);
-        setTask("");
-        setBranchEdited(false);
-        requestAnimationFrame(() => taskRef.current?.focus());
+        // What was typed while the launch ran is the next task: only the launched text is cleared.
+        if (latestTask.current.trim() === trimmed) {
+          setTask((cur) => (cur.trim() === trimmed ? "" : cur));
+          setBranchEdited(false);
+        }
+        // The branch it made is taken now: the next one is named past it.
+        setProbeAgain((n) => n + 1);
+        focusTask();
         return;
       }
       onClose?.({ keepDraft: false });
     },
-    [canGo, effective, gitRoot, plannedAgents, modePrefs, task, onLaunch, checks, backend, presets, inline, onClose, defaultPresetName],
+    [canGo, effective, gitRoot, plannedAgents, modePrefs, task, onLaunch, checks, backend, presets, inline, onClose, defaultPresetName, focusTask, setBranchEdited],
   );
 
+  /**
+   * Saves a preset. A name another preset already has (letter case ignored)
+   * is refused with a message; true when it was saved.
+   */
   const savePreset = useCallback(
-    async (name: string, c: LaunchChoice) => {
+    async (name: string, c: LaunchChoice): Promise<boolean> => {
       const clean = name.trim();
-      if (!clean) return;
+      if (!clean) return false;
+      const taken = presetNamed(clean, presets);
+      if (taken) {
+        setPresetError(t("launcher.presetNameTaken", { name: taken.name }));
+        return false;
+      }
       try {
         const preset = await backend.savePreset(clean, c);
         setPresets((list) => [...list, preset]);
+        setPresetError(null);
+        return true;
       } catch (err) {
         console.warn("[TaskLauncher] could not save the preset:", err);
+        setPresetError(err instanceof Error ? err.message : String(err));
+        return false;
       }
     },
-    [backend],
+    [backend, presets, t],
   );
+
+  /** The "Save as preset…" form: saved, it closes and the task field takes the keyboard back. */
+  const submitPresetForm = async () => {
+    if (saving === null || !effective || !saving.trim()) return;
+    if (await savePreset(saving, rememberedForm(effective))) {
+      setSaving(null);
+      focusTask();
+    }
+  };
+  const cancelPresetForm = () => {
+    setSaving(null);
+    setPresetError(null);
+    focusTask();
+  };
+  /** "Save it as a preset?": saved under the name typed (nothing happens without one). */
+  const submitSuggestion = async () => {
+    if (!suggest || !suggestName.trim()) return;
+    if (await savePreset(suggestName, suggest)) {
+      setSuggest(null);
+      focusTask();
+    }
+  };
+  /** "No, don't ask again": the one answer that stops the offer for good. */
+  const dismissSuggestion = () => {
+    if (suggest && gitRoot) void backend.dismissSuggestion(suggest, gitRoot).catch(() => {});
+    setSuggest(null);
+    setPresetError(null);
+    focusTask();
+  };
 
   // ── keyboard ────────────────────────────────────────────────────
   const openMenu = (m: Exclude<Menu, null>) => {
@@ -768,11 +1089,17 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
       target?.focus();
     });
   }, [menu]);
+  /** Esc in a menu: it closes and its chip has the keyboard again. */
   const closeMenu = useCallback(() => {
     const m = menu;
     setMenu(null);
     if (m) requestAnimationFrame(() => chipRefs.current[m]?.focus());
   }, [menu]);
+  /** A value picked in a menu: it closes and the task field has the keyboard (the next Enter launches). */
+  const pickDone = useCallback(() => {
+    setMenu(null);
+    focusTask();
+  }, [focusTask]);
 
   const onSheetKey = (e: React.KeyboardEvent) => {
     const mod = PLATFORM === "mac" ? e.metaKey : e.ctrlKey;
@@ -781,7 +1108,7 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
     if (e.key === "Escape") {
       e.stopPropagation();
       e.preventDefault();
-      if (saving !== null) setSaving(null);
+      if (saving !== null) cancelPresetForm();
       else if (menu) closeMenu();
       else if (!inline) close();
       return;
@@ -828,9 +1155,50 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
     const picked = await open({ directory: true, multiple: false });
     if (typeof picked === "string" && picked) {
       setRepoPath(picked);
-      setMenu(null);
+      pickDone();
     }
   };
+
+  // While the sheet is open, a key that reaches the page itself (the
+  // focused control went away) still works: Esc closes the sheet, any other
+  // key gives the task field the keyboard back. ⌘N on the open sheet does too.
+  useEffect(() => {
+    if (inline) return;
+    const onKey = (e: KeyboardEvent) => {
+      const active = document.activeElement;
+      if (e.defaultPrevented || (active && active !== document.body && active !== document.documentElement)) return;
+      if (e.key === "Escape") {
+        e.preventDefault();
+        closeRef.current();
+        return;
+      }
+      if (e.key === "Shift" || e.key === "Meta" || e.key === "Control" || e.key === "Alt") return;
+      if (e.key === "Tab") e.preventDefault();
+      taskRef.current?.focus();
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [inline]);
+  useEffect(() => {
+    if (focusNonce) focusTask();
+  }, [focusNonce, focusTask]);
+
+  useFocusTrap(sheetWrapRef, !inline);
+
+  // The screen around an inline launcher (the welcome) has its own Launch.
+  if (controlRef) {
+    controlRef.current = {
+      launch: () => launch(false),
+      keepAsDraft: () => {
+        if (choice) saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode });
+      },
+    };
+  }
+  const onStateChangeRef = useRef(onStateChange);
+  onStateChangeRef.current = onStateChange;
+  useEffect(() => {
+    onStateChangeRef.current?.({ task, canLaunch: canGo });
+  }, [task, canGo]);
 
   const copyInstall = (id: string) => {
     const cmd = installCommand(getAgent(id));
@@ -839,11 +1207,22 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   };
 
   const agentName = (id: string) => byId[id]?.name ?? getAgent(id)?.name ?? id;
+  /**
+   * An account as people know it: its label; the CLI's own profile is
+   * "default profile", or what it signs in with when that is the only
+   * account it can have ("Google account").
+   */
   const accountLabel = (c: AgentCapabilities | undefined, id: string | null) => {
     const a = c?.accounts.find((x) => x.id === id);
-    if (!a || a.id === "default") return t("launcher.accountDefault");
+    if (!a && isAddedAccount(id)) return id;
+    if (!a || a.id === "default") {
+      if (a && c && !c.canAddAccount && a.detail && a.signedIn) return a.detail;
+      return t("launcher.accountDefault");
+    }
     return a.label;
   };
+  /** The label of an account of an agent, by id (an added account that is gone: its id). */
+  const accountName = (agentId: string, id: string | null) => accountLabel(capsOf(agentId, id) ?? caps[agentId], id);
   const approvalLabel = (agentId: string, id: string) => {
     const key = `launcher.mode.${id}`;
     const label = t(key);
@@ -861,24 +1240,40 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
     const row = byId[id];
     if (!row) return t("doctor.checking");
     if (!row.installed) return t("doctor.notInstalled");
-    if (row.signed_in === "no") return t("launcher.agentNoteSignedOut");
+    if (row.signed_in === "no") {
+      // The doctor checks the default profile only: an added account may be signed in.
+      const signedIn = (caps[id]?.accounts ?? []).filter((a) => isAddedAccount(a.id) && a.signedIn).map((a) => a.label);
+      if (signedIn.length > 0) return t("launcher.agentNoteDefaultOut", { accounts: signedIn.join(", ") });
+      return t("launcher.agentNoteSignedOut");
+    }
     return row.version ? t("launcher.agentNoteInstalled", { version: row.version }) : t("launcher.agentNoteInstalledNoVersion");
   };
   const fallbackText = (f: LauncherIssue) => {
-    // Approval modes by their names ("Plan first"), models "default" as the chip says it.
+    const agentId = (f.alsoOn ? choice?.alsoOn?.agentId : choice?.agentId) ?? "";
+    // Approval modes by their names ("Plan first"), models "default" as the chip says it, accounts by their labels.
     const name = (v: string | null) => {
       if (v === null) return f.field === "effort" ? t("launcher.effortDefault") : "—";
-      if (f.field === "approval" && choice) return approvalLabel(choice.agentId, v);
+      if (f.field === "approval" && choice) return approvalLabel(agentId || choice.agentId, v);
       if (f.field === "model" && v === "default") return t("launcher.modelDefault");
+      if (f.field === "account") return accountName(agentId, v);
       return v;
     };
-    const text =
-      f.now === null
-        ? t(`launcher.fallbackGone.${f.field}`, { from: name(f.was) })
-        : t(`launcher.fallback.${f.field}`, { from: name(f.was), to: name(f.now) });
+    let text: string;
+    if (f.field === "account" && f.now !== null && f.code.startsWith("accountSignedOut")) {
+      text = t("launcher.fallbackAccountSignedOut", { account: name(f.was), using: name(f.now) });
+    } else {
+      text =
+        f.now === null
+          ? t(`launcher.fallbackGone.${f.field}`, { from: name(f.was) })
+          : t(`launcher.fallback.${f.field}`, { from: name(f.was), to: name(f.now) });
+    }
     // About a preset's second agent: said so.
     return f.alsoOn ? t("agentsSettings.issue.alsoOn", { issue: text }) : text;
   };
+
+  /** Sign in for an agent: in its added account's own profile when that is the one signed out. */
+  const signInFor = (agentId: string, accountId?: string | null) => onSignIn(agentId, isAddedAccount(accountId) ? accountId : null);
+  const checkAgain = (agentId: string, accountId?: string | null) => void recheck(agentId, accountId);
 
   // ── rendering pieces ────────────────────────────────────────────
   const renderRow = (row: BlockingRow, i: number) => {
@@ -895,18 +1290,23 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
             )}
           </div>
         );
-      case "signed-out":
+      case "signed-out": {
+        const account = isAddedAccount(row.accountId) ? accountName(row.agentId, row.accountId) : null;
+        const checking = rechecking === row.agentId;
         return (
-          <div className="task-launcher-block" data-kind={row.kind} data-agent-id={row.agentId} key={key}>
-            <span>{t("launcher.block.signedOut", { agent: agentName(row.agentId) })}</span>
-            <Button variant="link" className="task-launcher-link task-launcher-sign-in" onClick={() => onSignIn(row.agentId)}>
-              {t("launcher.signIn")}
+          <div className="task-launcher-block" data-kind={row.kind} data-agent-id={row.agentId} data-account-id={row.accountId ?? "default"} key={key}>
+            <span>
+              {account ? t("launcher.block.accountSignedOut", { account, agent: agentName(row.agentId) }) : t("launcher.block.signedOut", { agent: agentName(row.agentId) })}
+            </span>
+            <Button variant="link" className="task-launcher-link task-launcher-sign-in" onClick={() => signInFor(row.agentId, row.accountId)}>
+              {account ? t("launcher.signInTo", { account }) : t("launcher.signIn")}
             </Button>
-            <Button variant="link" className="task-launcher-link" onClick={doctor.refresh} disabled={doctor.loading}>
-              {t("doctor.recheck")}
+            <Button variant="link" className="task-launcher-link task-launcher-recheck" onClick={() => checkAgain(row.agentId, row.accountId)} disabled={checking || doctor.loading}>
+              {checking ? t("launcher.checkingSignIn") : t("doctor.recheck")}
             </Button>
           </div>
         );
+      }
       case "no-repo":
         return (
           <div className="task-launcher-block" data-kind={row.kind} key={key}>
@@ -915,8 +1315,17 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
         );
       case "not-git":
         return (
+          <div className="task-launcher-block" data-kind={row.kind} data-missing={row.missing ?? undefined} key={key}>
+            {row.missing === "missing" ? t("launcher.block.noFolder") : row.missing === "file" ? t("launcher.block.notAFolder") : t("launcher.block.notGit")}
+          </div>
+        );
+      case "no-commits":
+        return (
           <div className="task-launcher-block" data-kind={row.kind} key={key}>
-            {t("launcher.block.notGit")}
+            <span>{t("launcher.block.noCommits")}</span>
+            <Button variant="link" className="task-launcher-link task-launcher-use-current" onClick={() => setWhere("current-checkout")}>
+              {t("launcher.useCurrentCheckout")}
+            </Button>
           </div>
         );
       case "branch-exists":
@@ -938,6 +1347,7 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
                   if (!row.suggestion) return;
                   setBranch(row.suggestion);
                   setBranchEdited(true);
+                  focusTask();
                 }}
               >
                 {t("launcher.useBranch", { branch: row.suggestion })}
@@ -947,19 +1357,35 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
               <Button
                 variant="link"
                 className="task-launcher-link task-launcher-use-existing"
-                onClick={() => update({ where: { kind: "existing-branch", branch: row.existing } })}
+                onClick={() => {
+                  update({ where: { kind: "existing-branch", branch: row.existing } });
+                  focusTask();
+                }}
               >
                 {t("launcher.useExisting", { branch: row.existing })}
               </Button>
             )}
           </div>
         );
-      case "bad-branch":
+      case "bad-branch": {
+        const p = row.problem;
+        const text = !p
+          ? t("launcher.block.badBranch", { branch: row.branch || "—" })
+          : p.kind === "folder"
+            ? t("launcher.block.branchIsFolder", { branch: row.branch, existing: p.existing })
+            : p.kind === "under-branch"
+              ? t("launcher.block.branchUnderBranch", { branch: row.branch, existing: p.existing })
+              : p.kind === "dot-part"
+                ? t("launcher.block.branchDotPart")
+                : p.kind === "lock-part"
+                  ? t("launcher.block.branchLockPart")
+                  : t("launcher.block.branchTooLong", { max: p.max });
         return (
-          <div className="task-launcher-block" data-kind={row.kind} key={key}>
-            {t("launcher.block.badBranch", { branch: row.branch || "—" })}
+          <div className="task-launcher-block" data-kind={row.kind} data-problem={p?.kind} key={key}>
+            {text}
           </div>
         );
+      }
       case "low-disk":
         return (
           <div className="task-launcher-block" data-kind={row.kind} key={key}>
@@ -1006,15 +1432,23 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   const hasEffort = efforts.length > 0;
   const whereChipText =
     where.kind === "new-worktree"
-      ? t("launcher.whereChipWorktree", { branch: branch.trim() || taskBranch(task) })
+      ? t("launcher.whereChipWorktree", { branch: branch.trim() || taskBranch(task, fallbackId) })
       : where.kind === "existing-branch"
         ? t("launcher.whereChipExisting", { branch: where.branch || "—" })
         : t("launcher.whereChipCurrent", { branch: currentBranch || "HEAD" });
+  // The task runs in the project folder itself: said, in the danger colour.
+  const unisolated = !!choice && where.kind === "current-checkout";
 
+  /** A pick in an open chip menu closes it (see pickDone); the same control in + options leaves things be. */
+  const pickedInMenu = () => {
+    if (menu) pickDone();
+  };
   const setWhere = (kind: WhereKind) => {
     if (kind === "new-worktree") update({ where: { kind, baseBranch: where.kind === "new-worktree" ? where.baseBranch : "", branch: "" } });
     else if (kind === "existing-branch") update({ where: { kind, branch: where.kind === "existing-branch" ? where.branch : localBranches.find((b) => b !== currentBranch) ?? localBranches[0] ?? "" } });
     else update({ where: { kind } });
+    // An existing branch is picked next, in the same menu.
+    if (kind !== "existing-branch") pickedInMenu();
   };
 
   const baseOptions: SelectOption[] = [
@@ -1054,7 +1488,10 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
             aria-label={t("launcher.baseLabel")}
             value={where.baseBranch}
             options={baseOptions}
-            onChange={(v) => update({ where: { kind: "new-worktree", baseBranch: v, branch: "" } })}
+            onChange={(v) => {
+              update({ where: { kind: "new-worktree", baseBranch: v, branch: "" } });
+              pickedInMenu();
+            }}
           />
         </div>
       )}
@@ -1066,7 +1503,10 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
             aria-label={t("launcher.whereExisting")}
             value={where.branch}
             options={localBranches.map((b) => ({ value: b, label: b }))}
-            onChange={(v) => update({ where: { kind: "existing-branch", branch: v } })}
+            onChange={(v) => {
+              update({ where: { kind: "existing-branch", branch: v } });
+              pickedInMenu();
+            }}
           />
         </div>
       )}
@@ -1077,7 +1517,17 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
     <div className="task-launcher-approval" data-danger={danger ? "true" : "false"}>
       <div className="task-launcher-approval-modes" role="group" aria-label={t("launcher.approvalLabel")}>
         {agentCaps.approvalModes.map((m) =>
-          optionChip(m.id, m.id === choice.approvalModeId, () => update({ approvalModeId: m.id }), approvalLabel(choice.agentId, m.id), { "data-mode": m.id }, { danger: !!m.danger }),
+          optionChip(
+            m.id,
+            m.id === choice.approvalModeId,
+            () => {
+              update({ approvalModeId: m.id });
+              pickedInMenu();
+            },
+            approvalLabel(choice.agentId, m.id),
+            { "data-mode": m.id },
+            { danger: !!m.danger },
+          ),
         )}
       </div>
       <div className={`task-launcher-approval-note${danger ? " danger" : ""}`}>{approvalNote(choice.agentId, choice.approvalModeId)}</div>
@@ -1093,7 +1543,7 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   );
 
   const alsoSelects = (also: LaunchChoice) => {
-    const c = caps[also.agentId];
+    const c = capsOf(also.agentId, also.accountId);
     const alsoEfforts = effortsFor(c, also.modelId);
     return (
       <div className="task-launcher-also-fields">
@@ -1140,6 +1590,63 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   const appliedIndex = applied && applied.choice === choice ? presets.findIndex((p) => p.id === applied.id) : -1;
   const presetIndex =
     appliedIndex >= 0 ? appliedIndex : effective ? presets.findIndex((p) => sameCombo(rememberedForm(p.choice), rememberedForm(effective))) : -1;
+  // Saving a combination a preset already is: said ("Same as ⌘2 Plan first").
+  const sameAsIndex = saving !== null && effective ? presets.findIndex((p) => sameCombo(rememberedForm(p.choice), rememberedForm(effective))) : -1;
+  const sameAsPreset = sameAsIndex >= 0 ? { preset: presets[sameAsIndex], index: sameAsIndex } : null;
+  /** "Claude Code · Plan first", "Codex CLI · Read only · gpt-5": a combination in a few words. */
+  const comboSummary = (c: LaunchChoice) => {
+    const parts = [agentName(c.agentId)];
+    if (isAddedAccount(c.accountId)) parts.push(accountName(c.agentId, c.accountId));
+    parts.push(approvalLabel(c.agentId, c.approvalModeId));
+    if (c.modelId !== "default") parts.push(c.modelId);
+    return parts.join(" · ");
+  };
+  // The held account's row: what is wrong, and the two ways forward.
+  const holdRow = holdActive && accountHold && choice && (
+    <div className="task-launcher-block" data-kind="account-held" data-agent-id={accountHold.agentId} data-account-id={accountHold.was} key="account-held">
+      <span>
+        {(() => {
+          const account = accountName(accountHold.agentId, accountHold.was);
+          const fromPreset = accountHold.source !== "usual";
+          if (accountHold.gone) {
+            return fromPreset
+              ? t("launcher.block.presetAccountGone", { name: accountHold.source, account })
+              : t("launcher.block.usualAccountGone", { account });
+          }
+          return fromPreset
+            ? t("launcher.block.presetAccountSignedOut", { name: accountHold.source, account })
+            : t("launcher.block.usualAccountSignedOut", { account });
+        })()}
+      </span>
+      {!accountHold.gone && (
+        <Button variant="link" className="task-launcher-link task-launcher-sign-in" onClick={() => signInFor(accountHold.agentId, accountHold.was)}>
+          {t("launcher.signInTo", { account: accountName(accountHold.agentId, accountHold.was) })}
+        </Button>
+      )}
+      <Button
+        variant="link"
+        className="task-launcher-link task-launcher-use-default"
+        onClick={() => {
+          pickAccount(accountHold.now ?? "default");
+          focusTask();
+        }}
+      >
+        {accountHold.now && isAddedAccount(accountHold.now)
+          ? t("launcher.useAccountThisTime", { account: accountName(accountHold.agentId, accountHold.now) })
+          : t("launcher.useDefaultThisTime")}
+      </Button>
+      {!accountHold.gone && (
+        <Button
+          variant="link"
+          className="task-launcher-link task-launcher-recheck"
+          onClick={() => checkAgain(accountHold.agentId, accountHold.was)}
+          disabled={rechecking === accountHold.agentId}
+        >
+          {rechecking === accountHold.agentId ? t("launcher.checkingSignIn") : t("doctor.recheck")}
+        </Button>
+      )}
+    </div>
+  );
 
   const body = (
     <div className={`task-launcher${inline ? " task-launcher-inline" : ""}`} ref={sheetRef} onKeyDown={onSheetKey} data-ready={ready && choice ? "true" : "false"}>
@@ -1183,7 +1690,10 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
             variant="quiet"
             size="sm"
             className="task-launcher-save-preset"
-            onClick={() => setSaving(choice ? uniquePresetName(defaultPresetName(choice), presets) : "")}
+            onClick={() => {
+              setPresetError(null);
+              setSaving(choice ? uniquePresetName(defaultPresetName(choice), presets) : "");
+            }}
             disabled={!choice}
           >
             {t("launcher.saveAsPreset")}
@@ -1194,35 +1704,40 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
               size="sm"
               className="task-launcher-preset-name"
               aria-label={t("launcher.presetName")}
+              aria-invalid={presetError ? true : undefined}
+              aria-describedby={presetError ? "task-launcher-preset-error" : undefined}
               value={saving}
               autoFocus
-              onChange={(e) => setSaving(e.target.value)}
+              onChange={(e) => {
+                setSaving(e.target.value);
+                setPresetError(null);
+              }}
               onKeyDown={(e) => {
                 if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                   e.preventDefault();
                   e.stopPropagation();
-                  if (effective && saving.trim()) {
-                    void savePreset(saving, rememberedForm(effective));
-                    setSaving(null);
-                    requestAnimationFrame(() => taskRef.current?.focus());
-                  }
+                  void submitPresetForm();
                 }
               }}
             />
-            <Button
-              size="sm"
-              className="task-launcher-preset-save"
-              disabled={!saving.trim()}
-              onClick={() => {
-                if (effective) void savePreset(saving, rememberedForm(effective));
-                setSaving(null);
-              }}
-            >
+            <Button size="sm" className="task-launcher-preset-save" disabled={!saving.trim()} onClick={() => void submitPresetForm()}>
               {t("launcher.presetSave")}
             </Button>
-            <Button variant="quiet" size="sm" onClick={() => setSaving(null)}>
+            <Button variant="quiet" size="sm" className="task-launcher-preset-cancel" onClick={cancelPresetForm}>
               {t("launcher.cancel")}
             </Button>
+            {sameAsPreset && (
+              <span className="task-launcher-muted task-launcher-preset-same" data-preset-id={sameAsPreset.preset.id}>
+                {sameAsPreset.index < PRESET_SHORTCUTS
+                  ? t("launcher.presetSameAsKey", { key: fmt(`{mod}${sameAsPreset.index + 1}`), name: sameAsPreset.preset.name })
+                  : t("launcher.presetSameAs", { name: sameAsPreset.preset.name })}
+              </span>
+            )}
+          </span>
+        )}
+        {presetError && (saving !== null || !!suggest) && (
+          <span id="task-launcher-preset-error" className="task-launcher-preset-error" role="alert">
+            {presetError}
           </span>
         )}
       </div>
@@ -1235,44 +1750,62 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
             className="task-launcher-suggest-name"
             aria-label={t("launcher.presetName")}
             value={suggestName}
-            onChange={(e) => setSuggestName(e.target.value)}
+            onChange={(e) => {
+              setSuggestName(e.target.value);
+              setPresetError(null);
+            }}
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.nativeEvent.isComposing) {
                 e.preventDefault();
                 e.stopPropagation();
-                void savePreset(suggestName, suggest);
-                setSuggest(null);
+                // An empty name saves nothing and keeps the offer (as the disabled Save does).
+                void submitSuggestion();
               }
             }}
           />
-          <Button
-            size="sm"
-            className="task-launcher-suggest-save"
-            disabled={!suggestName.trim()}
-            onClick={() => {
-              void savePreset(suggestName, suggest);
-              setSuggest(null);
-            }}
-          >
+          <Button size="sm" className="task-launcher-suggest-save" disabled={!suggestName.trim()} onClick={() => void submitSuggestion()}>
             {t("launcher.presetSave")}
           </Button>
+          <Button variant="quiet" size="sm" className="task-launcher-suggest-dismiss" onClick={dismissSuggestion}>
+            {t("launcher.suggestDismiss")}
+          </Button>
+        </div>
+      )}
+
+      {otherUsual && (
+        <div className="task-launcher-note task-launcher-other-usual" role="status">
+          <span>{t("launcher.otherUsual", { repo: otherUsual.repo, combo: comboSummary(otherUsual.choice) })}</span>
           <Button
-            variant="quiet"
-            size="sm"
-            className="task-launcher-suggest-dismiss"
+            variant="link"
+            className="task-launcher-link task-launcher-use-usual"
             onClick={() => {
-              if (gitRoot) void backend.dismissSuggestion(suggest, gitRoot).catch(() => {});
-              setSuggest(null);
+              const usual = otherUsual.choice;
+              setOtherUsual(null);
+              const agentCapsNow = caps[usual.agentId];
+              applyStored(
+                agentCapsNow ? reconcileChoice(usual, agentCapsNow, usual.alsoOn ? caps[usual.alsoOn.agentId] ?? null : null) : { choice: usual, issues: [], launchable: true },
+                "usual",
+                true,
+              );
+              focusTask();
             }}
           >
-            {t("launcher.suggestDismiss")}
+            {t("launcher.useIt")}
           </Button>
         </div>
       )}
 
       {fallbacks && (
         <div className="task-launcher-fallback" role="alert" data-source={fallbacks.source}>
-          <span>{fallbacks.source === "usual" ? t("launcher.fallbackUsual") : fallbacks.source === "repo" ? t("launcher.fallbackRepo") : t("launcher.fallbackPreset", { name: fallbacks.source })}</span>
+          <span>
+            {fallbacks.source === "usual"
+              ? t("launcher.fallbackUsual")
+              : fallbacks.source === "repo"
+                ? t("launcher.fallbackRepo")
+                : fallbacks.source === "account"
+                  ? t("launcher.fallbackAccount", { account: choice ? accountName(choice.agentId, choice.accountId) : "" })
+                  : t("launcher.fallbackPreset", { name: fallbacks.source })}
+          </span>
           {!fallbacks.launchable && <span className="task-launcher-fallback-block">{t("launcher.fallbackNotLaunchable")}</span>}
           <ul>
             {fallbacks.list.map((f, i) => (
@@ -1308,8 +1841,8 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
               onChange={(e) => update({ extraArgs: e.target.value })}
             />
           )}
-          {menuChip("project", repoPath.trim() ? baseName(repoPath) : t("launcher.projectNone"))}
-          {menuChip("where", whereChipText)}
+          {menuChip("project", repoPath.trim() ? baseName(repoPath) : t("launcher.projectNone"), { danger: !!repoPath.trim() && gitRoot === null })}
+          {menuChip("where", whereChipText, { danger: unisolated })}
           {!isCustom &&
             menuChip("approval", approvalLabel(choice.agentId, choice.approvalModeId), {
               danger,
@@ -1350,27 +1883,44 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
           {t("launcher.dangerNotCarried", { mode: approvalLabel(choice.agentId, "bypassPermissions") })}
         </div>
       )}
+      {unisolated && (
+        <div className="task-launcher-danger-warning task-launcher-unisolated" role="note">
+          {t("launcher.unisolatedNote", { branch: currentBranch || "HEAD" })}
+        </div>
+      )}
 
       {choice && menu && (
         <div className="task-launcher-menu" data-menu={menu} ref={menuRef} onKeyDown={onMenuKeys} role="group" aria-label={t(`launcher.menu.${menu}`)}>
           {menu === "agent" && (
             <>
               <div className="task-launcher-menu-items">
-                {agents.map((a) => optionChip(a.id, a.id === choice.agentId, () => pickAgent(a.id), a.name, { "data-agent-id": a.id }, { note: agentNote(a.id) }))}
+                {agents.map((a) =>
+                  optionChip(
+                    a.id,
+                    a.id === choice.agentId,
+                    () => {
+                      pickAgent(a.id);
+                      pickDone();
+                    },
+                    a.name,
+                    { "data-agent-id": a.id },
+                    { note: agentNote(a.id) },
+                  ),
+                )}
               </div>
               <div className="task-launcher-menu-caption">{t("launcher.accountFor", { agent: agentName(choice.agentId) })}</div>
               <div className="task-launcher-menu-items">
-                {(agentCaps?.accounts ?? []).map((a) =>
+                {(caps[choice.agentId]?.accounts ?? agentCaps?.accounts ?? []).map((a) =>
                   optionChip(
                     a.id,
                     a.id === choice.accountId,
                     () => {
-                      update({ accountId: a.id });
-                      closeMenu();
+                      pickAccount(a.id);
+                      pickDone();
                     },
-                    a.id === "default" ? t("launcher.accountDefault") : a.label,
+                    accountLabel(caps[choice.agentId] ?? agentCaps, a.id),
                     { "data-account-id": a.id },
-                    { note: a.detail || (a.signedIn ? t("launcher.accountSignedIn") : t("launcher.accountSignedOut")) },
+                    { note: (a.id === "default" && !caps[choice.agentId]?.canAddAccount ? "" : a.detail) || (a.signedIn ? t("launcher.accountSignedIn") : t("launcher.accountSignedOut")) },
                   ),
                 )}
                 {onManageAccounts && (
@@ -1391,7 +1941,7 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
                     samePath(p.path, repoPath),
                     () => {
                       setRepoPath(p.path);
-                      closeMenu();
+                      pickDone();
                     },
                     p.name,
                     { "data-project-path": p.path, title: p.path },
@@ -1403,15 +1953,39 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
                 </Button>
               </div>
               <label className="task-launcher-inline-label" htmlFor="task-launcher-repo">{t("launcher.repoTyped")}</label>
-              <Input
-                id="task-launcher-repo"
-                code
-                className="task-launcher-repo"
-                value={repoPath}
-                spellCheck={false}
-                placeholder={t("launcher.repoPlaceholder")}
-                onChange={(e) => setRepoPath(e.target.value)}
-              />
+              {/* Enter here confirms the folder (it never launches): the menu closes, the task field has the keyboard. */}
+              <span className="task-launcher-repo-field" data-own-enter="true">
+                <Input
+                  id="task-launcher-repo"
+                  code
+                  className="task-launcher-repo"
+                  value={repoPath}
+                  spellCheck={false}
+                  placeholder={t("launcher.repoPlaceholder")}
+                  aria-describedby={resolvedPath || (repoPath.trim() && gitRoot === null) ? "task-launcher-repo-state" : undefined}
+                  onChange={(e) => setRepoPath(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      pickDone();
+                    }
+                  }}
+                />
+              </span>
+              {(resolvedPath || (repoPath.trim() && gitRoot === null)) && (
+                <div id="task-launcher-repo-state" className="task-launcher-muted task-launcher-repo-state" role="status">
+                  {resolvedPath ? t("launcher.repoResolved", { path: resolvedPath }) : null}
+                  {resolvedPath && gitRoot === null ? " · " : null}
+                  {gitRoot === null
+                    ? folder && !folder.exists
+                      ? t("launcher.block.noFolder")
+                      : folder && !folder.isDir
+                        ? t("launcher.block.notAFolder")
+                        : t("launcher.block.notGit")
+                    : null}
+                </div>
+              )}
             </>
           )}
           {menu === "where" && whereBlock}
@@ -1425,7 +1999,7 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
                     m.id === choice.modelId,
                     () => {
                       pickModel(m.id);
-                      closeMenu();
+                      pickDone();
                     },
                     m.id === "default" ? t("launcher.modelDefault") : m.label,
                     { "data-model-id": m.id, title: m.unavailableReason },
@@ -1442,16 +2016,27 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
                   ),
                 )}
               </div>
-              {agentCaps.modelSource === "free-text" && (
-                <Input
-                  size="sm"
-                  code
-                  className="task-launcher-model-text"
-                  aria-label={t("launcher.modelLabel")}
-                  placeholder={t("launcher.modelTyped")}
-                  value={choice.modelId === "default" ? "" : choice.modelId}
-                  onChange={(e) => update({ modelId: e.target.value.trim() || "default", effort: null })}
-                />
+              {(agentCaps.modelSource === "free-text" || agentCaps.acceptsTypedModel) && (
+                // Any model id the agent takes (a pinned version, a long-context variant); Enter confirms it.
+                <span className="task-launcher-model-field" data-own-enter="true">
+                  <Input
+                    size="sm"
+                    code
+                    className="task-launcher-model-text"
+                    aria-label={t("launcher.modelTypedLabel")}
+                    placeholder={MODEL_EXAMPLE[choice.agentId] ? t("launcher.modelTypedExample", { example: MODEL_EXAMPLE[choice.agentId] }) : t("launcher.modelTyped")}
+                    value={choice.modelId === "default" || agentCaps.models.some((m) => m.id === choice.modelId) ? "" : choice.modelId}
+                    spellCheck={false}
+                    onChange={(e) => update({ modelId: e.target.value.trim() || "default", effort: null })}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && !e.nativeEvent.isComposing && !e.metaKey && !e.ctrlKey) {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        pickDone();
+                      }
+                    }}
+                  />
+                </span>
               )}
               <div className="task-launcher-menu-caption">{t(`launcher.modelSource.${agentCaps.modelSource}`, { agent: agentName(choice.agentId), version: agentCaps.cliVersion ?? "" })}</div>
             </>
@@ -1464,7 +2049,7 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
                   choice.effort === null,
                   () => {
                     update({ effort: null });
-                    closeMenu();
+                    pickDone();
                   },
                   t("launcher.effortDefault"),
                   { "data-effort": "" },
@@ -1475,7 +2060,7 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
                     ef === choice.effort,
                     () => {
                       update({ effort: ef });
-                      closeMenu();
+                      pickDone();
                     },
                     ef,
                     { "data-effort": ef },
@@ -1629,9 +2214,50 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
         </div>
       )}
 
-      {(rows.length > 0 || noFirstPrompt.length > 0 || failed || validation || customMissing || capsError || (doctor.loading && !doctor.rows)) && (
-        <div className="task-launcher-rows">
+      <div className="task-launcher-preview" aria-live="polite">
+        <span className="task-launcher-preview-label">{t("launcher.previewLabel")}</span>
+        <span className="task-launcher-preview-line">
+          <code className="task-launcher-command" title={previewLine}>{previewLine}</code>
+          {contextNote && (
+            <span className="task-launcher-context-note" title={t("launcher.contextNoteTitle")}>
+              {t("launcher.contextNote")}
+            </span>
+          )}
+        </span>
+      </div>
+
+      {recents.length > 0 && (
+        <div className="task-launcher-recents">
+          <span>{t("launcher.recent")}</span>
+          {recents.map((r) => (
+            <Button
+              key={r}
+              size="sm"
+              className="task-launcher-recent"
+              onClick={() => {
+                setTask(r);
+                taskRef.current?.focus();
+              }}
+            >
+              {taskLabel(r, 32)}
+            </Button>
+          ))}
+        </div>
+      )}
+
+      {launched.length > 0 && (
+        <div className="task-launcher-launched" role="status" data-count={launched.length}>
+          {t("launcher.launchedCount", { count: launched.length, last: launched[launched.length - 1].label })}
+          {launched[launched.length - 1].queued && <span className="task-launcher-queued"> · {t("launcher.queued")}</span>}
+        </div>
+      )}
+
+      {/* What stops Launch stays next to it, in view however far the sheet scrolls. */}
+      <div className="task-launcher-dock">
+      {(rows.length > 0 || holdActive || noFirstPrompt.length > 0 || failed || validation || customMissing || capsError || (doctor.loading && !doctor.rows)) && (
+        <div className="task-launcher-rows" id="task-launcher-blocks">
           {doctor.loading && !doctor.rows && <div className="task-launcher-note">{t("doctor.checking")}</div>}
+          {holdRow}
           {rows.map(renderRow)}
           {capsError && (
             <div className="task-launcher-block" data-kind="caps-error" data-agent-id={capsError.agentId}>
@@ -1664,61 +2290,44 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
         </div>
       )}
 
-      <div className="task-launcher-preview" aria-live="polite">
-        <span className="task-launcher-preview-label">{t("launcher.previewLabel")}</span>
-        <code className="task-launcher-command" title={previewLine}>{previewLine}</code>
-      </div>
-
-      {recents.length > 0 && (
-        <div className="task-launcher-recents">
-          <span>{t("launcher.recent")}</span>
-          {recents.map((r) => (
+      {!(inline && controlRef) && (
+        <div className="task-launcher-footer">
+          {onOpenAdvanced ? (
+            <Button variant="quiet" className="task-launcher-advanced" onClick={onOpenAdvanced}>
+              {t("launcher.advanced", { shortcut: shortcutLabel("file.new-session-advanced") })}
+            </Button>
+          ) : (
+            <span />
+          )}
+          <div className="task-launcher-actions">
+            {!inline && onClose && (
+              <Button variant="quiet" className="task-launcher-cancel" onClick={close}>
+                {t("launcher.cancelEsc")}
+              </Button>
+            )}
+            {!inline && (
+              <Button
+                className="task-launcher-launch-next"
+                disabled={!canGo}
+                aria-describedby={!canGo && blocked ? "task-launcher-blocks" : undefined}
+                onClick={() => void launch(true)}
+              >
+                {t("launcher.launchNext", { shortcut: fmt("{mod}⏎") })}
+              </Button>
+            )}
+            {/* One primary per surface: in the welcome, its own Finish is the primary. */}
             <Button
-              key={r}
-              size="sm"
-              className="task-launcher-recent"
-              onClick={() => {
-                setTask(r);
-                taskRef.current?.focus();
-              }}
+              variant={inline ? "secondary" : "primary"}
+              className="task-launcher-launch"
+              disabled={!canGo}
+              aria-describedby={!canGo && blocked ? "task-launcher-blocks" : undefined}
+              onClick={() => void launch(false)}
             >
-              {taskLabel(r, 32)}
+              {launching ? t("launcher.launching") : t("launcher.launchEnter")}
             </Button>
-          ))}
+          </div>
         </div>
       )}
-
-      {launched.length > 0 && (
-        <div className="task-launcher-launched" role="status" data-count={launched.length}>
-          {t("launcher.launchedCount", { count: launched.length, last: launched[launched.length - 1].label })}
-          {launched[launched.length - 1].queued && <span className="task-launcher-queued"> · {t("launcher.queued")}</span>}
-        </div>
-      )}
-
-      <div className="task-launcher-footer">
-        {onOpenAdvanced ? (
-          <Button variant="quiet" className="task-launcher-advanced" onClick={onOpenAdvanced}>
-            {t("launcher.advanced", { shortcut: shortcutLabel("file.new-session-advanced") })}
-          </Button>
-        ) : (
-          <span />
-        )}
-        <div className="task-launcher-actions">
-          {!inline && onClose && (
-            <Button variant="quiet" className="task-launcher-cancel" onClick={close}>
-              {t("launcher.cancelEsc")}
-            </Button>
-          )}
-          {!inline && (
-            <Button className="task-launcher-launch-next" disabled={!canGo} onClick={() => void launch(true)}>
-              {t("launcher.launchNext", { shortcut: fmt("{mod}⏎") })}
-            </Button>
-          )}
-          {/* One primary per surface: in the welcome, its own Finish is the primary. */}
-          <Button variant={inline ? "secondary" : "primary"} className="task-launcher-launch" disabled={!canGo} onClick={() => void launch(false)}>
-            {launching ? t("launcher.launching") : t("launcher.launchEnter")}
-          </Button>
-        </div>
       </div>
     </div>
   );
@@ -1726,6 +2335,7 @@ export function TaskLauncher({ onLaunch, onClose, onStartOver, onOpenAdvanced, o
   if (inline) return body;
   return (
     <div
+      ref={sheetWrapRef}
       className="task-launcher-overlay"
       role="dialog"
       aria-modal="true"

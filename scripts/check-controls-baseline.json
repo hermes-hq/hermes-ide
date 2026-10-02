@@ -64,7 +64,6 @@
     "src/components/TemplatePicker.tsx": 14,
     "src/components/TodoPanel.tsx": 2,
     "src/components/TurnBar.tsx": 1,
-    "src/fleet/TaskQueueSection.tsx": 2,
     "src/plugins/PluginPanelHost.tsx": 1
   },
   "kit-override": {

@@ -51,6 +51,22 @@ pub struct HostFallback {
 #[derive(Default)]
 pub struct SessionHostState {
     pub quit_decision: Mutex<Option<bool>>,
+    /// Tasks waiting in the frontend's task queue (N22). They are kept for
+    /// the next start; a quit with some asks first, so the person is told.
+    pub queued_tasks: std::sync::atomic::AtomicUsize,
+}
+
+/// Whether a quit asks first: undecided, and an agent at work or tasks waiting.
+fn quit_asks(decision: Option<bool>, working: usize, queued: usize) -> bool {
+    decision.is_none() && (working > 0 || queued > 0)
+}
+
+/// The frontend's task queue changed: how many tasks wait now.
+#[tauri::command]
+pub fn session_host_set_queued(host_state: State<'_, SessionHostState>, count: usize) {
+    host_state
+        .queued_tasks
+        .store(count, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// Where the host's files live for one app instance.
@@ -356,10 +372,14 @@ pub fn on_exit_requested(app: &AppHandle) -> bool {
         let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
         working_hosted_sessions(&mgr)
     };
+    let queued = app
+        .try_state::<SessionHostState>()
+        .map(|s| s.queued_tasks.load(std::sync::atomic::Ordering::Relaxed))
+        .unwrap_or(0);
     match decision {
-        None if !working.is_empty() => {
+        None if quit_asks(decision, working.len(), queued) => {
             log::info!(
-                "[session-host] quit requested with {} working hosted session(s); asking",
+                "[session-host] quit requested with {} working hosted session(s) and {queued} queued task(s); asking",
                 working.len()
             );
             let _ = app.emit(QUIT_REQUESTED_EVENT, &working);
@@ -816,6 +836,18 @@ mod unix {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_quit_asks_while_agents_work_or_tasks_wait_until_answered() {
+        assert!(!quit_asks(None, 0, 0), "nothing to say: quit at once");
+        assert!(quit_asks(None, 1, 0), "an agent at work");
+        assert!(
+            quit_asks(None, 0, 2),
+            "tasks waiting in the queue, no agent at work"
+        );
+        assert!(!quit_asks(Some(true), 1, 2), "answered: keep running");
+        assert!(!quit_asks(Some(false), 0, 2), "answered: stop");
+    }
 
     #[test]
     fn paths_are_keyed_by_the_data_folder_and_short_enough_for_a_socket() {

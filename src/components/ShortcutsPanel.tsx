@@ -1,5 +1,5 @@
 import "../styles/components/ShortcutsPanel.css";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { fmt } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
 import { CloseButton } from "./ui";
@@ -31,10 +31,15 @@ export function ShortcutsPanel({ onClose }: ShortcutsPanelProps) {
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [onClose]);
+  // The panel takes the keyboard when it opens (Esc, scrolling), not the terminal behind it.
+  const panelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    panelRef.current?.focus();
+  }, []);
 
   return (
-    <div className="shortcuts-overlay" onClick={onClose} role="dialog" aria-modal="true">
-      <div className="shortcuts-panel" onClick={(e) => e.stopPropagation()}>
+    <div className="shortcuts-overlay" onClick={onClose} role="dialog" aria-modal="true" aria-label={t("shortcuts.title")}>
+      <div className="shortcuts-panel" ref={panelRef} tabIndex={-1} onClick={(e) => e.stopPropagation()}>
         <div className="shortcuts-header">
           <span className="shortcuts-title">{t("shortcuts.title")}</span>
           <CloseButton className="shortcuts-close" onClick={onClose} label={t("common.close")} />
