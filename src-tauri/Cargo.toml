@@ -104,7 +104,7 @@ lazy_static = "1"
 sysinfo = { version = "0.39.6", features = ["system", "user"] }
 git2 = { version = "0.20", features = ["vendored-openssl"] }
 ignore = "0.4"
-dirs = "6"
+dirs = "7"
 tokio = { version = "1", features = ["rt-multi-thread", "process", "io-util", "sync", "macros", "time"] }
 arboard = { version = "3", features = ["image-data"] }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp", "bmp", "tiff"] }
