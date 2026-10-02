@@ -488,7 +488,7 @@ export const dePack: LanguagePack = {
     "track.approvedToast": "{slug}: {from} freigegeben; nächste Phase {to}",
     "track.approvedToldToast": "{slug}: {from} freigegeben; {writer} soll jetzt {to} beginnen",
     "track.explainDone": "Alle Phasen sind fertig. Prüfe die Änderungen und lande das Feature.",
-    "track.explainWaiting": "{phase} wartet auf deine Prüfung. Lies {file} (o) oder bearbeite sie (⇧O). Dann schick deine Änderungen zurück (r), gib frei, um {next} zu starten ({shortcut}), oder überspringe (s).",
+    "track.explainWaiting": "{phase} wartet auf deine Prüfung. Lies {file} (o) oder bearbeite sie (⇧O). Dann schick deine Änderungen zurück (r), gib frei, um {next} zu starten ({shortcut}), oder überspringe (⇧S).",
     "track.explainApproved": "Freigegeben. Der Agent soll jetzt {phase} beginnen: Er schreibt die nächste Datei und hält wieder für deine Prüfung an.",
     "track.explainApprovedNoWriter": "Freigegeben. An diesem Worktree hängt kein Agent: Führe im Terminal des Agenten `hi phase` aus, um {phase} zu beginnen.",
     "track.explainWorking": "Der Agent schreibt {file} für {phase} (bisher {lines}/{cap} Zeilen). Wenn er sie übergibt, hält er an, und du prüfst sie hier.",

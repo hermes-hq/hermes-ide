@@ -518,7 +518,7 @@ const ENGLISH_PACK: LanguagePack = {
     "track.approvedToast": "{slug}: approved {from}; next phase {to}",
     "track.approvedToldToast": "{slug}: {from} approved; {writer} was told to start {to}",
     "track.explainDone": "Every phase is done. Review the changes and land the feature.",
-    "track.explainWaiting": "{phase} is ready for your review. Read {file} (o) or edit it (⇧O). Then send your edits back (r), approve to start {next} ({shortcut}), or skip (s).",
+    "track.explainWaiting": "{phase} is ready for your review. Read {file} (o) or edit it (⇧O). Then send your edits back (r), approve to start {next} ({shortcut}), or skip (⇧S).",
     "track.explainApproved": "Approved. The agent was told to start {phase}: it writes the next file and stops again for your review.",
     "track.explainApprovedNoWriter": "Approved. No agent is attached to this worktree: in the agent's terminal, run `hi phase` to start {phase}.",
     "track.explainWorking": "The agent is writing {file} for {phase} ({lines}/{cap} lines so far). When it hands it over it stops, and you review it here.",

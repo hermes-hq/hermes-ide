@@ -488,7 +488,7 @@ export const jaPack: LanguagePack = {
     "track.approvedToast": "{slug}: {from} を承認; 次のフェーズは {to}",
     "track.approvedToldToast": "{slug}: {from} を承認しました。{writer} に {to} の開始を伝えました",
     "track.explainDone": "すべてのフェーズが完了しました。変更を確認してフィーチャーをランドしてください。",
-    "track.explainWaiting": "{phase} がレビュー待ちです。{file} を読む（o）か編集します（⇧O）。そのあと修正を送り返す（r）、承認して {next} を始める（{shortcut}）、またはスキップします（s）。",
+    "track.explainWaiting": "{phase} がレビュー待ちです。{file} を読む（o）か編集します（⇧O）。そのあと修正を送り返す（r）、承認して {next} を始める（{shortcut}）、またはスキップします（⇧S）。",
     "track.explainApproved": "承認しました。エージェントに {phase} の開始を伝えました。次のファイルを書き、再びレビューのために止まります。",
     "track.explainApprovedNoWriter": "承認しました。この worktree にはエージェントが接続されていません。エージェントのターミナルで `hi phase` を実行して {phase} を始めてください。",
     "track.explainWorking": "エージェントが {phase} の {file} を書いています（現在 {lines}/{cap} 行）。渡し終えると止まるので、ここでレビューします。",

@@ -488,7 +488,7 @@ export const ruPack: LanguagePack = {
     "track.approvedToast": "{slug}: {from} одобрено; следующая фаза {to}",
     "track.approvedToldToast": "{slug}: {from} одобрено; {writer} попросили начать {to}",
     "track.explainDone": "Все фазы пройдены. Проверьте изменения и влейте функцию.",
-    "track.explainWaiting": "{phase} ждёт вашей проверки. Прочитайте {file} (o) или отредактируйте (⇧O). Затем отправьте правки обратно (r), одобрите, чтобы начать {next} ({shortcut}), или пропустите (s).",
+    "track.explainWaiting": "{phase} ждёт вашей проверки. Прочитайте {file} (o) или отредактируйте (⇧O). Затем отправьте правки обратно (r), одобрите, чтобы начать {next} ({shortcut}), или пропустите (⇧S).",
     "track.explainApproved": "Одобрено. Агента попросили начать {phase}: он пишет следующий файл и снова останавливается для вашей проверки.",
     "track.explainApprovedNoWriter": "Одобрено. К этому worktree не подключён агент: в терминале агента выполните `hi phase`, чтобы начать {phase}.",
     "track.explainWorking": "Агент пишет {file} для фазы {phase} (пока {lines}/{cap} строк). Когда он сдаст файл, он остановится, и вы проверите его здесь.",

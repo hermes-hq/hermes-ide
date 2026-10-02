@@ -622,7 +622,7 @@ export const hiPack: LanguagePack = {
     "track.approvedToast": "{slug}: {from} स्वीकृत; अगला चरण {to}",
     "track.approvedToldToast": "{slug}: {from} मंज़ूर; {writer} को {to} शुरू करने को कहा गया",
     "track.explainDone": "सभी चरण पूरे हो गए। बदलाव देखें और फ़ीचर लैंड करें।",
-    "track.explainWaiting": "{phase} आपकी समीक्षा के लिए तैयार है। {file} पढ़ें (o) या संपादित करें (⇧O)। फिर अपने बदलाव वापस भेजें (r), {next} शुरू करने के लिए मंज़ूरी दें ({shortcut}), या छोड़ें (s)।",
+    "track.explainWaiting": "{phase} आपकी समीक्षा के लिए तैयार है। {file} पढ़ें (o) या संपादित करें (⇧O)। फिर अपने बदलाव वापस भेजें (r), {next} शुरू करने के लिए मंज़ूरी दें ({shortcut}), या छोड़ें (⇧S)।",
     "track.explainApproved": "मंज़ूर। एजेंट को {phase} शुरू करने को कहा गया: वह अगली फ़ाइल लिखता है और आपकी समीक्षा के लिए फिर रुकता है।",
     "track.explainApprovedNoWriter": "मंज़ूर। इस वर्कट्री से कोई एजेंट जुड़ा नहीं है: एजेंट के टर्मिनल में {phase} शुरू करने के लिए `hi phase` चलाएँ।",
     "track.explainWorking": "एजेंट {phase} के लिए {file} लिख रहा है (अब तक {lines}/{cap} पंक्तियाँ)। सौंपने पर वह रुकता है, और आप यहाँ उसकी समीक्षा करते हैं।",

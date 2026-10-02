@@ -488,7 +488,7 @@ export const ptBRPack: LanguagePack = {
     "track.approvedToast": "{slug}: {from} aprovada; próxima fase {to}",
     "track.approvedToldToast": "{slug}: {from} aprovado; {writer} foi avisado para começar {to}",
     "track.explainDone": "Todas as fases foram concluídas. Revise as alterações e finalize a funcionalidade.",
-    "track.explainWaiting": "{phase} está pronta para sua revisão. Leia {file} (o) ou edite (⇧O). Depois envie suas edições de volta (r), aprove para começar {next} ({shortcut}) ou pule (s).",
+    "track.explainWaiting": "{phase} está pronta para sua revisão. Leia {file} (o) ou edite (⇧O). Depois envie suas edições de volta (r), aprove para começar {next} ({shortcut}) ou pule (⇧S).",
     "track.explainApproved": "Aprovado. O agente foi avisado para começar {phase}: ele escreve o próximo arquivo e para de novo para sua revisão.",
     "track.explainApprovedNoWriter": "Aprovado. Nenhum agente está ligado a este worktree: no terminal do agente, rode `hi phase` para começar {phase}.",
     "track.explainWorking": "O agente está escrevendo {file} para {phase} ({lines}/{cap} linhas até agora). Quando entregar, ele para e você revisa aqui.",

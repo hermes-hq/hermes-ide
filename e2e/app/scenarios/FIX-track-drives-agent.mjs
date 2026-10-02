@@ -149,7 +149,7 @@ try {
   assert(done.status === 0 && /Stop here and end your turn/.test(done.stdout), "hi phase done tells the agent to stop here");
   await bridge.waitFor("the gate in the panel", `const p = e2e.first('[data-testid="track-panel"]'); return p && p.dataset.gate === "waiting";`, { timeoutMs: 20_000 });
   said = await explain(bridge);
-  assert(/^questions is ready for your review\. Read questions\.md \(o\) or edit it \(⇧O\)\. Then send your edits back \(r\), approve to start research \(.+⏎\), or skip \(s\)\.$/.test(said), `"${said}"`);
+  assert(/^questions is ready for your review\. Read questions\.md \(o\) or edit it \(⇧O\)\. Then send your edits back \(r\), approve to start research \(.+⏎\), or skip \(⇧S\)\.$/.test(said), `"${said}"`);
   const size = await bridge.text('.track-phase[data-phase="questions"] .track-phase-lines');
   assert(size.trim() === "5/40", `the file's size against its cap (${size.trim()})`);
   await bridge.screenshot(join(evidenceDir, "03-ready-for-review.png"));

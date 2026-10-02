@@ -488,7 +488,7 @@ export const esPack: LanguagePack = {
     "track.approvedToast": "{slug}: {from} aprobada; siguiente fase {to}",
     "track.approvedToldToast": "{slug}: {from} aprobado; se pidió a {writer} que empiece {to}",
     "track.explainDone": "Todas las fases están hechas. Revisa los cambios y aterriza la funcionalidad.",
-    "track.explainWaiting": "{phase} está lista para tu revisión. Lee {file} (o) o edítalo (⇧O). Después envía tus cambios (r), aprueba para empezar {next} ({shortcut}) u omítela (s).",
+    "track.explainWaiting": "{phase} está lista para tu revisión. Lee {file} (o) o edítalo (⇧O). Después envía tus cambios (r), aprueba para empezar {next} ({shortcut}) u omítela (⇧S).",
     "track.explainApproved": "Aprobado. Se pidió al agente que empiece {phase}: escribe el siguiente archivo y vuelve a detenerse para tu revisión.",
     "track.explainApprovedNoWriter": "Aprobado. No hay ningún agente en este worktree: en la terminal del agente, ejecuta `hi phase` para empezar {phase}.",
     "track.explainWorking": "El agente está escribiendo {file} para {phase} ({lines}/{cap} líneas por ahora). Cuando lo entregue se detendrá y lo revisarás aquí.",

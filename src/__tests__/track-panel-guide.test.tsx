@@ -84,7 +84,7 @@ describe("Track panel: what is happening, what you do next", () => {
   it("at the gate: read, edit, send edits, approve or skip; approving tells the agent to run `hi phase`", async () => {
     feature("questions", "waiting", [{ name: "questions.md", lines: 9 }]);
     const sent = show(agent());
-    expect(explain()).toMatch(/^questions is ready for your review\. Read questions\.md \(o\) or edit it \(⇧O\)\. Then send your edits back \(r\), approve to start research \(.+⏎\), or skip \(s\)\.$/);
+    expect(explain()).toMatch(/^questions is ready for your review\. Read questions\.md \(o\) or edit it \(⇧O\)\. Then send your edits back \(r\), approve to start research \(.+⏎\), or skip \(⇧S\)\.$/);
     await act(async () => {
       fireEvent.click(document.querySelector(".track-approve") as HTMLElement);
     });
@@ -97,6 +97,11 @@ describe("Track panel: what is happening, what you do next", () => {
     const sent = show(agent());
     await act(async () => {
       fireEvent.click(document.querySelector(".track-skip") as HTMLElement);
+    });
+    // A skip asks first (QA-review-8); confirming it tells the agent.
+    expect(sent).toEqual([]);
+    await act(async () => {
+      fireEvent.click(document.querySelector("button.track-skip-confirm") as HTMLElement);
     });
     expect(sent[0][1]).toContain("questions skipped by the person. Run `hi phase` now");
   });

@@ -488,7 +488,7 @@ export const frPack: LanguagePack = {
     "track.approvedToast": "{slug} : {from} approuvée ; phase suivante {to}",
     "track.approvedToldToast": "{slug} : {from} approuvé ; {writer} a été invité à commencer {to}",
     "track.explainDone": "Toutes les phases sont terminées. Relisez les changements et intégrez la fonctionnalité.",
-    "track.explainWaiting": "{phase} attend votre relecture. Lisez {file} (o) ou modifiez-le (⇧O). Puis renvoyez vos modifications (r), approuvez pour commencer {next} ({shortcut}) ou passez (s).",
+    "track.explainWaiting": "{phase} attend votre relecture. Lisez {file} (o) ou modifiez-le (⇧O). Puis renvoyez vos modifications (r), approuvez pour commencer {next} ({shortcut}) ou passez (⇧S).",
     "track.explainApproved": "Approuvé. L'agent a été invité à commencer {phase} : il écrit le fichier suivant et s'arrête de nouveau pour votre relecture.",
     "track.explainApprovedNoWriter": "Approuvé. Aucun agent n'est rattaché à ce worktree : dans le terminal de l'agent, lancez `hi phase` pour commencer {phase}.",
     "track.explainWorking": "L'agent écrit {file} pour {phase} ({lines}/{cap} lignes pour l'instant). Quand il le remet, il s'arrête et vous le relisez ici.",

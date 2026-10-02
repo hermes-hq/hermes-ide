@@ -488,7 +488,7 @@ export const zhCNPack: LanguagePack = {
     "track.approvedToast": "{slug}:已批准 {from};下一阶段 {to}",
     "track.approvedToldToast": "{slug}：已批准 {from}；已通知 {writer} 开始 {to}",
     "track.explainDone": "所有阶段都已完成。请审阅更改并合入该功能。",
-    "track.explainWaiting": "{phase} 等待你的审阅。阅读 {file}（o）或编辑它（⇧O）。然后发回你的修改（r）、批准以开始 {next}（{shortcut}），或跳过（s）。",
+    "track.explainWaiting": "{phase} 等待你的审阅。阅读 {file}（o）或编辑它（⇧O）。然后发回你的修改（r）、批准以开始 {next}（{shortcut}），或跳过（⇧S）。",
     "track.explainApproved": "已批准。已通知代理开始 {phase}：它会写下一个文件，然后再次停下等你审阅。",
     "track.explainApprovedNoWriter": "已批准。此工作树没有关联的代理：请在代理的终端中运行 `hi phase` 来开始 {phase}。",
     "track.explainWorking": "代理正在为 {phase} 编写 {file}（目前 {lines}/{cap} 行）。交付后它会停下，你在这里审阅。",
