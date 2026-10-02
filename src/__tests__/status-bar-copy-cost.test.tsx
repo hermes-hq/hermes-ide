@@ -62,7 +62,10 @@ function copyCost(): string {
   act(() => h.handler?.("status.copy-cost"));
   expect(writeText).toHaveBeenCalledTimes(1);
   const copied = writeText.mock.calls[0][0];
-  expect(copied).toBe((cost as HTMLElement).textContent);
+  // What is copied is the amount the bar shows; the bar says what it adds up.
+  expect(copied).toBe(cost.querySelector(".status-bar-cost-amount")?.textContent);
+  expect(cost.textContent).toBe(`Open sessions: ${copied}`);
+  expect((cost as HTMLElement).title.split("\n")[0]).toBe("Covers open sessions only");
   return copied;
 }
 

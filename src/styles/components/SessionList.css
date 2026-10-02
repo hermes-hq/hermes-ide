@@ -54,7 +54,11 @@
   cursor: pointer;
   transition: background var(--dur-quick) var(--ease-out-soft);
   position: relative;
+  /* clip, not hidden: a hidden box can still be scrolled (a focused or
+   * scrolled-into-view child moved the whole row's text left). Engines
+   * without clip keep hidden. */
   overflow: hidden;
+  overflow: clip;
 }
 
 /* Hover, the current row's fill and its brass rail come from the row's
@@ -416,6 +420,25 @@
   gap: var(--space-2);
   align-items: center;
   margin-top: var(--space-1);
+  /* Inside the row, never past its edge: status, memory and age first; the
+   * spend (last) moves to a second line when the row is too narrow, and is
+   * cut with an ellipsis only when it alone is wider than the row (the
+   * line's tooltip then has all of it, fillCutLineTitle). */
+  flex-wrap: wrap;
+  row-gap: 0;
+  min-width: 0;
+  overflow: hidden;
+  overflow: clip;
+  white-space: nowrap;
+}
+.session-item-meta > * { flex-shrink: 0; }
+.session-item-meta > .session-spend,
+.session-item-meta > .session-cap-reached {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 /* The agent (and its model): plain metadata in the row's ink. */
@@ -957,7 +980,8 @@
   transition: opacity 0.12s, color 0.12s, border-color 0.12s;
 }
 
-.session-item-wrapper:hover .session-item-project-assign {
+.session-item-wrapper:hover .session-item-project-assign,
+.session-item-project-assign:focus-visible {
   opacity: 1;
 }
 

@@ -2040,6 +2040,10 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "feature_flag_overrides",
     // Away notifications (N16): webhook / ntfy / Telegram address
     "away_notify_url",
+    // ...how long a blocked agent waits while Hermes is in front of you
+    // ("0" | "120" | "600" seconds), and whether messages name sessions
+    "away_notify_delay",
+    "away_notify_names",
     // Fleet controls (2.0: spend caps and the task queue — see src/fleet/)
     "fleet_spend_cap_session_usd",
     "fleet_spend_cap_feature_usd",

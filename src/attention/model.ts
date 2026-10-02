@@ -5,18 +5,26 @@
 // so the order ⌘I visits sessions, what the badge counts and which section
 // an item sits in are table-tested without React or Tauri.
 //
-// Two sections:
-//   Blocked on you — every kind except "ready": an approval, a question, a
-//                    gate, an error, a limit. The badge counts these.
+// Three sections:
+//   Blocked on you — an agent's item of every kind except "ready": an
+//                    approval, a question, a gate, an error, a limit.
+//   Hermes notices — the same kinds raised by Hermes itself, with no session
+//                    (the disk guard, an away message that could not be
+//                    sent). Listed apart and never counted as agents.
 //   Ready for you  — "ready": an agent finished and you have not looked.
 //
-// Both are oldest first. A muted session's items stay listed (marked muted)
-// but are left out of the badge count, the ⌘I cycle and every notification.
+// The badge, the dock and ⌘I count the same thing: agents (sessions) blocked
+// on you, however many items each has. All sections are oldest first. A
+// muted session's items stay listed (marked muted) but are left out of the
+// badge count, the ⌘I cycle and every notification.
 
 import type { InboxItem, InboxKind } from "../agent/contract/inbox";
 import type { AgentStatusKind } from "../agent/contract/status";
 
 export type AttentionSection = "blocked" | "ready";
+
+/** Where an item is listed: an agent's Blocked on you item, a Hermes notice, or Ready for you. */
+export type InboxGroup = AttentionSection | "notices";
 
 /** How long M mutes a session. */
 export const MUTE_DURATION_MS = 60 * 60 * 1000;
@@ -58,25 +66,42 @@ function byAge(a: InboxItem, b: InboxItem): number {
 }
 
 export interface AttentionGroups {
+  /** Agents' items Blocked on you. */
   readonly blocked: readonly InboxItem[];
+  /** Hermes's own notices (no session). */
+  readonly notices: readonly InboxItem[];
   readonly ready: readonly InboxItem[];
 }
 
-/** Items split into the two sections, each oldest first (stable for ties). */
-export function groupInbox(items: readonly InboxItem[]): AttentionGroups {
-  const blocked: InboxItem[] = [];
-  const ready: InboxItem[] = [];
-  for (const item of items) (sectionOf(item.kind) === "ready" ? ready : blocked).push(item);
-  return { blocked: blocked.sort(byAge), ready: ready.sort(byAge) };
+/** The group an item is listed in. */
+export function groupOf(item: InboxItem): InboxGroup {
+  if (sectionOf(item.kind) === "ready") return "ready";
+  return item.sessionId === null ? "notices" : "blocked";
 }
 
-/** What the title-bar badge and the dock badge show: open, unmuted Blocked on you items. */
+/** Items split into the three groups, each oldest first (stable for ties). */
+export function groupInbox(items: readonly InboxItem[]): AttentionGroups {
+  const groups: Record<InboxGroup, InboxItem[]> = { blocked: [], notices: [], ready: [] };
+  for (const item of items) groups[groupOf(item)].push(item);
+  return { blocked: groups.blocked.sort(byAge), notices: groups.notices.sort(byAge), ready: groups.ready.sort(byAge) };
+}
+
+/**
+ * What the title-bar badge and the dock badge show: how many agents are
+ * blocked on you (unmuted), the same sessions ⌘I visits.
+ */
 export function blockedCount(items: readonly InboxItem[], mutes: MuteMap, now: number): number {
-  let n = 0;
-  for (const item of items) {
-    if (sectionOf(item.kind) === "blocked" && !isMuted(mutes, item.sessionId, now)) n++;
-  }
-  return n;
+  return blockedSessionOrder(items, mutes, now).length;
+}
+
+/** Hermes notices: open Blocked on you items with no session. */
+export function noticeCount(items: readonly InboxItem[]): number {
+  return groupInbox(items).notices.length;
+}
+
+/** How many distinct sessions a list of items belongs to. */
+export function sessionCount(items: readonly InboxItem[]): number {
+  return new Set(items.flatMap((i) => (i.sessionId === null ? [] : [i.sessionId]))).size;
 }
 
 /**
@@ -110,8 +135,8 @@ export function nextBlockedSession(
   return order[(i + 1) % order.length];
 }
 
-/** The list the inbox renders, top to bottom: Blocked on you, then Ready for you. */
+/** The list the inbox renders, top to bottom: Blocked on you, Hermes notices, Ready for you. */
 export function inboxRows(items: readonly InboxItem[]): InboxItem[] {
-  const { blocked, ready } = groupInbox(items);
-  return [...blocked, ...ready];
+  const { blocked, notices, ready } = groupInbox(items);
+  return [...blocked, ...notices, ...ready];
 }
