@@ -281,8 +281,11 @@ fn eval_js(app: &AppHandle, label: &str, script: &str, timeout: Duration) -> Res
         script = script
     );
 
-    let started = eval_once(&window, kickoff, Duration::from_secs(5).min(timeout))
-        .map_err(|e| format!("{e}; {}", who_is_busy(app)))?;
+    // The whole timeout, not less: a page busy for a few seconds (the first
+    // terminal on a cold Linux runner) still answers within what the caller
+    // allowed.
+    let started =
+        eval_once(&window, kickoff, timeout).map_err(|e| format!("{e}; {}", who_is_busy(app)))?;
     if started.as_str() != Some("started") {
         return Err(format!(
             "script did not start (syntax error, or the page is still loading); webview returned: {}",
