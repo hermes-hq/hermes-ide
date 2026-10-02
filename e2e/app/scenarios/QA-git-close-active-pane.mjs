@@ -32,7 +32,13 @@ try {
   await bridge.click(`.session-item[data-session-item-id="${B}"]`);
   await bridge.waitFor("B in front", `return e2e.first(".split-pane-label > span")?.textContent === "B shell";`);
   await bridge.clickWhenReady(`const row = document.querySelector('.session-item[data-session-item-id="${B}"]'); const b = [...row.querySelectorAll("button")].find((b) => /close/i.test((b.getAttribute("aria-label") || "") + b.className + (b.title || ""))); return e2e.click(e2e.must(b, "the row's close button"));`);
-  await bridge.clickWhenReady(`const b = e2e.first(".close-dialog .close-dialog-btn-confirm"); return b ? e2e.click(b) : false;`, { timeoutMs: 10_000 }).catch(() => log("  (no confirmation asked)"));
+  // The dialog comes after the close checks (the session's projects, its
+  // worktree): wait for it rather than look once.
+  const asked = await bridge
+    .waitFor("the close confirmation", `return !!e2e.first(".close-dialog .close-dialog-btn-confirm") || !document.querySelector('.session-item[data-session-item-id="${B}"]');`, { timeoutMs: 10_000 })
+    .then(() => bridge.eval(`const b = e2e.first(".close-dialog .close-dialog-btn-confirm"); return b ? e2e.click(b) : false;`))
+    .catch(() => false);
+  if (!asked) log("  (no confirmation asked)");
   await bridge.waitFor("B gone", `return !document.querySelector('.session-item[data-session-item-id="${B}"]');`, { timeoutMs: 15_000 });
   await sleep(1500);
   const seen = await bridge.eval(`return {
