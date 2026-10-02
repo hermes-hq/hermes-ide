@@ -176,6 +176,13 @@ try {
     return info && info.opened && lines.some((l) => l.trim().length > 0);
   `, { timeoutMs: 30_000 });
   await sleep(1500); // let the shell finish starting up
+  if (platform() === "win32") {
+    // PowerShell writes its history prediction into the line after the
+    // cursor ("h" shows "hi run …" from an earlier scenario's launch), so
+    // the typed text is never at the end of the line. Turn it off.
+    await bridge.typeInTerminal(sessionId, "Set-PSReadLineOption -PredictionSource None -ErrorAction SilentlyContinue; Clear-Host\r");
+    await sleep(2000);
+  }
 
   log("step 3: run the foreground check back to back while typing, one key at a time");
   await bridge.eval(`

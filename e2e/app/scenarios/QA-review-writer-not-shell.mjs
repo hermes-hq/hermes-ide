@@ -16,6 +16,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { registryPath } from "../cap-steps.mjs";
 import { launchApp } from "../harness.mjs";
 import { HI, L, fakeAgents, launchTask, mkRepo, mkWork, onWindows, runScenario, sessionCwd, sleep } from "../review-steps.mjs";
 import { rmSync } from "node:fs";
@@ -24,12 +25,18 @@ await runScenario("QA-review-writer-not-shell", async ({ evidenceDir, log, check
   const work = mkWork("writer");
   const { repo } = mkRepo(join(work, "demo-repo"), { "math.js": "export const sub = (a, b) => a - b;\n" });
   const fake = fakeAgents(work);
+  // Windows terminals rebuild PATH from the registry (see N12): the fake
+  // agents must be on it there too (CI runners only).
+  const undoPath = registryPath(fake, log);
   const env = { ...fake.env, ...(process.env.HERMES_E2E_FREE_SPACE_BYTES ? { HERMES_E2E_FREE_SPACE_BYTES: process.env.HERMES_E2E_FREE_SPACE_BYTES } : {}) };
   const app = await launchApp(
     onWindows
       ? { runDir: join(evidenceDir, "run-1"), log, home: "real", resetData: true, flagDefaults: null, env }
       : { runDir: join(evidenceDir, "run-1"), log, home: "private", homeDir: join(work, "home"), flagDefaults: null, env },
-  );
+  ).catch((e) => {
+    undoPath?.();
+    throw e;
+  });
   try {
     const { bridge } = app;
     await L.completeTaskWelcome(bridge, repo);
@@ -68,6 +75,7 @@ await runScenario("QA-review-writer-not-shell", async ({ evidenceDir, log, check
     check(prompts.some((p) => /hermes review/.test(p)), "the agent received the review line");
   } finally {
     if (app.isRunning()) await app.stop();
+    undoPath?.();
     rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
   }
 });

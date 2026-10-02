@@ -10,7 +10,7 @@
 
 import { join } from "node:path";
 import { launcherState, openLauncher, pressKeyOnFocus, typeInto, waitLaunchEnabled, waitLauncherClosed } from "../launcher-steps.mjs";
-import { runLauncherQa, sleep } from "../qa-launcher-steps.mjs";
+import { launchedSince, runLauncherQa, sleep } from "../qa-launcher-steps.mjs";
 
 await runLauncherQa("QA-launcher-same-task-twice", async ({ bridge, fx, log, check, evidenceDir }) => {
   await openLauncher(bridge);
@@ -30,8 +30,7 @@ await runLauncherQa("QA-launcher-same-task-twice", async ({ bridge, fx, log, che
   check(!st.launchDisabled && st.blocks.length === 0, "the same task again is launchable without typing a branch name");
   const before = fx.records().length;
   await pressKeyOnFocus(bridge, "Enter");
-  await sleep(3000);
-  check(fx.records().length > before, "Enter launches it");
+  check(await launchedSince(fx, before), "Enter launches it");
   check(fx.worktrees().some((w) => w.branch === "hermes/fix-this-test-2"), "on hermes/fix-this-test-2");
   await bridge.screenshot(join(evidenceDir, "01-second.png"));
 
