@@ -12,7 +12,7 @@ import { render, cleanup, act, fireEvent, screen, within } from "@testing-librar
 import "@testing-library/jest-dom/vitest";
 
 const h = vi.hoisted(() => ({
-  setAttentionBadge: vi.fn(async (_count: number) => "dock-badge"),
+  setAttentionBadge: vi.fn(async (_count: number, _notices?: number) => "dock-badge"),
   setKeepAwake: vi.fn(async (_active: boolean) => "caffeinate"),
   sendAwayNotification: vi.fn(async (_payload: unknown) => ({ outcome: "sent", status: 200, target: "webhook" })),
   notifyAttention: vi.fn((_title: string, _body: string) => true),
@@ -133,14 +133,14 @@ describe("F12 attention center", () => {
     clock += 1_000;
     status("A", "plan_ready");
     expect(badge()).toHaveAttribute("data-count", "3");
-    expect(h.setAttentionBadge).toHaveBeenLastCalledWith(3);
+    expect(h.setAttentionBadge).toHaveBeenLastCalledWith(3, 0);
 
     for (let i = 0; i < 4; i++) pressNext();
     expect(onJump.mock.calls.map((c) => c[0])).toEqual(["B", "C", "A", "B"]);
 
     status("B", "working");
     expect(badge()).toHaveAttribute("data-count", "2");
-    expect(h.setAttentionBadge).toHaveBeenLastCalledWith(2);
+    expect(h.setAttentionBadge).toHaveBeenLastCalledWith(2, 0);
   });
 
   it("the inbox is a listbox driven by the keyboard: groups, order, peek, mute, jump", () => {
@@ -218,7 +218,7 @@ describe("F12 attention center", () => {
     expect(list).toHaveAttribute("aria-activedescendant", options()[1].id);
   });
 
-  it("never notifies for the session you look at in a focused window; others notify once and go away minimal", () => {
+  it("no OS notification for the session you look at in a focused window; others notify once and go away minimal", () => {
     rememberUserLabel("B", "bravo-task");
     setup("A");
     setWindowFocusOverride(true);
@@ -231,12 +231,14 @@ describe("F12 attention center", () => {
       ["A", "suppressed-focused"],
       ["B", "sent"],
     ]);
-    // Hermes is in front of the person: B's away message waits (2 min by
-    // default) and goes once the window loses the focus.
+    // Hermes is in front of the person: the away messages wait (2 min by
+    // default) and go once the window loses the focus: B's, and A's too (a
+    // focused window on A did not mean someone was sitting at it).
     expect(h.sendAwayNotification).not.toHaveBeenCalled();
     act(() => setWindowFocusOverride(false));
-    expect(h.sendAwayNotification).toHaveBeenCalledTimes(1);
-    const payload = h.sendAwayNotification.mock.calls[0][0] as Record<string, string>;
+    expect(h.sendAwayNotification).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(h.sendAwayNotification.mock.calls)).not.toMatch(/zebra|otter|walrus|export const/);
+    const payload = h.sendAwayNotification.mock.calls.map((c) => c[0] as Record<string, string>).find((p) => p.task === "bravo-task")!;
     expect(Object.keys(payload).sort()).toEqual(["agent", "state", "task", "where"]);
     expect(payload.task).toBe("bravo-task");
     expect(payload.state).toBe("needs_approval");
@@ -580,7 +582,7 @@ describe("what the counts count (LEAD-07) and ⌘I with nothing waiting (LEAD-12
     expect(badge()).toHaveAttribute("data-count", "2");
     expect(badge()).toHaveAttribute("data-notices", "1");
     expect(badge()).toHaveAccessibleName("Attention inbox: 2 agents blocked on you · Hermes · 1 notice");
-    expect(h.setAttentionBadge).toHaveBeenLastCalledWith(2);
+    expect(h.setAttentionBadge).toHaveBeenLastCalledWith(2, 1);
     pressNext();
     expect(document.querySelector(".attention-position")?.getAttribute("data-total")).toBe("2");
 
@@ -588,9 +590,59 @@ describe("what the counts count (LEAD-07) and ⌘I with nothing waiting (LEAD-12
     const list = screen.getByRole("listbox", { name: "Attention inbox" });
     const groups = within(list).getAllByRole("group");
     expect(groups.map((g) => g.getAttribute("data-section"))).toEqual(["blocked", "notices"]);
-    expect(groups[0].querySelector(".attention-group-title")?.textContent).toBe("Blocked on you (2)");
+    expect(groups[0].querySelector(".attention-group-title")?.textContent).toBe("Blocked on you · 2 agents");
     expect(groups[1].querySelector(".attention-group-title")?.textContent).toBe("Hermes · 1 notice");
     expect(within(groups[1]).getAllByRole("option").map((o) => o.getAttribute("data-session-id"))).toEqual([""]);
+  });
+
+  it("a Hermes notice alone still marks the badge and the dock, and ⌘I opens the inbox on it", () => {
+    const { badge, onJump } = setup("D");
+    let notice: ReturnType<typeof raiseInboxItem> | undefined;
+    act(() => {
+      notice = raiseInboxItem({ kind: "error", sessionId: null, detail: "Only 2 GB left", source: "worktree" });
+    });
+    expect(badge()).toHaveAttribute("data-count", "0");
+    expect(badge()).toHaveAttribute("data-notices", "1");
+    expect(badge()).toHaveClass("attention-badge-hot");
+    expect(badge().querySelector(".attention-badge-count")?.textContent).toBe("!");
+    expect(h.setAttentionBadge).toHaveBeenLastCalledWith(0, 1);
+
+    pressNext();
+    expect(onJump).not.toHaveBeenCalled();
+    expect(document.querySelector(".attention-position")).toBeNull();
+    const list = screen.getByRole("listbox", { name: "Attention inbox" });
+    expect(within(list).getByRole("option", { selected: true })).toHaveAttribute("data-item-id", notice!.id);
+
+    // Dismissed (Enter on a notice): a quiet zero, the dock cleared.
+    fireEvent.keyDown(list, { key: "Enter" });
+    expect(badge()).not.toHaveClass("attention-badge-hot");
+    expect(badge().querySelector(".attention-badge-count")?.textContent).toBe("0");
+    expect(h.setAttentionBadge).toHaveBeenLastCalledWith(0, 0);
+  });
+
+  it("an agent and a notice: the badge shows the agent count, ⌘I goes to the agent", () => {
+    const { badge, onJump } = setup("D");
+    status("A", "needs_approval");
+    act(() => {
+      raiseInboxItem({ kind: "error", sessionId: null, detail: "Only 2 GB left", source: "worktree" });
+    });
+    expect(badge().querySelector(".attention-badge-count")?.textContent).toBe("1");
+    expect(h.setAttentionBadge).toHaveBeenLastCalledWith(1, 1);
+    pressNext();
+    expect(onJump).toHaveBeenLastCalledWith("A");
+  });
+
+  it("one agent with two requests: the header counts one agent", () => {
+    setup("D");
+    status("A", "needs_approval");
+    act(() => {
+      raiseInboxItem({ kind: "gate", sessionId: "A", detail: "Plan ready", source: "track" });
+    });
+    pressInbox();
+    const list = screen.getByRole("listbox", { name: "Attention inbox" });
+    const group = within(list).getAllByRole("group")[0];
+    expect(group.querySelector(".attention-group-title")?.textContent).toBe("Blocked on you · 1 agent");
+    expect(within(group).getAllByRole("option")).toHaveLength(2);
   });
 
   it("one agent reads in the singular", () => {

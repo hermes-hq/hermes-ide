@@ -130,15 +130,23 @@ describe("the last message and Send test message", () => {
   });
 
   it("saves a typed address before testing it, and cannot test an empty one", async () => {
-    setup("");
+    const { onSave } = setup("");
     const button = screen.getByRole("button", { name: "Send test message" });
     expect(button).toBeDisabled();
     const input = document.getElementById("away-notify-url") as HTMLInputElement;
     fireEvent.focus(input);
     fireEvent.change(input, { target: { value: URL } });
+    let stored: () => void = () => {};
+    onSave.mockImplementationOnce(() => new Promise<void>((done) => (stored = done)));
     fireEvent.click(screen.getByRole("button", { name: "Send test message" }));
     await flush();
-    expect(h.setSetting).toHaveBeenCalledWith("away_notify_url", URL);
+    // Saved once, through Settings; the test waits until it is stored.
+    expect(onSave).toHaveBeenCalledTimes(1);
+    expect(onSave).toHaveBeenCalledWith("away_notify_url", URL);
+    expect(h.setSetting).not.toHaveBeenCalled();
+    expect(h.send).not.toHaveBeenCalled();
+    stored();
+    await flush();
     expect(h.send).toHaveBeenCalledTimes(1);
   });
 });

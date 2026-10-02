@@ -346,14 +346,15 @@ describe("notifier", () => {
     expect(n.log().map((e) => e.decision)).toEqual(["sent", "sent"]);
   });
 
-  it("never notifies for the session you are looking at in a focused window", () => {
+  it("shows no OS notification for the session you are looking at in a focused window", () => {
     const { n, os, away, look } = setup();
     look("A", true);
     raiseInboxItem({ kind: "blocked", sessionId: "A", detail: "x", source: "status" });
     const b = raiseInboxItem({ kind: "blocked", sessionId: "B", detail: "y", source: "status" });
     n.update(listInboxItems());
     expect(os).toEqual([b.id]);
-    expect(away.map((p) => p.task)).toEqual(["task-B"]);
+    // Its away message follows the delay like any other (Immediately here).
+    expect(away.map((p) => p.task)).toEqual(["task-A", "task-B"]);
     expect(n.log().map((e) => [e.sessionId, e.decision])).toEqual([
       ["A", "suppressed-focused"],
       ["B", "sent"],
@@ -479,6 +480,70 @@ describe("notifier", () => {
       expect(n.pendingAway()).toEqual([]);
     });
 
+    it("the session in view: waits for the delay too (you may have stepped away), then goes", () => {
+      const { n, os, away, look } = setup({ awayDelayMs: () => TWO_MIN });
+      look("A", true);
+      const a = raiseInboxItem({ kind: "blocked", sessionId: "A", detail: "x", source: "status" });
+      n.update(listInboxItems());
+      // A second request of the same agent waits with the first, not twice.
+      raiseInboxItem({ kind: "gate", sessionId: "A", detail: "plan", source: "track" });
+      n.update(listInboxItems());
+      expect(os).toEqual([]);
+      expect(away).toEqual([]);
+      expect(n.pendingAway()).toEqual([{ itemId: a.id, sessionId: "A", since: clock, watched: true }]);
+      // Looking at it (the attention center calls seen() on every change while
+      // it is in view) does not drop it: it was asked while in view.
+      n.seen("A");
+      clock += TWO_MIN - 1;
+      n.tick();
+      expect(away).toEqual([]);
+      clock += 1;
+      n.tick();
+      expect(away.map((p) => p.task)).toEqual(["task-A"]);
+      expect(n.log().map((e) => e.decision)).toEqual(["suppressed-focused", "suppressed-focused", "away-later"]);
+    });
+
+    it("the session in view: goes as soon as the window loses the focus", () => {
+      const { n, away, look } = setup({ awayDelayMs: () => TWO_MIN });
+      look("A", true);
+      raiseInboxItem({ kind: "blocked", sessionId: "A", detail: "x", source: "status" });
+      n.update(listInboxItems());
+      clock += 1_000;
+      look("A", false);
+      n.tick();
+      expect(away.map((p) => p.task)).toEqual(["task-A"]);
+    });
+
+    it("the session in view: dropped once answered", () => {
+      const { n, away, look } = setup({ awayDelayMs: () => TWO_MIN });
+      look("A", true);
+      const a = raiseInboxItem({ kind: "blocked", sessionId: "A", detail: "x", source: "status" });
+      n.update(listInboxItems());
+      resolveInboxItem(a.id);
+      n.update(listInboxItems());
+      clock += TWO_MIN;
+      look("A", false);
+      n.tick();
+      expect(away).toEqual([]);
+      expect(n.pendingAway()).toEqual([]);
+    });
+
+    it("using Hermes (a key, a click) starts every waiting delay again", () => {
+      const { n, away, look } = setup({ awayDelayMs: () => TWO_MIN });
+      look("A", true);
+      raiseInboxItem({ kind: "blocked", sessionId: "A", detail: "x", source: "status" });
+      raiseInboxItem({ kind: "blocked", sessionId: "B", detail: "y", source: "status" });
+      n.update(listInboxItems());
+      clock += 90_000;
+      n.activity();
+      clock += 90_000;
+      n.tick();
+      expect(away).toEqual([]); // 3 min since asked, only 1.5 since last seen at work
+      clock += 30_000;
+      n.tick();
+      expect(away.map((p) => p.task)).toEqual(["task-A", "task-B"]);
+    });
+
     it("Immediately (0) sends at once even while focused; a changed delay applies to what waits", () => {
       let delay = TWO_MIN;
       const { n, away, look } = setup({ awayDelayMs: () => delay });
@@ -575,6 +640,20 @@ describe("what an away message and a notification say", () => {
     expect(awayWhere("W", placed)).not.toMatch(/heron|rotate/);
     expect(awayWhere(null, placed)).toBe("");
     expect(awayWhere("gone", placed)).toBe("");
+  });
+
+  it("never sends the account name: an agent started in a home folder works in \"~\"", () => {
+    // Built at runtime so no home-folder literal sits in the source.
+    const MAC_HOME = "/Users" + "/test";
+    const LINUX_HOME = "/home" + "/test";
+    const WIN_HOME = "C:\\" + "Users\\test";
+    const at = (working_directory: string) => ({ H: { id: "H", working_directory, created_at: "2026-01-01T10:00:00Z" } });
+    for (const home of [MAC_HOME, MAC_HOME + "/", LINUX_HOME, "/root", WIN_HOME, "~"]) {
+      expect(awayWhere("H", at(home))).toBe("~ #1");
+    }
+    // Folders inside the home keep their own name.
+    expect(awayWhere("H", at(MAC_HOME + "/api-repo"))).toBe("api-repo #1");
+    expect(awayWhere("H", at(LINUX_HOME + "/projects"))).toBe("projects #1");
   });
 
   it("names the session only when the person opted in, then whatever named it", () => {

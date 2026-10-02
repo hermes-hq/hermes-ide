@@ -100,11 +100,17 @@ await runScenario("QA-status-session-rows", async ({ evidenceDir, log, assert, a
   assert(estimated.length === 3, `the three estimated spends start with ≈ (${estimated.map((r) => r.spend.text).join(", ")})`);
   assert(estimated.every((r) => /estimated/i.test(r.spend.title)), "their tooltip says the cost is estimated");
 
-  const projectRule = await bridge.eval(`
-    for (const sheet of document.styleSheets) {
-      let rules; try { rules = sheet.cssRules; } catch { continue; }
-      for (const rule of rules) if (rule.selectorText && rule.selectorText.includes(".session-item-project-assign:focus-visible") && rule.style.opacity === "1") return true;
-    }
-    return false;`);
-  assert(projectRule, '"+ Project" shows when it has the keyboard focus');
+  // "+ Project" is hidden until hovered; given the keyboard focus it shows.
+  const project = await bridge.eval(`
+    const b = e2e.first(".session-item-project-assign");
+    if (!b) return null;
+    const before = getComputedStyle(b).opacity;
+    b.focus();
+    await new Promise((r) => setTimeout(r, 400));
+    const out = { before, focused: document.activeElement === b, focusVisible: b.matches(":focus-visible"), opacity: getComputedStyle(b).opacity };
+    b.blur();
+    return out;`);
+  log(`  "+ Project" with the keyboard focus: ${JSON.stringify(project)}`);
+  assert(project && project.focused && project.focusVisible, `"+ Project" takes the keyboard focus (${JSON.stringify(project)})`);
+  assert(project.opacity === "1", `"+ Project" shows when it has the keyboard focus (opacity ${project?.opacity})`);
 });
