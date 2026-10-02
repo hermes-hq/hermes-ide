@@ -7,7 +7,9 @@
 //      search its files."; with a shell that has no project, "This session
 //      has no project. Add one to search its files." with Add project… and
 //      the field off; once the project is added the field works and finds a
-//      word in the repository; in German the panel is German.
+//      word in the repository; opened again for that session it never
+//      flashes "no project" nor turns the field off while the projects load,
+//      and the field has the keyboard; in German the panel is German.
 //   2. NEWCOMER-13 Usage: a plain shell reads "Shell" / "No agent in this
 //      session." (never "claude · live"); a Claude task in a terminal reads
 //      "Claude Code · terminal" and says how to get usage (Agent view).
@@ -127,6 +129,41 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, apps, onCleanup }) => {
     const summary = await bridge.waitFor("results", `return e2e.norm(e2e.first(".search-summary")?.innerText ?? "").match(/^\\d+ results? in \\d+ files?$/)?.[0] ?? false;`, { timeoutMs: 15_000 }).catch(() => "");
     check(!!summary, `the search finds the word in the repository ("${summary}")`);
   }
+
+  log("step 1b2: Find opened again for the session with a project");
+  // While its projects load, the panel must not say "no project" nor turn
+  // the field off: Find has the keyboard in the field on every open.
+  const opens = [];
+  for (let i = 0; i < 3; i++) {
+    await menu(bridge, "edit.find");
+    await bridge.waitFor("the Search panel to close", `return !e2e.first(".search-panel");`);
+    await bridge.eval(`window.__HERMES_E2E__.focusTerminal(${JSON.stringify(shell)}); return true;`);
+    await sleep(300);
+    await bridge.eval(`
+      window.__qaSearch = { noProject: false, disabled: false };
+      window.__qaSearchObs?.disconnect();
+      const look = () => {
+        if (e2e.first(".search-no-project")) window.__qaSearch.noProject = true;
+        if (e2e.first(".search-panel .search-input")?.disabled) window.__qaSearch.disabled = true;
+      };
+      window.__qaSearchObs = new MutationObserver(look);
+      window.__qaSearchObs.observe(document.body, { subtree: true, childList: true, attributes: true, characterData: true });
+      return true;
+    `);
+    await menu(bridge, "edit.find");
+    await bridge.waitFor("the Search panel", `return !!e2e.first(".search-panel");`);
+    await sleep(1000);
+    const r = await bridge.eval(`
+      window.__qaSearchObs.disconnect();
+      const input = e2e.first(".search-panel .search-input");
+      return { ...window.__qaSearch, focused: !!input && document.activeElement === input, disabledNow: !!input?.disabled };
+    `);
+    log(`  open #${i + 1}: ${JSON.stringify(r)}`);
+    opens.push(r);
+  }
+  check(opens.every((r) => !r.noProject), `"no project" never shows for a session that has one (${opens.filter((r) => r.noProject).length}/${opens.length} opens showed it)`);
+  check(opens.every((r) => !r.disabled && !r.disabledNow), `the field is never off while the projects load (${opens.filter((r) => r.disabled).length}/${opens.length} opens turned it off)`);
+  check(opens.every((r) => r.focused), `Find puts the keyboard in the field on every open (${opens.filter((r) => !r.focused).length}/${opens.length} did not)`);
 
   log("step 1c: in German");
   await invoke(bridge, "set_setting", { key: "ui_language", value: "de" });

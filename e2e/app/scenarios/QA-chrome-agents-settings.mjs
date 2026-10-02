@@ -13,9 +13,9 @@
 //   3. ACC-13c: a model the default profile refused reads "1 refused by the
 //      default profile".
 //   4. ACC-08 remove: Remove asks first and says what stays on disk; Esc
-//      cancels; "Remove and sign out" runs the CLI's own sign-out in the
-//      profile, which stays on disk; adding the name again says it reuses
-//      the existing profile.
+//      cancels and gives the keyboard back to Remove; "Remove and sign
+//      out" runs the CLI's own sign-out in the profile, which stays on
+//      disk; adding the name again says it reuses the existing profile.
 //
 // Negative control (must end in RESULT: FAIL): a build of main before the
 // fix (Esc closes Settings, "work" is accepted, Remove acts at once).
@@ -200,8 +200,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, apps, onCleanup }) => {
   if (asked.text) {
     await press(bridge, "Escape");
     await sleep(400);
-    const afterEsc2 = await bridge.eval(`return { confirm: !!e2e.first('${acct} [role="alertdialog"]'), row: !!e2e.first('${acct}'), settings: !!e2e.first('[role="dialog"] .settings-title') };`);
+    const afterEsc2 = await bridge.eval(`return { confirm: !!e2e.first('${acct} [role="alertdialog"]'), row: !!e2e.first('${acct}'), settings: !!e2e.first('[role="dialog"] .settings-title'), focus: document.activeElement === e2e.first('${acct} .agents-settings-remove') };`);
     check(!afterEsc2.confirm && afterEsc2.row && afterEsc2.settings, `Esc cancels the removal only (${JSON.stringify(afterEsc2)})`);
+    check(afterEsc2.focus, "after Esc the keyboard is back on that account's Remove");
     await bridge.click(`${acct} .agents-settings-remove`);
     await bridge.waitFor("the confirmation", `return !!e2e.first('${acct} .agents-settings-confirm-sign-out');`);
     await bridge.click(`${acct} .agents-settings-confirm-sign-out`);

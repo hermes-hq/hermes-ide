@@ -7,9 +7,9 @@
 //      refused. Later opus launches and finishes a turn: it is offered
 //      again. Refused once more, "Check again" in Settings > Agents forgets
 //      the refusal too.
-//   2. ACC-06: Codex's own default model (`model` in ~/.codex/config.toml,
-//      no -m on the launch) is refused: the banner names that model and
-//      where it is set, and the launcher's "default" no longer promises it
+//   2. ACC-06: Codex's own default model (`model` in its config.toml under
+//      CODEX_HOME, no -m on the launch) is refused: the banner names that
+//      model and the file it is set in (CODEX_HOME's, not ~/.codex's), and the launcher's "default" no longer promises it
 //      always works; it says the account refused it.
 //
 // Negative control (must end in RESULT: FAIL): a build of main before the
@@ -116,6 +116,8 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, apps, onCleanup }) => {
   setFake(f, "reject-models", "claude", "");
   check((await opusOf(bridge))?.available === false, "refused again: marked refused again");
   await openAgentsSettings(bridge);
+  const hint = await bridge.eval(`return e2e.first(".agents-settings-refresh")?.title ?? "";`);
+  check(/refused models again/.test(hint), `Check again says it also offers refused models again ("${hint}")`);
   await bridge.click(".agents-settings-refresh");
   await bridge.waitFor("the check to finish", `return e2e.first(".agents-settings")?.dataset.loading === "false";`, { timeoutMs: 60_000 });
   await sleep(500);
@@ -136,7 +138,10 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, apps, onCleanup }) => {
     return { title: e2e.norm(b.querySelector(".launch-rejected-title").innerText), actions: [...b.querySelectorAll(".launch-rejected-action")].map((a) => a.dataset.action) };
   `);
   log(`  banner: ${JSON.stringify(banner)}`);
-  check(banner.title === "Codex's default model, gpt-5.2-codex (set in ~/.codex/config.toml), isn't available on your default account", "the banner names the default model and where it is set");
+  // CODEX_HOME points Codex's default profile at the test's folder: the
+  // banner names the file there, not the catalog's ~/.codex/config.toml.
+  const configFile = join(codexHome, "config.toml");
+  check(banner.title === `Codex's default model, gpt-5.2-codex (set in ${configFile}), isn't available on your default account`, `the banner names the default model and the config file CODEX_HOME points at ("${banner.title}")`);
   check(!banner.actions.includes("retry-default") && banner.actions.includes("pick-model"), "it offers another model, not the same default again");
   await bridge.screenshot(join(evidenceDir, "02-codex-default-banner.png"));
   const codex = await caps(bridge, "codex");
