@@ -133,6 +133,21 @@ describe("New branch form: a case-only variant of an existing branch", () => {
     expect(screen.queryByRole("button", { name: /Use the existing/ })).toBeNull();
   });
 
+  it("a slow availability answer for an earlier name does not clear the clash error", async () => {
+    setup();
+    let answer: (v: { available: boolean; usedBySession: null }) => void = () => {};
+    vi.mocked(checkBranchAvailable).mockImplementationOnce(() => new Promise((r) => { answer = r; }));
+    const { field } = await openNewTab();
+    fireEvent.change(field, { target: { value: "fix/slow" } });
+    await waitFor(() => expect(checkBranchAvailable).toHaveBeenCalledWith("p1", "fix/slow"));
+    fireEvent.change(field, { target: { value: "Develop" } });
+    expect(await screen.findByText(/Branch develop already exists/)).toBeInTheDocument();
+    answer({ available: true, usedBySession: null });
+    await new Promise((r) => setTimeout(r, 50));
+    expect(screen.getByText(/Branch develop already exists/)).toBeInTheDocument();
+    expect(field).toHaveAttribute("aria-invalid", "true");
+  });
+
   it("an existing branch another session uses is not offered", async () => {
     setup([{ sessionId: "other", branchName: "develop", worktreePath: "/x/wt", isMainWorktree: false }]);
     const { field } = await openNewTab();

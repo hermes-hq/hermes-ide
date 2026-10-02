@@ -416,11 +416,14 @@ export function SessionBranchSelector({ projectId, existingBranchName, defaultTa
       );
       return;
     }
-    // Check availability via backend
+    // Check availability via backend. An answer that comes back after the
+    // name changed belongs to the old name and must not touch the error.
+    let stale = false;
     setCheckingAvailability(true);
     const timer = setTimeout(() => {
       checkBranchAvailable(projectId, newBranchName)
         .then((result) => {
+          if (stale) return;
           if (!result.available) {
             setValidationError(
               result.usedBySession
@@ -433,11 +436,17 @@ export function SessionBranchSelector({ projectId, existingBranchName, defaultTa
         })
         .catch(() => {
           // Non-blocking — allow creation attempt
-          setValidationError(null);
+          if (!stale) setValidationError(null);
         })
-        .finally(() => setCheckingAvailability(false));
+        .finally(() => {
+          if (!stale) setCheckingAvailability(false);
+        });
     }, 300);
-    return () => clearTimeout(timer);
+    return () => {
+      stale = true;
+      clearTimeout(timer);
+      setCheckingAvailability(false);
+    };
   }, [newBranchName, projectId, nameClash, t]);
 
   // Tell the parent what the New branch form holds (see onDraftChange). While
