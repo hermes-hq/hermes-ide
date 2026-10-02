@@ -881,6 +881,9 @@ mod tests {
         sh(&r, &["config", "user.email", "test@example.com"]);
         sh(&r, &["config", "user.name", "Test"]);
         sh(&r, &["config", "commit.gpgsign", "false"]);
+        // Windows runners set core.autocrlf=true globally; the tests compare
+        // exact bytes, so checkouts here keep the committed line endings.
+        sh(&r, &["config", "core.autocrlf", "false"]);
         fs::write(r.join("README.md"), "# readme\n\nline\n").unwrap();
         fs::write(r.join("NOTES.md"), "notes\n").unwrap();
         sh(&r, &["add", "."]);
@@ -893,7 +896,14 @@ mod tests {
         let c = t.path().join("clone");
         sh(
             t.path(),
-            &["clone", "-q", origin.to_str().unwrap(), c.to_str().unwrap()],
+            &[
+                "clone",
+                "-q",
+                "-c",
+                "core.autocrlf=false",
+                origin.to_str().unwrap(),
+                c.to_str().unwrap(),
+            ],
         );
         sh(&c, &["config", "user.email", "test@example.com"]);
         sh(&c, &["config", "user.name", "Test"]);

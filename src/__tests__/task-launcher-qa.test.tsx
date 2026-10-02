@@ -380,7 +380,7 @@ describe("presets and the offer", () => {
     expect(h.cap.presets).toHaveLength(1);
     // The same combination as a preset is said too.
     await pick("approval", '[data-mode="plan"]');
-    expect(document.querySelector(".task-launcher-preset-same")).toHaveTextContent(/Same as .1 Quick fix/);
+    expect(document.querySelector(".task-launcher-preset-same")).toHaveTextContent(/Same as (⌘|Ctrl\+)1 Quick fix/);
   });
 
   it("Enter with an empty name keeps the offer; only 'No, don't ask again' records it (SOLO-18)", async () => {

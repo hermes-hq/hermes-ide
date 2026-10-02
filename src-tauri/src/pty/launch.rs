@@ -3427,7 +3427,10 @@ mod tests {
         let n = &hooks["Notification"][0]["hooks"][0];
         assert_eq!(
             n["command"],
-            "\"/app/hi\" signal --agent gemini --event Notification"
+            format!(
+                "{}\"/app/hi\" signal --agent gemini --event Notification",
+                if cfg!(windows) { "& " } else { "" }
+            )
         );
         assert_eq!(n["name"], "hermes-notification");
         assert_eq!(n["env"]["HERMES_SESSION_ID"], "hermes-1");
@@ -3870,7 +3873,10 @@ mod tests {
         let end = &json["hooks"]["SessionEnd"][0]["hooks"][0];
         assert_eq!(
             end["command"],
-            "\"/app/hi\" signal --agent gemini --event SessionEnd"
+            format!(
+                "{}\"/app/hi\" signal --agent gemini --event SessionEnd",
+                if cfg!(windows) { "& " } else { "" }
+            )
         );
         assert_eq!(end["env"]["HERMES_SESSION_ID"], "hermes-1");
         assert_eq!(end["env"]["HERMES_SIGNAL_NONCE"], "n0nce");
