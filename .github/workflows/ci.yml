@@ -371,7 +371,7 @@ jobs:
 
   # ── Real-app scenarios (all three OSes) ──────────────────────────────
   # One job per OS builds the test app (the app plus its test-only
-  # automation bridge) and uploads it; three shard jobs per OS download that
+  # automation bridge) and uploads it; five shard jobs per OS download that
   # one build and each run the scenarios a stable hash of the file name puts
   # on their shard (e2e/app/ci-plan.mjs), hands-free through e2e/app/run.mjs
   # (which skips scenarios the ledger limits to other platforms). Every job
@@ -475,7 +475,7 @@ jobs:
           retention-days: 14
 
   e2e-app:
-    name: Real app on ${{ matrix.platform.name }} (${{ matrix.shard }}/3)
+    name: Real app on ${{ matrix.platform.name }} (${{ matrix.shard }}/5)
     needs: [changes, e2e-build]
     if: needs.changes.outputs.frontend == 'true' || needs.changes.outputs.rust == 'true' || needs.changes.outputs.ci == 'true'
     strategy:
@@ -488,16 +488,18 @@ jobs:
             name: windows
           - os: macos-15
             name: macos
-        # Keep in step with the "/3" in SHARD below.
-        shard: [1, 2, 3]
+        # Keep in step with the "/5" in SHARD below (and the job name).
+        shard: [1, 2, 3, 4, 5]
     runs-on: ${{ matrix.platform.os }}
     # Nightly and manual runs repeat terminal-echo (REPEAT, 20 by default) on
     # the shard that holds it, which then needs well over the 60 minutes a
     # pull request's single run fits in. (A Linux shard's single run takes
-    # about 50 minutes on a slow runner: 45 cut the last steps off.)
-    timeout-minutes: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 120 || 60 }}
+    # about 50 minutes on a slow runner: 45 cut the last steps off. The 2.0
+    # QA scenarios took three Linux shards past 90: five shards, the longest
+    # about 60 minutes.)
+    timeout-minutes: ${{ (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 120 || 75 }}
     env:
-      SHARD: ${{ matrix.shard }}/3
+      SHARD: ${{ matrix.shard }}/5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
