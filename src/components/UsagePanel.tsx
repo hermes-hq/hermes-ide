@@ -208,7 +208,7 @@ export function usageEmptyText(session: Pick<SessionData, "ai_provider" | "detec
   if (!id) return t("usage.noAgent");
   // Agent view (where usage is reported) exists for agents Hermes runs through their SDK.
   if (getAgent(id)?.structured?.protocol === "claude-agent-sdk") {
-    return t("usage.terminalTask", { options: t("usage.options"), runsIn: t("launcher.viewLabel"), agentView: t("launcher.viewAgent") });
+    return t("usage.terminalTask", { options: t("launcher.moreOptions", { shortcut: "" }).replace(/\s+/g, " ").trim(), runsIn: t("launcher.viewLabel"), agentView: t("launcher.viewAgent") });
   }
   return t("usage.claudeOnly", { agent: getAgent(id)?.name ?? id });
 }

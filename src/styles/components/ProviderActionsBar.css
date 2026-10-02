@@ -116,9 +116,13 @@
   background: var(--bg-3);
   padding: 0 5px;
   border-radius: var(--radius-pill);
-  /* --text-3 is tuned for the surfaces, not for --bg-3 under it. */
-  color: var(--text-1);
+  color: var(--text-3);
   font-weight: 600;
+}
+
+/* Frosted Light: --text-3 on --bg-3 falls under 4.5:1. */
+html[data-theme="frosted-light"] .pab-commands-trigger:not(.pab-commands-trigger-active) .pab-commands-count {
+  color: var(--text-1);
 }
 
 .pab-commands-trigger-active .pab-commands-count {

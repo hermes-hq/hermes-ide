@@ -7,10 +7,11 @@
 // until the person picks one.
 
 import { useEffect, useMemo, useState } from "react";
+import { homeDir } from "@tauri-apps/api/path";
 import "../styles/components/LaunchRejectedBanner.css";
 import { useSessionEvents } from "../agent/contract/sessionEventStore";
 import { getAgentCapabilities, relaunchAgent } from "../agent/capabilities/api";
-import { rejectionView, type RejectionAction } from "../agent/capabilities/rejection";
+import { defaultConfigPath, rejectionView, type RejectionAction } from "../agent/capabilities/rejection";
 import { nearestEffort } from "../agent/capabilities/choice";
 import type { AgentCapabilities } from "../agent/capabilities/types";
 import { getAgent } from "../catalog/agentCatalog";
@@ -43,14 +44,18 @@ export function LaunchRejectedBanner({ session, onSignIn }: LaunchRejectedBanner
 	// agent's capabilities; the banner waits for them briefly so it does not
 	// show a raw account id first.
 	const [ready, setReady] = useState(false);
+	const [home, setHome] = useState<string | null>(null);
 	useEffect(() => {
 		if (!visible || !agentId) return;
 		let live = true;
 		const giveUp = setTimeout(() => live && setReady(true), 2000);
-		getAgentCapabilities(agentId, session.agent_launch?.accountId ?? null)
+		const capsRead = getAgentCapabilities(agentId, session.agent_launch?.accountId ?? null)
 			.then((c) => live && setCaps(c))
-			.catch(() => live && setCaps(null))
-			.finally(() => live && setReady(true));
+			.catch(() => live && setCaps(null));
+		const homeRead = homeDir()
+			.then((h) => live && setHome(h))
+			.catch(() => {});
+		void Promise.all([capsRead, homeRead]).finally(() => live && setReady(true));
 		return () => {
 			live = false;
 			clearTimeout(giveUp);
@@ -58,8 +63,9 @@ export function LaunchRejectedBanner({ session, onSignIn }: LaunchRejectedBanner
 	}, [visible, agentId, session.agent_launch?.accountId]);
 
 	const agentName = getAgent(agentId)?.name ?? agentId;
-	// Where the CLI keeps its own default model (Codex: ~/.codex/config.toml).
-	const configPath = getAgent(agentId)?.setup?.settings.global[0] ?? null;
+	// Where the CLI keeps its own default model (Codex: ~/.codex/config.toml,
+	// or $CODEX_HOME/config.toml when Hermes's environment sets it).
+	const configPath = defaultConfigPath(getAgent(agentId)?.setup?.settings.global[0], caps?.defaultProfileDir, home);
 	const view = useMemo(
 		() => (rejection ? rejectionView(rejection, agentName, session.agent_launch, caps, t("launchRejected.defaultAccount"), configPath) : null),
 		[rejection, agentName, session.agent_launch, caps, t, configPath],

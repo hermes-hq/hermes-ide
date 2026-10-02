@@ -76,6 +76,11 @@ pub struct AgentCapabilities {
     pub account_note: Option<String>,
     pub default_approval_mode_id: String,
     pub checked_at: i64,
+    /// The folder the default profile uses when Hermes's environment sets
+    /// the agent's profile variable (`CODEX_HOME=…`): its config lives
+    /// there, not in the catalog's `~/.codex`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub default_profile_dir: Option<String>,
 }
 
 /// Where the agent runs.

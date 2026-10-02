@@ -9,6 +9,7 @@
 import type { LaunchRejectedEvent } from "../contract/events";
 import type { SessionAgentLaunch } from "../../types/session";
 import type { AgentAccount, AgentCapabilities } from "./types";
+import { basename, tildePath } from "../../utils/paths";
 
 export type RejectionAction =
 	| { kind: "retry-default" }
@@ -34,6 +35,20 @@ export function refusedModelName(message: string | null | undefined): string | n
 	if (!message) return null;
 	const named = /[Tt]he model `([^`\s]+)`/.exec(message) ?? /[Tt]he ['"`]([^'"`\s]+)['"`] model\b/.exec(message);
 	return named ? named[1] : null;
+}
+
+/**
+ * Where the CLI's default profile keeps the config that names its default
+ * model: the catalog's file ("~/.codex/config.toml"), or the same file in
+ * the folder Hermes's environment points the profile at (`CODEX_HOME`),
+ * shown under `home` as "~/…".
+ */
+export function defaultConfigPath(catalogPath: string | null | undefined, profileDir: string | null | undefined, home: string | null): string | null {
+	if (!catalogPath) return null;
+	const dir = profileDir?.replace(/[\\/]+$/, "");
+	if (!dir) return catalogPath;
+	const sep = dir.includes("\\") && !dir.includes("/") ? "\\" : "/";
+	return tildePath(`${dir}${sep}${basename(catalogPath)}`, home);
 }
 
 /** The account's name for the title: its label, or `defaultLabel` for the CLI's own profile. */

@@ -36,9 +36,14 @@ export function formatResultCount(total: number, fileCount: number, t?: Translat
   return `${total} ${rWord} in ${fileCount} ${fWord}`;
 }
 
-/** What the panel needs before it can search: a session, then a project in it. */
-export function searchBlocker(sessionId: string | null, projectId: string | null): "no-session" | "no-project" | null {
+/**
+ * What the panel needs before it can search: a session, then a project in
+ * it. "loading" while the session's projects are read: nothing is said
+ * yet and the field stays usable (it has the keyboard on open).
+ */
+export function searchBlocker(sessionId: string | null, projectId: string | null, projectsLoaded = true): "no-session" | "loading" | "no-project" | null {
   if (!sessionId) return "no-session";
+  if (!projectsLoaded) return "loading";
   if (!projectId) return "no-project";
   return null;
 }
@@ -90,9 +95,9 @@ export function SearchPanel({ visible, onAddProject }: SearchPanelProps) {
   const sessionId = state.activeSessionId;
   // The session's primary project; follows a project added or removed
   // while the panel is open.
-  const { projects } = useSessionProjects(sessionId);
-  const projectId = projects[0]?.id ?? null;
-  const blocker = searchBlocker(sessionId, projectId);
+  const { projects, loaded: projectsLoaded } = useSessionProjects(sessionId);
+  const projectId = projectsLoaded ? projects[0]?.id ?? null : null;
+  const blocker = searchBlocker(sessionId, projectId, projectsLoaded);
 
   // Auto-focus input on mount
   useEffect(() => {
@@ -187,7 +192,7 @@ export function SearchPanel({ visible, onAddProject }: SearchPanelProps) {
           type="text"
           placeholder={t("search.placeholder")}
           aria-label={t("search.placeholder")}
-          disabled={blocker !== null}
+          disabled={blocker === "no-session" || blocker === "no-project"}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           spellCheck={false}

@@ -108,11 +108,15 @@ pub fn version_at_least(version: &str, min: &str) -> bool {
 const BROKEN_LINE_MAX: usize = 200;
 
 /// Why an installed CLI cannot start, from its `--version` run: exit 126
-/// (found but not executable) or 127 (its interpreter or a library is
-/// missing, e.g. `#!/usr/bin/env node` with no node on PATH), or the shell's
-/// "command not found" / "No such file or directory". Only when it printed
-/// no version: a CLI that answers with a version starts. The reason is its
-/// first non-empty line (a path, never an account), or the exit code.
+/// (found but not executable), 127 (its interpreter or a library is
+/// missing, e.g. `#!/usr/bin/env node` with no node on PATH) or 9009
+/// (cmd.exe: an npm `.cmd` shim whose `node` is not on PATH), or a failed
+/// run whose output is the shell's "command not found" / "No such file or
+/// directory" / cmd.exe's "is not recognized as an internal or external
+/// command". Only when it printed no version: a CLI that answers with a
+/// version starts, and a run that exited 0 started whatever it printed.
+/// The reason is its first non-empty line without its closing punctuation
+/// (a path, never an account), or the exit code.
 pub fn broken_reason(probe: &Probe, version: Option<&str>) -> Option<String> {
     if version.is_some() {
         return None;
@@ -121,14 +125,16 @@ pub fn broken_reason(probe: &Probe, version: Option<&str>) -> Option<String> {
         return None;
     };
     let lower = output.to_lowercase();
-    let says_missing =
-        lower.contains("command not found") || lower.contains("no such file or directory");
-    if !(matches!(code, 126 | 127) || says_missing) {
+    let says_missing = lower.contains("command not found")
+        || lower.contains("no such file or directory")
+        || lower.contains("is not recognized as an internal or external command");
+    if !(matches!(code, 126 | 127 | 9009) || (*code != 0 && says_missing)) {
         return None;
     }
     let line = output
         .lines()
         .map(str::trim)
+        .map(|l| l.trim_end_matches([',', ';', ':', '.']).trim_end())
         .find(|l| !l.is_empty())
         .map(|l| l.chars().take(BROKEN_LINE_MAX).collect::<String>());
     Some(line.unwrap_or_else(|| format!("exit {code}")))
@@ -640,6 +646,26 @@ mod tests {
         };
         assert_eq!(broken_reason(&p, None), None);
         assert_eq!(broken_reason(&Probe::TimedOut, None), None);
+        // Windows: an npm .cmd shim with no node on PATH (cmd.exe exits 9009).
+        let p = Probe::Exited {
+            code: 9009,
+            output: "'node' is not recognized as an internal or external command,\r\noperable program or batch file.\r\n".into(),
+        };
+        assert_eq!(
+            broken_reason(&p, None).as_deref(),
+            Some("'node' is not recognized as an internal or external command")
+        );
+        let p = Probe::Exited {
+            code: 1,
+            output: "'node' is not recognized as an internal or external command,".into(),
+        };
+        assert!(broken_reason(&p, None).is_some());
+        // A run that exited 0 started, whatever warning it printed.
+        let p = Probe::Exited {
+            code: 0,
+            output: "warning: ~/.cache/x: No such file or directory\nbuild 2026-09 (dev)".into(),
+        };
+        assert_eq!(broken_reason(&p, None), None);
     }
 
     #[test]
