@@ -912,7 +912,22 @@ mod tests {
         let lock = bundled_lock().unwrap();
         assert_eq!(s.catalog, lock.catalog);
         assert_eq!(store::info(&conn).unwrap().rows as usize, cat.rows.len());
-        // Every curated body is there: the library works offline.
+        let lock_rows =
+            serde_json::from_str::<serde_json::Value>(LOCK_JSON).unwrap()["rows"].as_i64();
+        assert_eq!(Some(cat.rows.len() as i64), lock_rows);
+        // Every tier the manifest lists is imported, each row under its own.
+        for (tier, tier_ref) in &cat.manifest.tiers {
+            let stored: i64 = conn
+                .query_row(
+                    "SELECT count(*) FROM entry WHERE tier = ?1",
+                    [catalog::tier_order(tier)],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            eprintln!("{tier}: {stored} rows");
+            assert_eq!(Some(stored), tier_ref.rows, "{tier}");
+        }
+        // Every body is there: the library works offline.
         let bodies: i64 = conn
             .query_row("SELECT count(*) FROM body_cache", [], |r| r.get(0))
             .unwrap();

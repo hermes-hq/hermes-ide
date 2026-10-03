@@ -206,8 +206,10 @@ function untar(buf) {
 }
 
 /**
- * The bundled catalog: `{ manifest, manifestBytes, objects, rows, body(row) }`
- * where `objects` maps "o/aa/<sha>" to bytes and `rows` are the curated rows.
+ * The bundled catalog: `{ manifest, manifestBytes, objects, rows, tiers,
+ * body(row) }` where `objects` maps "o/aa/<sha>" to bytes, `rows` are the
+ * rows of every tier and `tiers` maps each tier to its shard list and the
+ * rows of each of its shards.
  */
 export function readBundledCatalog(path = bundledArchivePath()) {
   const files = untar(zlib.zstdDecompressSync(readFileSync(path)));
@@ -215,33 +217,33 @@ export function readBundledCatalog(path = bundledArchivePath()) {
   if (!manifestBytes) throw new Error(`${path} has no manifest.json`);
   files.delete("manifest.json");
   const manifest = JSON.parse(manifestBytes.toString("utf8"));
-  const list = JSON.parse(
-    files.get(refRel(manifest.tiers.curated.list)).toString("utf8"),
-  );
-  const shardKey = Object.keys(list.shards)[0];
-  const rows = files
-    .get(refRel(list.shards[shardKey].object))
-    .toString("utf8")
-    .split("\n")
-    .filter((l) => l.trim())
-    .map((l) => JSON.parse(l));
+  const tiers = {};
+  const rows = [];
+  for (const [tier, ref] of Object.entries(manifest.tiers)) {
+    const list = JSON.parse(files.get(refRel(ref.list)).toString("utf8"));
+    const shards = {};
+    for (const [key, shard] of Object.entries(list.shards)) {
+      shards[key] = files
+        .get(refRel(shard.object))
+        .toString("utf8")
+        .split("\n")
+        .filter((l) => l.trim())
+        .map((l) => JSON.parse(l));
+      rows.push(...shards[key]);
+    }
+    tiers[tier] = { list, shards };
+  }
   const body = (row) =>
     JSON.parse(files.get(refRel(row.body)).toString("utf8"));
-  return {
-    manifest,
-    manifestBytes,
-    objects: files,
-    rows,
-    list,
-    shardKey,
-    body,
-  };
+  return { manifest, manifestBytes, objects: files, rows, tiers, body };
 }
 
 /**
  * A newer catalog built from `base`: the same rows plus `extra` rows (each
- * `{ row, body }`; the body object is created), as sequence `seq`. Returns
- * `{ manifestBytes, objects }` (the base objects plus the new ones).
+ * `{ row, body }`; the body object is created, the row goes to the first
+ * shard of its tier, curated by default), as sequence `seq`. Returns
+ * `{ manifestBytes, objects, rows }` (the base objects plus the new ones;
+ * the rows of every tier).
  */
 export function newerCatalog(base, { seq, extra = [], catalog } = {}) {
   const objects = new Map(base.objects);
@@ -251,37 +253,34 @@ export function newerCatalog(base, { seq, extra = [], catalog } = {}) {
     objects.set(objectRel(hex), bytes);
     return { ref: `sha256:${hex}`, bytes: bytes.length };
   };
-  const rows = [...base.rows];
+  const tiers = structuredClone(base.tiers);
   for (const { row, body } of extra) {
     const b = put(JSON.stringify(body));
-    rows.push({ ...row, body: b.ref, bytes: b.bytes });
+    const tier = tiers[row.tier ?? "curated"];
+    if (!tier) throw new Error(`the base catalog has no ${row.tier} tier`);
+    const first = Object.keys(tier.shards)[0];
+    tier.shards[first].push({ tier: "curated", ...row, body: b.ref, bytes: b.bytes });
+    tier.changed = true;
   }
-  const shard = put(rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
-  const list = put(
-    JSON.stringify({
-      ...base.list,
-      shards: {
-        ...base.list.shards,
-        [base.shardKey]: {
-          ...base.list.shards[base.shardKey],
-          object: shard.ref,
-          rows: rows.length,
-        },
-      },
-    }),
-  );
+  const manifestTiers = { ...base.manifest.tiers };
+  const rows = [];
+  for (const [name, tier] of Object.entries(tiers)) {
+    const tierRows = Object.values(tier.shards).flat();
+    rows.push(...tierRows);
+    if (!tier.changed) continue;
+    const shards = {};
+    for (const [key, shardRows] of Object.entries(tier.shards)) {
+      const shard = put(shardRows.map((r) => JSON.stringify(r)).join("\n") + "\n");
+      shards[key] = { ...tier.list.shards[key], object: shard.ref, rows: shardRows.length };
+    }
+    const list = put(JSON.stringify({ ...tier.list, shards }));
+    manifestTiers[name] = { ...manifestTiers[name], list: list.ref, rows: tierRows.length };
+  }
   const manifest = {
     ...base.manifest,
     ...(catalog ? { catalog } : {}),
     seq,
-    tiers: {
-      ...base.manifest.tiers,
-      curated: {
-        ...base.manifest.tiers.curated,
-        list: list.ref,
-        rows: rows.length,
-      },
-    },
+    tiers: manifestTiers,
   };
   return {
     manifestBytes: Buffer.from(

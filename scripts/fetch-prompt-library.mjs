@@ -100,6 +100,7 @@ export async function collectCatalog({ manifestBytes, lock, getObject, concurren
 		await fetchVerified(typeof ref === "string" ? ref : ref?.object, `pack ${name}`);
 	}
 	const rows = [];
+	const tiers = {};
 	for (const [tier, info] of Object.entries(manifest.tiers ?? {})) {
 		const list = JSON.parse((await fetchVerified(info.list, `${tier} shard list`)).toString("utf8"));
 		if (list.schema !== 1) throw new Error(`${tier} shard list schema ${list.schema} is not supported`);
@@ -110,12 +111,16 @@ export async function collectCatalog({ manifestBytes, lock, getObject, concurren
 			if (typeof shard.rows === "number" && shard.rows !== shardRows.length) {
 				throw new Error(`${tier} shard "${prefix}" has ${shardRows.length} rows, its list says ${shard.rows}`);
 			}
+			// A row's stored tier is its own field: it must be the list's.
+			const stray = shardRows.find((r) => r.tier !== tier);
+			if (stray) throw new Error(`${tier} shard "${prefix}": ${stray.id} says tier ${JSON.stringify(stray.tier)}`);
 			tierRows += shardRows.length;
 			rows.push(...shardRows);
 		}
 		if (typeof info.rows === "number" && info.rows !== tierRows) {
 			throw new Error(`${tier} tier has ${tierRows} rows, the manifest says ${info.rows}`);
 		}
+		tiers[tier] = tierRows;
 	}
 	if (typeof lock.rows === "number" && rows.length !== lock.rows) {
 		throw new Error(`the catalog has ${rows.length} rows, the lock says ${lock.rows}`);
@@ -130,7 +135,7 @@ export async function collectCatalog({ manifestBytes, lock, getObject, concurren
 		}
 	};
 	await Promise.all(Array.from({ length: Math.max(1, concurrency) }, worker));
-	return { files, manifest, rows, bodies: bodies.length };
+	return { files, manifest, rows, tiers, bodies: bodies.length };
 }
 
 // ─── Archive (ustar, deterministic) ──────────────────────────────────
@@ -185,7 +190,7 @@ export function zstd(buf) {
 }
 
 /** Writes the archive and its sidecar atomically; returns the sidecar. */
-export function writeArchive({ files, lock, rows, outDir = OUT_DIR }) {
+export function writeArchive({ files, lock, rows, tiers = {}, outDir = OUT_DIR }) {
 	const archive = zstd(tarBuffer(files));
 	if (archive.length > lock.max_archive_bytes) {
 		throw new Error(`the archive is ${archive.length} bytes, over the ${lock.max_archive_bytes}-byte cap in the lock`);
@@ -197,6 +202,7 @@ export function writeArchive({ files, lock, rows, outDir = OUT_DIR }) {
 		catalog: lock.catalog,
 		seq: lock.seq,
 		rows,
+		tiers,
 		objects: files.size - 1,
 		manifest_sha256: lock.manifest_sha256,
 		archive: ARCHIVE_NAME,
@@ -218,7 +224,12 @@ export function upToDate(lock, outDir = OUT_DIR) {
 	if (!existsSync(sidecarPath) || !existsSync(archivePath)) return false;
 	try {
 		const sidecar = JSON.parse(readFileSync(sidecarPath, "utf8"));
-		return sidecar.manifest_sha256 === lock.manifest_sha256 && sidecar.archive_sha256 === sha256Hex(readFileSync(archivePath));
+		// A sidecar without per-tier counts predates them: write it again.
+		return (
+			sidecar.manifest_sha256 === lock.manifest_sha256 &&
+			typeof sidecar.tiers === "object" &&
+			sidecar.archive_sha256 === sha256Hex(readFileSync(archivePath))
+		);
 	} catch {
 		return false;
 	}
@@ -302,10 +313,11 @@ async function fetchCatalog({ force = false, offline = false } = {}) {
 		if (sha256Hex(manifestBytes) === lock.manifest_sha256) remember("manifest.json", manifestBytes);
 	}
 	const started = Date.now();
-	const { files, rows, bodies } = await collectCatalog({ manifestBytes, lock, getObject: get });
-	const sidecar = writeArchive({ files, lock, rows: rows.length });
+	const { files, rows, tiers, bodies } = await collectCatalog({ manifestBytes, lock, getObject: get });
+	const sidecar = writeArchive({ files, lock, rows: rows.length, tiers });
+	const byTier = Object.entries(tiers).map(([t, n]) => `${t} ${n}`).join(", ");
 	console.log(
-		`[library] ${lock.catalog} (seq ${lock.seq}): ${rows.length} rows, ${bodies} bodies, ${files.size - 1} objects verified; ` +
+		`[library] ${lock.catalog} (seq ${lock.seq}): ${rows.length} rows (${byTier}), ${bodies} bodies, ${files.size - 1} objects verified; ` +
 			`${ARCHIVE_NAME} ${(sidecar.archive_bytes / 1e6).toFixed(2)} MB in ${((Date.now() - started) / 1000).toFixed(1)} s`,
 	);
 }

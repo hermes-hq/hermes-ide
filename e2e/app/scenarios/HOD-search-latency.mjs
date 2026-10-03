@@ -13,7 +13,12 @@
 //     search p95 20-27 ms, round trip 51.0 ms on Linux (twice); 17-21 ms on
 //     macOS and Windows.
 //   - Typing in the search field shows the results for the text typed within
-//     500 ms (the field waits 80 ms for typing to pause).
+//     500 ms (the field waits 80 ms for typing to pause). Timed inside the
+//     page, from the input event to the rendered answer: timed from the test
+//     runner it also counted the bridge's round trips and 100 ms polls, and
+//     one of the five queries took 350-580 ms on every OS while the others
+//     took 115-130 ms and the search itself stayed at p95 15-27 ms (CI,
+//     2026-10-03: Windows worst 577 ms with search p95 18.5 ms).
 //   - Answers that arrive late are dropped: typing "a" and at once
 //     "flaky tests" shows the results of "flaky tests", not of "a".
 //   - Paging is by cursor: page 2 continues page 1 with no repeats, and
@@ -111,11 +116,30 @@ await runLauncherQa(
     for (const q of ["flaky tests", "write a cover letter", "sql query", "persona kind:persona", "commit message"]) {
       await typeValue(bridge, ".lib-search-input", "");
       await sleep(150);
-      const t0 = Date.now();
+      typed.push(
+        await bridge.eval(`
+          const q = ${JSON.stringify(q)};
+          const el = e2e.must(e2e.first(".lib-search-input"), "the search field");
+          const answered = () => {
+            const res = e2e.first('[data-testid="library-results"]');
+            if (!res || e2e.first('[data-testid="library-view"]')?.getAttribute("data-answered") !== q) return false;
+            if (res.querySelector(".lib-results-head .lib-muted")?.innerText.match(/search/i)) return false;
+            return res.querySelectorAll(".lib-row").length > 0;
+          };
+          el.focus();
+          const t0 = performance.now();
+          Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(el, q);
+          el.dispatchEvent(new Event("input", { bubbles: true }));
+          while (!answered()) {
+            if (performance.now() - t0 > 10000) return 10000;
+            await new Promise((r) => setTimeout(r, 2));
+          }
+          return Math.round(performance.now() - t0);
+        `),
+      );
       await search(bridge, q);
-      typed.push(Date.now() - t0);
     }
-    log(`  typing to results: ${typed.join(", ")} ms`);
+    log(`  typing to results (in the page): ${typed.join(", ")} ms`);
     check(Math.max(...typed) <= 500, `results show within 500 ms of typing (worst ${Math.max(...typed)} ms)`);
 
     // Late answers are dropped.

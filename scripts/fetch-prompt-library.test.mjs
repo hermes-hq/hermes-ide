@@ -5,8 +5,12 @@ import zlib from "node:zlib";
 import { afterEach, describe, expect, it } from "vitest";
 import { collectCatalog, objectRel, readLock, sha256Hex, tarBuffer, upToDate, writeArchive } from "./fetch-prompt-library.mjs";
 
-/** A two-row catalog in memory, built the way hodios-dist lays it out. */
-function fakeCatalog() {
+/**
+ * A two-row catalog in memory, built the way hodios-dist lays it out: one
+ * row in each tier, each tier with its own shard list. `betaTier` is the
+ * tier field beta's row carries.
+ */
+function fakeCatalog({ betaTier = "verified" } = {}) {
 	const objects = new Map();
 	const put = (text) => {
 		const bytes = Buffer.from(text, "utf8");
@@ -15,13 +19,13 @@ function fakeCatalog() {
 		return `sha256:${hex}`;
 	};
 	const body = (id) => put(JSON.stringify({ schema: 1, fm: { id, kind: "prompt", title: id }, body: `Do ${id}.`, steps: [] }));
-	const rows = ["alpha", "beta"].map((id) => ({ id, v: "1.0.0", kind: "prompt", body: body(id) }));
-	const shard = put(rows.map((r) => JSON.stringify(r)).join("\n") + "\n");
-	const list = put(JSON.stringify({ schema: 1, tier: "curated", prefixLen: 0, shards: { "": { object: shard, rows: 2 } } }));
+	const list = (tier, id, rowTier = tier) => {
+		const shard = put(`${JSON.stringify({ id, v: "1.0.0", kind: "prompt", tier: rowTier, body: body(id) })}\n`);
+		return { list: put(JSON.stringify({ schema: 1, tier, prefixLen: 0, shards: { "": { object: shard, rows: 1 } } })), rows: 1 };
+	};
+	const tiers = { curated: list("curated", "alpha"), verified: list("verified", "beta", betaTier) };
 	const vocab = put(JSON.stringify({ schema: 1, facets: {}, domains: {}, detect: {} }));
-	const manifest = Buffer.from(
-		JSON.stringify({ schema: 1, catalog: "2026.0101.0", seq: 1, objects: "o/{aa}/{sha256}", tiers: { curated: { list, rows: 2 } }, deltas: [], packs: {}, vocab }),
-	);
+	const manifest = Buffer.from(JSON.stringify({ schema: 1, catalog: "2026.0101.0", seq: 1, objects: "o/{aa}/{sha256}", tiers, deltas: [], packs: {}, vocab }));
 	const lock = {
 		source: "test",
 		tag: "v2026.0101.0",
@@ -50,12 +54,20 @@ describe("fetch-prompt-library", () => {
 		expect(lock.max_archive_bytes).toBeLessThanOrEqual(5_000_000);
 	});
 
-	it("collects every object of the hash chain", async () => {
+	it("collects every object of the hash chain, every tier", async () => {
 		const c = fakeCatalog();
 		const out = await collectCatalog({ manifestBytes: c.manifest, lock: c.lock, getObject: c.getObject });
 		expect(out.rows.map((r) => r.id)).toEqual(["alpha", "beta"]);
-		// manifest + list + shard + vocab + 2 bodies
-		expect(out.files.size).toBe(6);
+		expect(out.tiers).toEqual({ curated: 1, verified: 1 });
+		// manifest + 2 lists + 2 shards + vocab + 2 bodies
+		expect(out.files.size).toBe(8);
+	});
+
+	it("refuses a row whose tier is not its shard list's", async () => {
+		for (const betaTier of ["curated", null]) {
+			const c = fakeCatalog({ betaTier });
+			await expect(collectCatalog({ manifestBytes: c.manifest, lock: c.lock, getObject: c.getObject })).rejects.toThrow(/beta says tier/);
+		}
 	});
 
 	it("refuses a manifest the lock does not pin", async () => {
@@ -87,7 +99,8 @@ describe("fetch-prompt-library", () => {
 		expect(sha256Hex(tarBuffer(files))).toBe(sha256Hex(tarBuffer(new Map([...files].reverse()))));
 		const outDir = mkdtempSync(join(tmpdir(), "hermes-lib-test-"));
 		dirs.push(outDir);
-		const sidecar = writeArchive({ files, lock: c.lock, rows: 2, outDir });
+		const sidecar = writeArchive({ files, lock: c.lock, rows: 2, tiers: { curated: 1, verified: 1 }, outDir });
+		expect(sidecar.tiers).toEqual({ curated: 1, verified: 1 });
 		const archive = readFileSync(join(outDir, sidecar.archive));
 		expect(sha256Hex(archive)).toBe(sidecar.archive_sha256);
 		expect(zlib.zstdDecompressSync(archive).includes(Buffer.from("manifest.json"))).toBe(true);

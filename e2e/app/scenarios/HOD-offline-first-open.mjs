@@ -6,8 +6,9 @@
 //
 //   run 1  fresh install, welcome finished. The Library opens from the
 //          activity bar; its first open imports the catalog bundled with the
-//          build: every row the lock pins (1,570 at 2026.1003.0) is there,
-//          from the bundle, with every body offline. The home screen shows a
+//          build: every row the lock pins is there, every tier of it (each
+//          row stored and searchable under its own tier), from the bundle,
+//          with every body offline. The home screen shows a
 //          few short shelves, never the whole catalog. A search finds
 //          entries; one opens and its text renders. The failed update check
 //          is recorded quietly and changes nothing.
@@ -70,9 +71,34 @@ await runLauncherQa(
       status.offlineBodies >= lock.rows,
       `every body is stored for offline use (${status.offlineBodies})`,
     );
+    // Every tier is imported and searchable: page through tier:<name>.
+    for (const [tier, expected] of Object.entries(lock.tiers ?? {})) {
+      const found = await bridge.eval(`
+        const ids = new Set();
+        let cursor = null;
+        do {
+          const page = await window.__TAURI_INTERNALS__.invoke("library_search", {
+            request: { query: ${JSON.stringify(`tier:${tier}`)}, limit: 50, cursor, personalise: false, includeHidden: true },
+            context: null,
+          });
+          for (const h of page.hits) ids.add(h.id);
+          cursor = page.nextCursor;
+        } while (cursor);
+        return ids.size;
+      `);
+      check(found === expected, `the ${tier} tier is all there (${found} of ${expected})`);
+    }
     check(
-      typeof status.importMs === "number" && status.importMs <= 1500,
-      `the first-open import took ${status.importMs} ms (budget 400 ms on a desktop, 1500 ms on a CI runner)`,
+      Object.keys(lock.tiers ?? {}).length > 0,
+      `the bundle lists its tiers (${JSON.stringify(lock.tiers)})`,
+    );
+    // The import is linear in rows. CI with 1,570 rows (debug build): 356-473
+    // ms on Linux, 506-817 on macOS, 488-1347 on Windows, so at most 0.86 ms
+    // a row; the budget is 1 ms a row (2,570 ms at 2,570 rows).
+    const importBudget = lock.rows;
+    check(
+      typeof status.importMs === "number" && status.importMs <= importBudget,
+      `the first-open import took ${status.importMs} ms (budget ${importBudget} ms on a CI runner, 1 ms a row in the debug test build)`,
     );
 
     await bridge.waitFor(

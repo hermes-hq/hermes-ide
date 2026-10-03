@@ -901,6 +901,48 @@ pub mod tests {
     }
 
     #[test]
+    fn searches_every_tier_and_stores_each_row_s_tier() {
+        let conn = conn_with(&[
+            (
+                "lint-curated",
+                serde_json::json!({"title": "Lint the code"}),
+                "x",
+            ),
+            (
+                "lint-verified",
+                serde_json::json!({"tier": "verified", "title": "Lint the code too"}),
+                "x",
+            ),
+            (
+                "review-verified",
+                serde_json::json!({"tier": "verified", "title": "Review a diff"}),
+                "x",
+            ),
+        ]);
+        let ids = |p: &SearchPage| p.hits.iter().map(|h| h.id.clone()).collect::<Vec<_>>();
+        // Text search reaches both tiers; curated ranks first on equal text.
+        assert_eq!(
+            ids(&search(&conn, &req("lint"), None).unwrap()),
+            vec!["lint-curated", "lint-verified"]
+        );
+        let mut verified = ids(&search(&conn, &req("tier:verified"), None).unwrap());
+        verified.sort();
+        assert_eq!(verified, vec!["lint-verified", "review-verified"]);
+        assert_eq!(
+            ids(&search(&conn, &req("tier:curated"), None).unwrap()),
+            vec!["lint-curated"]
+        );
+        let tiers: Vec<(String, i64)> = conn
+            .prepare("SELECT tier, rows FROM sync ORDER BY tier")
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap()
+            .map(Result::unwrap)
+            .collect();
+        assert_eq!(tiers, vec![("curated".into(), 1), ("verified".into(), 2)]);
+    }
+
+    #[test]
     fn searches_text_aliases_and_facets() {
         let conn = sample();
         let ids = |p: &SearchPage| p.hits.iter().map(|h| h.id.clone()).collect::<Vec<_>>();

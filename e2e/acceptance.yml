@@ -1850,7 +1850,7 @@ features:
     status: shipped
     criteria:
       HOD-1:
-        text: "A fresh install with no network has the whole bundled catalog: the Library opens, every pinned row is there with its body, search works, an entry renders; a relaunch needs no second import"
+        text: "A fresh install with no network has the whole bundled catalog: the Library opens, every pinned row of every tier is there with its body, search works, an entry renders; a relaunch needs no second import"
         scenarios: [HOD-offline-first-open.mjs]
       HOD-2:
         text: "Search answers at p95 <= 50 ms in the app (300 mixed queries), results follow typing within 500 ms, late answers are dropped, and paging is by cursor with a virtualized list"

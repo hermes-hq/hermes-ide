@@ -399,6 +399,11 @@ pub fn collect(
                 if row.id.is_empty() {
                     return Err(format!("{what}: a row has no id"));
                 }
+                // The stored tier is the row's own field: it must be the
+                // tier of the list the row came from.
+                if &row.tier != tier {
+                    return Err(format!("{what}: {} says tier \"{}\"", row.id, row.tier));
+                }
                 rows.push((row, line.to_string()));
                 n += 1;
             }
@@ -522,7 +527,9 @@ pub mod tests {
         entries: &[(&str, serde_json::Value, &str)],
     ) -> Fixture {
         let mut objects = HashMap::new();
-        let mut lines = Vec::new();
+        // One shard list per tier, like hodios-dist (a row's tier comes
+        // from its `tier` field, curated when the entry does not say).
+        let mut lines: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for (id, extra, body) in entries {
             let body_obj = serde_json::json!({
                 "schema": 1,
@@ -531,17 +538,34 @@ pub mod tests {
                 "body": body, "steps": [],
             });
             let body_ref = put(&mut objects, serde_json::to_vec(&body_obj).unwrap());
-            lines.push(row_json(id, extra.clone(), &body_ref).to_string());
+            let tier = extra
+                .get("tier")
+                .and_then(|t| t.as_str())
+                .unwrap_or("curated");
+            lines
+                .entry(tier.to_string())
+                .or_default()
+                .push(row_json(id, extra.clone(), &body_ref).to_string());
         }
-        let shard = put(&mut objects, format!("{}\n", lines.join("\n")).into_bytes());
-        let list = put(
-            &mut objects,
-            serde_json::to_vec(&serde_json::json!({
-                "schema": 1, "tier": "curated", "prefixLen": 0,
-                "shards": { "": { "object": shard, "rows": entries.len() } }
-            }))
-            .unwrap(),
-        );
+        let mut tiers = serde_json::Map::new();
+        for (tier, tier_lines) in &lines {
+            let shard = put(
+                &mut objects,
+                format!("{}\n", tier_lines.join("\n")).into_bytes(),
+            );
+            let list = put(
+                &mut objects,
+                serde_json::to_vec(&serde_json::json!({
+                    "schema": 1, "tier": tier, "prefixLen": 0,
+                    "shards": { "": { "object": shard, "rows": tier_lines.len() } }
+                }))
+                .unwrap(),
+            );
+            tiers.insert(
+                tier.clone(),
+                serde_json::json!({ "list": list, "rows": tier_lines.len() }),
+            );
+        }
         let vocab = put(
             &mut objects,
             serde_json::to_vec(&serde_json::json!({
@@ -567,7 +591,7 @@ pub mod tests {
         let manifest = serde_json::to_vec(&serde_json::json!({
             "schema": 1, "catalog": catalog, "seq": seq, "minClientVersion": "0.1.0",
             "objects": "o/{aa}/{sha256}",
-            "tiers": { "curated": { "list": list, "rows": entries.len() } },
+            "tiers": tiers,
             "deltas": [], "packs": {}, "vocab": vocab
         }))
         .unwrap();
@@ -607,6 +631,61 @@ pub mod tests {
         assert_eq!(cat.bodies.len(), 3);
         assert!(cat.vocab.is_some());
         assert_eq!(cat.manifest.catalog, "2026.0101.0");
+    }
+
+    #[test]
+    fn collects_every_tier_and_refuses_a_row_in_the_wrong_list() {
+        let f = fixture(
+            "2026.0101.0",
+            1,
+            &[
+                ("a-curated", serde_json::json!({}), "A."),
+                ("b-verified", serde_json::json!({"tier": "verified"}), "B."),
+                ("c-verified", serde_json::json!({"tier": "verified"}), "C."),
+            ],
+        );
+        let mut src = f.objects.clone();
+        let cat = collect(&f.manifest, &mut src, true, &HashSet::new()).unwrap();
+        let mut tiers: Vec<(String, String)> = cat
+            .rows
+            .iter()
+            .map(|(r, _)| (r.id.clone(), r.tier.clone()))
+            .collect();
+        tiers.sort();
+        assert_eq!(
+            tiers,
+            [
+                ("a-curated".into(), "curated".into()),
+                ("b-verified".into(), "verified".into()),
+                ("c-verified".into(), "verified".into()),
+            ]
+        );
+        assert_eq!(cat.bodies.len(), 3);
+
+        // A verified row whose own field says curated is refused.
+        let mut objects = HashMap::new();
+        let mut m: serde_json::Value = serde_json::from_slice(&f.manifest).unwrap();
+        let row = row_json("b-verified", serde_json::json!({}), "sha256:00");
+        let shard = put(&mut objects, format!("{row}\n").into_bytes());
+        let list = put(
+            &mut objects,
+            serde_json::to_vec(&serde_json::json!({
+                "schema": 1, "tier": "verified", "prefixLen": 0,
+                "shards": { "": { "object": shard, "rows": 1 } }
+            }))
+            .unwrap(),
+        );
+        m["tiers"]["verified"] = serde_json::json!({ "list": list, "rows": 1 });
+        let mut src = f.objects.clone();
+        src.extend(objects);
+        let err = collect(
+            &serde_json::to_vec(&m).unwrap(),
+            &mut src,
+            false,
+            &HashSet::new(),
+        )
+        .unwrap_err();
+        assert!(err.contains("b-verified says tier \"curated\""), "{err}");
     }
 
     #[test]
