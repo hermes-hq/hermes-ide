@@ -17,7 +17,7 @@ import type { AgentCapabilities, CheckedPreset, ChoiceIssue, LaunchChoice } from
 import { reconcileChoice } from "../agent/capabilities/choice";
 import { takesChannels } from "../agent/providers/launchQuirks";
 import { shortcutLabel } from "../utils/keymap";
-import { fmt, PLATFORM } from "../utils/platform";
+import { fmt, isActionMod, PLATFORM } from "../utils/platform";
 import { AI_AGENT_PREFIXES_KEY, parseAgentPrefixes } from "../utils/aiProviders";
 import { LAST_AI_PROVIDER_KEY } from "../utils/lastAiProvider";
 import {
@@ -53,6 +53,11 @@ import {
   wasOfferedThisSession,
 } from "../launcher/draft";
 import { overlayOpened } from "../state/overlays";
+import { takeLauncherSeed } from "../library/launcherSeed";
+import { personaDelivery, systemPromptFlag, type LibraryLaunchPersona, type LibraryLaunchPick } from "../library/delivery";
+import { useLibraryMessages } from "../library/messages";
+import { worksTarget } from "../library/targets";
+import { LibraryPicker } from "./library/LibraryPicker";
 import { useModalTabTrap } from "../hooks/useFocusTrap";
 import {
   TASK_LAUNCHES_KEY,
@@ -102,6 +107,12 @@ export interface TaskLaunchRequest {
   choice: LaunchChoice;
   /** The sheet stays open after this launch (Launch & next, or the inline launcher). */
   staysOpen?: boolean;
+  /**
+   * Library picks: the prompt the task text came from, and a persona every
+   * agent gets (its system prompt where the CLI has a proven flag, else the
+   * start of its first prompt; see src/library/delivery.ts).
+   */
+  library?: { prompt?: LibraryLaunchPick | null; persona?: LibraryLaunchPersona | null };
 }
 
 /** true: started; "queued": waits for a free slot (running-agents cap); false: failed. */
@@ -225,7 +236,13 @@ export function TaskLauncher({
   const agentIds = useMemo(() => agents.map((a) => a.id), [agents]);
 
   // ── state ────────────────────────────────────────────────────────
-  const [task, setTask] = useState(initialTask ?? "");
+  // "Start a task with this" from the Library: taken once, at mount.
+  const [librarySeed] = useState(() => (inline ? null : takeLauncherSeed()));
+  const [task, setTask] = useState(librarySeed?.task ?? initialTask ?? "");
+  const [libPrompt, setLibPrompt] = useState<LibraryLaunchPick | null>(librarySeed?.prompt ?? null);
+  const [libPersona, setLibPersona] = useState<LibraryLaunchPersona | null>(librarySeed?.persona ?? null);
+  const [libPickerOpen, setLibPickerOpen] = useState(false);
+  const libraryReady = useLibraryMessages();
   const [choice, setChoice] = useState<LaunchChoice | null>(null);
   const [repoPath, setRepoPath] = useState(defaultRepo ?? "");
   const [probe, setProbe] = useState<{ path: string; result: RepoProbe } | null>(null);
@@ -462,7 +479,8 @@ export function TaskLauncher({
       setSuggestName(pending.name);
       setSuggestCount(pending.count);
     }
-    const draft = inline ? null : takeLauncherDraft();
+    // A task started from the Library is a new intent: the old draft waits.
+    const draft = inline || librarySeed ? null : takeLauncherDraft();
     if (draft) {
       setTask(draft.task);
       setChoice(draft.choice);
@@ -884,7 +902,7 @@ export function TaskLauncher({
   // A stored choice that could not be made launchable is judged live by the
   // rows above (agent missing, account signed out), with today's answers.
   const canGo =
-    !!choice && ready && canLaunch(task, gitRoot, rows) && plannedAgents.length > 0 && !launching && !customMissing && !validation && !capsError && !staleBase && !holdActive;
+    !!choice && ready && canLaunch(task.trim() || (libPersona?.title ?? ""), gitRoot, rows) && plannedAgents.length > 0 && !launching && !customMissing && !validation && !capsError && !staleBase && !holdActive;
   // Why Launch is not possible, for the Launch button's description.
   const blocked = rows.length > 0 || holdActive || !!validation || customMissing || !!capsError || failed;
 
@@ -965,6 +983,7 @@ export function TaskLauncher({
           doneWhen: checks.map((c) => c.trim()).filter(Boolean),
           choice: plannedAgents[0].choice,
           ...(next || inline ? { staysOpen: true } : {}),
+          ...(libPrompt || libPersona ? { library: { prompt: libPrompt, persona: libPersona } } : {}),
         });
       } catch (err) {
         console.error("[TaskLauncher] launch failed:", err);
@@ -1015,7 +1034,7 @@ export function TaskLauncher({
       }
       onClose?.({ keepDraft: false });
     },
-    [canGo, effective, gitRoot, plannedAgents, modePrefs, task, onLaunch, checks, backend, presets, inline, onClose, defaultPresetName, focusTask, setBranchEdited],
+    [canGo, effective, gitRoot, plannedAgents, modePrefs, task, onLaunch, checks, backend, presets, inline, onClose, defaultPresetName, focusTask, setBranchEdited, libPrompt, libPersona],
   );
 
   /**
@@ -1823,8 +1842,72 @@ export function TaskLauncher({
         rows={3}
         value={task}
         placeholder={t("launcher.taskPlaceholder")}
-        onChange={(e) => setTask(e.target.value)}
+        onChange={(e) => {
+          setTask(e.target.value);
+          if (!e.target.value.trim()) setLibPrompt(null);
+        }}
+        onKeyDown={(e) => {
+          // ⌘J / Ctrl+J: the Library, filtered to the agents of this launch.
+          if (isActionMod(e) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "j" && libraryReady) {
+            e.preventDefault();
+            setLibPickerOpen((o) => !o);
+          }
+        }}
       />
+
+      {libraryReady && (
+        <div className="task-launcher-library" data-testid="launcher-library">
+          <Button size="sm" variant="quiet" className="task-launcher-from-library" aria-expanded={libPickerOpen} onClick={() => setLibPickerOpen((o) => !o)}>
+            {t("library.launcher.fromLibrary", { shortcut: fmt("{mod}J") })}
+          </Button>
+          {libPrompt && (
+            <Chip size="sm" className="task-launcher-library-prompt" onRemove={() => setLibPrompt(null)} removeLabel={t("library.launcher.remove")}>
+              {t("library.launcher.promptChip", { title: libPrompt.title, version: libPrompt.version })}
+            </Chip>
+          )}
+          {libPersona && (
+            <Chip size="sm" className="task-launcher-library-persona" onRemove={() => setLibPersona(null)} removeLabel={t("library.launcher.remove")}>
+              {t("library.launcher.personaChip", { title: libPersona.title })}
+            </Chip>
+          )}
+        </div>
+      )}
+      {libraryReady && libPickerOpen && (
+        <div className="task-launcher-library-picker">
+          <LibraryPicker
+            works={[...new Set(plannedAgents.map((a) => worksTarget(a.id)))]}
+            kinds={["prompt", "workflow", "persona"]}
+            onPick={(pick) => {
+              if (pick.kind === "persona") {
+                setLibPersona({ id: pick.id, version: pick.version, title: pick.title, text: pick.text });
+              } else {
+                setTask(pick.text);
+                setLibPrompt({ id: pick.id, version: pick.version, title: pick.title });
+              }
+              setLibPickerOpen(false);
+              focusTask();
+            }}
+          />
+        </div>
+      )}
+      {libraryReady && libPersona && (
+        <div className="task-launcher-library-how" data-testid="launcher-persona-how">
+          <span className="task-launcher-library-how-title">{t("library.launcher.howTitle")}</span>
+          {plannedAgents.map((a) => {
+            const how = personaDelivery(a.id, a.mode);
+            const name = agentName(a.id);
+            return (
+              <span key={`${a.id}-${a.mode}`} data-agent={a.id} data-delivery={how}>
+                {how === "system"
+                  ? t("library.launcher.howSystem", { agent: name, flag: systemPromptFlag(a.id) ?? "" })
+                  : how === "first-message"
+                    ? t("library.launcher.howFirst", { agent: name })
+                    : t("library.launcher.howClipboard", { agent: name })}
+              </span>
+            );
+          })}
+        </div>
+      )}
 
       {choice && (
         <div className="task-launcher-chips" role="toolbar" aria-label={t("launcher.chipsLabel")} onKeyDown={onMenuKeys}>

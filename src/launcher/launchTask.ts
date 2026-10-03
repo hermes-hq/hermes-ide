@@ -19,6 +19,7 @@ import type { CreateSessionOpts, SessionData } from "../types/session";
 import type { TaskLaunchRequest } from "../components/TaskLauncher";
 import { getAgent } from "../catalog/agentCatalog";
 import { translate } from "../i18n/registry";
+import { launchPrompts } from "../library/delivery";
 import {
   agentTakesFirstPrompt,
   appendTaskLaunches,
@@ -96,13 +97,24 @@ export function normalizeRepoPath(path: string, windows = false): string {
   return p || path.trim();
 }
 
+/**
+ * What one agent of a launch starts with: the task (the track's first
+ * prompt for a Full track), and a library persona where it goes for that
+ * agent — its system prompt, or the start of its first prompt.
+ */
+function promptsFor(launch: QueuedLaunch): { firstPrompt: string; systemPrompt: string | null } {
+  const agent = launch.req.agents[launch.agentIndex];
+  return launchPrompts(agent.id, agent.mode, launch.firstPrompt, launch.req.library?.persona);
+}
+
 /** The create_session options of one agent of a launch. */
 function sessionOpts(launch: QueuedLaunch): CreateSessionOpts {
-  const { req, agentIndex, projectId, firstPrompt } = launch;
+  const { req, agentIndex, projectId } = launch;
   const agent = req.agents[agentIndex];
   const custom = getAgent(agent.id)?.custom === true;
+  const { firstPrompt, systemPrompt } = promptsFor(launch);
   return {
-    label: taskLabel(req.task),
+    label: taskLabel(req.task || req.library?.persona?.title || ""),
     aiProvider: agent.id,
     mode: agent.mode,
     projectIds: [projectId],
@@ -113,6 +125,7 @@ function sessionOpts(launch: QueuedLaunch): CreateSessionOpts {
       ? { [projectId]: { branch: agent.branch, createNew: agent.createBranch, ...(agent.createBranch && agent.baseBranch ? { baseBranch: agent.baseBranch } : {}) } }
       : undefined,
     initialPrompt: firstPrompt,
+    ...(systemPrompt ? { systemPrompt } : {}),
     permissionMode: agent.launch.permissionMode,
     customPrefix: agent.launch.customPrefix || undefined,
     customSuffix: agent.launch.customSuffix || undefined,
@@ -192,10 +205,11 @@ function newLaunchId(deps: LaunchTaskDeps): string {
 export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): Promise<LaunchTaskResult> {
   const result: LaunchTaskResult = { ok: false, sessionIds: [], queued: 0, copiedFor: [], featureFiles: [] };
   const task = req.task.trim();
-  if (!task || req.agents.length === 0) return result;
+  // A library persona alone (no task yet) is a launch too.
+  if ((!task && !req.library?.persona?.text.trim()) || req.agents.length === 0) return result;
 
   const projectId = await deps.projectFor(req.repoRoot);
-  const label = taskLabel(task);
+  const label = taskLabel(task || req.library?.persona?.title || "");
   const slug = taskSlug(task) || "task";
   // A Full track drives the agent phase by phase from its first prompt. When
   // the prompt cannot be built the launch still goes, with the bare task.
@@ -236,7 +250,9 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
   for (const s of started) records.push(await finishAgent(s.launch, s.sessionId, deps, result));
 
   if (result.copiedFor.length > 0) {
-    await deps.copyText(firstPrompt).catch((err) => console.warn("[launchTask] could not copy the task:", err));
+    const copied = started.find((s) => s.launch.req.agents[s.launch.agentIndex].id === result.copiedFor[0]);
+    const text = copied ? promptsFor(copied.launch).firstPrompt : firstPrompt;
+    await deps.copyText(text).catch((err) => console.warn("[launchTask] could not copy the task:", err));
   }
   await saveRecords(records, deps);
   return result;
@@ -251,7 +267,7 @@ export async function finishQueuedLaunch(launch: QueuedLaunch, sessionId: string
   const result: LaunchTaskResult = { ok: true, sessionIds: [sessionId], queued: 0, copiedFor: [], featureFiles: [], launchId: launch.launchId };
   const record = await finishAgent(launch, sessionId, deps, result);
   if (result.copiedFor.length > 0) {
-    await deps.copyText(launch.firstPrompt).catch((err) => console.warn("[launchTask] could not copy the task:", err));
+    await deps.copyText(promptsFor(launch).firstPrompt).catch((err) => console.warn("[launchTask] could not copy the task:", err));
   }
   await saveRecords([record], deps);
   return result;

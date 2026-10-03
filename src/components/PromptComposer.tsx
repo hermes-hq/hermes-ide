@@ -554,6 +554,11 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
               onRenameGroup={renameGroup}
               onDeleteGroup={deleteGroup}
               onMoveToGroup={moveToGroup}
+              onSelectLibrary={(text) => {
+                setFields({ ...EMPTY_FIELDS, task: text });
+                setAdvancedOpen(false);
+                requestAnimationFrame(() => taskRef.current?.focus());
+              }}
             />
           </div>
           <button className="prompt-composer-close" onClick={onClose} title={t("builder.close")}>&#10005;</button>

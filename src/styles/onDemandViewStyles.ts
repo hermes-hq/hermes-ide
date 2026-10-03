@@ -25,6 +25,7 @@ import "./components/FileExplorer.css";
 import "./components/FilePreview.css";
 import "./components/GitPanel.css";
 import "./components/LandSheet.css";
+import "./components/Library.css";
 import "./components/McpSection.css";
 import "./components/MemorySection.css";
 import "./components/OnboardingWizard.css";

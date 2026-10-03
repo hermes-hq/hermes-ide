@@ -166,6 +166,7 @@ export function ActivityBar({ side, tabs, activeTabId, onTabClick, onReorder, to
       {pinnedTabs && pinnedTabs.map((tab) => (
         <button
           key={tab.id}
+          data-tab-id={tab.id}
           className={`activity-bar-tab activity-bar-expandable activity-bar-expand-${side}${activeTabId === tab.id ? " activity-bar-tab-active" : ""}`}
           onClick={() => onTabClick(tab.id)}
         >
@@ -270,6 +271,13 @@ export const PlusIcon = (
   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round">
     <line x1="8" y1="3" x2="8" y2="13" />
     <line x1="3" y1="8" x2="13" y2="8" />
+  </svg>
+);
+
+export const LibraryIcon = (
+  <svg width="18" height="18" viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round">
+    {/* Two books and a leaning third: the prompt library */}
+    <path d="M2.5 3h3.5v12h-3.5zM7 3h3.5v12h-3.5zM11.8 4.2l2.8-.6 1.4 10.8-2.8.6z" />
   </svg>
 );
 

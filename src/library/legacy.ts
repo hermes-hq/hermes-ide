@@ -1,0 +1,170 @@
+// ─── Hermes 2.0 prompts inside the Library ───────────────────────────
+//
+// Nothing the person saved moves or changes: their templates, groups, pins,
+// custom roles and styles stay in the same settings keys and the Builder
+// reads them as before. The Library shows them as "My templates", next to
+// the 2.0 built-ins as read-only "Hermes classics". An old id resolves in
+// this order:
+//
+//   1. the person's own item (user-…, custom-role-…, custom-style-…);
+//   2. a library entry that carries it as its id or a reviewed alias;
+//   3. the classic copy (the 2.0 arrays, unchanged);
+//   4. kept as it is and shown as missing — never dropped.
+
+import { getSetting } from "../api/settings";
+import type { PromptTemplate } from "../lib/templates";
+import type { RoleDefinition } from "../lib/roles";
+import type { StyleDefinition } from "../lib/styles";
+
+export interface LegacyItem {
+  /** "classic:template:<id>", "mine:<id>" … unique in the Library. */
+  key: string;
+  id: string;
+  group: "classic" | "mine";
+  source: "template" | "role" | "style";
+  title: string;
+  description: string;
+  category: string;
+  /** What "Use in session" sends. */
+  text: string;
+}
+
+type Compile = typeof import("../lib/compilePrompt");
+
+let compileModule: Promise<Compile> | null = null;
+const loadCompile = () => (compileModule ??= import("../lib/compilePrompt"));
+
+function parseList<T>(raw: string): T[] {
+  try {
+    const v = JSON.parse(raw);
+    return Array.isArray(v) ? (v as T[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function templateText(c: Compile, tpl: PromptTemplate, roles: RoleDefinition[], styles: StyleDefinition[]): string {
+  const fields = (tpl.fields ?? {}) as Record<string, unknown>;
+  // A 1.x template keeps one free-text role.
+  if (typeof fields.role === "string") {
+    return c.compilePromptLegacy({
+      role: String(fields.role ?? ""),
+      task: String(fields.task ?? ""),
+      scope: String(fields.scope ?? ""),
+      constraints: String(fields.constraints ?? ""),
+      style: String(fields.style ?? ""),
+    });
+  }
+  const f = tpl.fields ?? {};
+  return c.compilePrompt(
+    {
+      ...c.EMPTY_FIELDS,
+      ...f,
+      roleIds: f.roleIds?.length ? f.roleIds : (tpl.recommendedRoles ?? []),
+      styleSelections: f.styleSelections?.length ? f.styleSelections : (tpl.recommendedStyles ?? []),
+    },
+    roles,
+    styles,
+  );
+}
+
+/** The 2.0 built-in templates, roles and styles, read-only. */
+export async function loadClassics(): Promise<LegacyItem[]> {
+  const c = await loadCompile();
+  const roles = c.BUILT_IN_ROLES;
+  const styles = c.BUILT_IN_STYLES;
+  const out: LegacyItem[] = [];
+  for (const t of c.BUILT_IN_TEMPLATES) {
+    out.push({
+      key: `classic:template:${t.id}`,
+      id: t.id,
+      group: "classic",
+      source: "template",
+      title: t.name,
+      description: t.description ?? "",
+      category: t.category,
+      text: templateText(c, t, roles, styles),
+    });
+  }
+  for (const r of roles) {
+    out.push({ key: `classic:role:${r.id}`, id: r.id, group: "classic", source: "role", title: r.label, description: r.description ?? "", category: "role", text: r.systemInstruction });
+  }
+  for (const s of styles) {
+    out.push({ key: `classic:style:${s.id}`, id: s.id, group: "classic", source: "style", title: s.label, description: s.description ?? "", category: "style", text: s.levels[2] });
+  }
+  return out;
+}
+
+/** The person's saved templates, with their own roles and styles. */
+export async function loadMine(): Promise<LegacyItem[]> {
+  const c = await loadCompile();
+  const [rawTemplates, rawRoles, rawStyles] = await Promise.all([
+    getSetting("prompt_templates").catch(() => ""),
+    getSetting("custom_roles").catch(() => ""),
+    getSetting("custom_styles").catch(() => ""),
+  ]);
+  const roles = [...c.BUILT_IN_ROLES, ...parseList<RoleDefinition>(rawRoles)];
+  const styles = [...c.BUILT_IN_STYLES, ...parseList<StyleDefinition>(rawStyles)];
+  return parseList<PromptTemplate>(rawTemplates)
+    .filter((t) => t && typeof t.id === "string")
+    .map((t) => ({
+      key: `mine:${t.id}`,
+      id: t.id,
+      group: "mine" as const,
+      source: "template" as const,
+      title: t.name || t.id,
+      description: t.description ?? "",
+      category: String(t.category ?? ""),
+      text: templateText(c, t, roles, styles),
+    }));
+}
+
+/** Items whose title, description, id or text holds every word of the query. */
+export function filterLegacy(items: readonly LegacyItem[], query: string): LegacyItem[] {
+  const words = query
+    .toLowerCase()
+    .split(/\s+/)
+    .filter((w) => w && !/^[a-z]+:/.test(w));
+  if (words.length === 0) return [...items];
+  return items.filter((i) => {
+    const hay = `${i.title} ${i.description} ${i.id} ${i.category}`.toLowerCase();
+    return words.every((w) => hay.includes(w));
+  });
+}
+
+export type Resolution =
+  | { kind: "user"; id: string }
+  | { kind: "library"; id: string }
+  | { kind: "classic"; id: string; source: LegacyItem["source"] }
+  | { kind: "missing"; id: string };
+
+export function isUserId(id: string): boolean {
+  return id.startsWith("user-") || id.startsWith("custom-role-") || id.startsWith("custom-style-") || id.startsWith("custom-");
+}
+
+/**
+ * Where each old id leads now. `libraryIds` is the backend's alias answer
+ * (library_resolve); `classics` the 2.0 arrays; `mine` the person's items.
+ */
+export function resolveIds(
+  ids: readonly string[],
+  libraryIds: Readonly<Record<string, string>>,
+  classics: readonly LegacyItem[],
+  mine: readonly LegacyItem[],
+): Record<string, Resolution> {
+  const out: Record<string, Resolution> = {};
+  for (const id of ids) {
+    if (isUserId(id) || mine.some((m) => m.id === id)) out[id] = { kind: "user", id };
+    else if (libraryIds[id]) out[id] = { kind: "library", id: libraryIds[id] };
+    else {
+      const classic = classics.find((c) => c.id === id);
+      out[id] = classic ? { kind: "classic", id, source: classic.source } : { kind: "missing", id };
+    }
+  }
+  return out;
+}
+
+/** Classics that a library entry replaces (by id or reviewed alias) are not listed twice. */
+export function visibleClassics(classics: readonly LegacyItem[], libraryIds: Readonly<Record<string, string>>): LegacyItem[] {
+  return classics.filter((c) => !libraryIds[c.id]);
+}

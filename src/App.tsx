@@ -35,7 +35,7 @@ import { getSetting } from "./api/settings";
 import { workingDirectoryRecoveryMessage, reusedCheckoutMessage, type WorkingDirectoryRecovery, type ReusedCheckout } from "./state/isolation";
 import { SessionList } from "./components/SessionList";
 import { hideOpeningOverlay, showOpeningOverlay } from "./utils/sessionCreatorOverlay";
-import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon, TrackIcon } from "./components/ActivityBar";
+import { ActivityBar, SessionsIcon, ContextIcon, UsageIcon, WorkbenchIcon, PlusIcon, PluginsIcon, SettingsIcon, TrackIcon, LibraryIcon } from "./components/ActivityBar";
 import { useTrackWatching } from "./track/useTrackWatching";
 import { attachedSessions, editorCommandFor, gateMovedLine, isAgentSession, submitLineBytes } from "./track/rules";
 import { getTrackState, hasTurnHistory, noteOwnApproval } from "./track/store";
@@ -130,6 +130,8 @@ const PromptComposer = lazyView("PromptComposer", () => import("./components/Pro
 const ShortcutsPanel = lazyView("ShortcutsPanel", () => import("./components/ShortcutsPanel").then((m) => m.ShortcutsPanel));
 const WorkspacePanel = lazyView("WorkspacePanel", () => import("./components/WorkspacePanel").then((m) => m.WorkspacePanel));
 const CostDashboard = lazyView("CostDashboard", () => import("./components/CostDashboard").then((m) => m.CostDashboard));
+// The prompt library: its code, catalog and strings load the first time it opens.
+const LibraryView = lazyView("LibraryView", () => import("./components/library/LibraryView").then((m) => m.LibraryView));
 
 function AppContent() {
   const { t } = useI18n();
@@ -209,6 +211,7 @@ function AppContent() {
   const launcherReturnRef = useRef<null | { kind: "settings" } | { kind: "sign-in"; sessionId: string | null }>(null);
   const [launcherReopen] = useState(() => new LauncherReopen());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [libraryOpen, setLibraryOpen] = useState(false);
   const [cmdPaletteShortcut, setCmdPaletteShortcut] = useState("cmd_k");
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
   // An update must never kill a working agent (N10): count agent sessions
@@ -1433,6 +1436,7 @@ function AppContent() {
             side="left"
             pinnedTabs={[
               { id: "sessions", label: `${t("sessions.title")} (${shortcutLabel("view.toggle-sidebar")})`, icon: SessionsIcon, badge: sessions.length || undefined },
+              { id: "library", label: t("app.library"), icon: LibraryIcon },
             ]}
             tabs={(() => {
               const filtered = pluginPanels
@@ -1454,9 +1458,11 @@ function AppContent() {
               setActivityBarOrder(ids);
               setSetting("activity_bar_order", JSON.stringify(ids)).catch(() => {});
             }}
-            activeTabId={activePluginPanel ?? activeBottomPanel ?? (!ui.sessionListCollapsed ? "sessions" : null)}
+            activeTabId={libraryOpen ? "library" : activePluginPanel ?? activeBottomPanel ?? (!ui.sessionListCollapsed ? "sessions" : null)}
             onTabClick={(tabId) => {
-              if (tabId === "sessions") {
+              if (tabId === "library") {
+                setLibraryOpen((open) => !open);
+              } else if (tabId === "sessions") {
                 setActivePluginPanel(null);
                 dispatch({ type: "TOGGLE_SIDEBAR" });
               } else {
@@ -1613,6 +1619,13 @@ function AppContent() {
                 one is active), so unsent image attachments survive a
                 switch to a terminal session and back. The composer renders
                 nothing for non-agent sessions. */}
+            {libraryOpen && (
+              <PanelErrorBoundary panelName="Library">
+                <Suspense fallback={null}>
+                  <LibraryView onClose={() => setLibraryOpen(false)} onStartTask={() => void openTaskLauncher(true)} />
+                </Suspense>
+              </PanelErrorBoundary>
+            )}
             {hasAgentSession(sessions) && (
               <PanelErrorBoundary panelName="Composer">
                 <Suspense fallback={null}>
@@ -1828,6 +1841,7 @@ function AppContent() {
           } : undefined}
           onAttachProject={() => setProjectPickerOpen(true)}
           onOpenComposer={() => dispatch({ type: "OPEN_COMPOSER" })}
+          onOpenLibrary={() => setLibraryOpen(true)}
           onOpenShortcuts={() => { setShortcutsOpen(true); }}
           onToggleGit={reviewDeskEnabled ? toggleReviewDesk : () => dispatch({ type: "TOGGLE_GIT_PANEL" })}
           reviewDesk={reviewDeskEnabled}

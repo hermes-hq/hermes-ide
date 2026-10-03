@@ -3,6 +3,8 @@ import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { TEMPLATE_CATEGORIES, type PromptTemplate, type TemplateCategory } from "../lib/templates";
 import { fmt } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
+import { Button } from "./ui";
+import { LibraryPicker } from "./library/LibraryPicker";
 
 interface TemplatePickerProps {
   builtInTemplates: PromptTemplate[];
@@ -21,9 +23,11 @@ interface TemplatePickerProps {
   onRenameGroup: (oldName: string, newName: string) => void;
   onDeleteGroup: (name: string) => void;
   onMoveToGroup: (templateId: string, group: string | null) => void;
+  /** The prompt library's tab: a picked entry, rendered with its arguments, becomes the task. */
+  onSelectLibrary?: (text: string) => void;
 }
 
-type TabId = "built-in" | "my-templates";
+type TabId = "built-in" | "my-templates" | "library";
 
 export function TemplatePicker({
   builtInTemplates,
@@ -42,6 +46,7 @@ export function TemplatePicker({
   onRenameGroup,
   onDeleteGroup,
   onMoveToGroup,
+  onSelectLibrary,
 }: TemplatePickerProps) {
   const { t } = useI18n();
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
@@ -292,8 +297,8 @@ export function TemplatePicker({
           className="template-picker-dropdown"
           style={{ top: dropdownPos.top, left: dropdownPos.left }}
         >
-          {/* Search */}
-          <div className="template-picker-search-wrap">
+          {/* Search (the Library tab has its own) */}
+          <div className="template-picker-search-wrap" hidden={activeTab === "library"}>
             <input
               ref={searchRef}
               className="template-picker-search"
@@ -336,9 +341,31 @@ export function TemplatePicker({
                 <span className="template-picker-tab-count">{userTemplates.length}</span>
               )}
             </button>
+            {onSelectLibrary && (
+              <Button
+                size="sm"
+                variant={activeTab === "library" ? "secondary" : "quiet"}
+                className="template-picker-library-tab"
+                aria-pressed={activeTab === "library"}
+                onClick={() => setActiveTab("library")}
+              >
+                {t("app.library")}
+              </Button>
+            )}
           </div>
 
-          <div className="template-picker-list">
+          {activeTab === "library" && onSelectLibrary && (
+            <LibraryPicker
+              embedded
+              kinds={["prompt", "workflow", "persona", "style"]}
+              onPick={(pick) => {
+                onSelectLibrary(pick.text);
+                onToggle();
+              }}
+            />
+          )}
+
+          <div className="template-picker-list" hidden={activeTab === "library"}>
             {/* Pinned — always visible at top of list */}
             {pinnedTemplates.length > 0 && !search && (
               <>

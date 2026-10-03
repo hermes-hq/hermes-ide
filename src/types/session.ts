@@ -230,6 +230,10 @@ export interface CreateSessionOpts {
    *  (so the helper is used for this session whatever the launchHelper
    *  flag says); the Agent view gets it as the first message. */
   initialPrompt?: string;
+  /** A library persona added to the agent's system prompt through its catalog's
+   *  `system_prompt` flag (terminal agents with a proven flag only; the launcher
+   *  puts the persona in the first prompt for every other agent). */
+  systemPrompt?: string;
   /** N19 handoff: the new agent's first prompt (the task and the work so
    *  far). Passed only as a launch argument through the `hi` helper. */
   seedPrompt?: string;

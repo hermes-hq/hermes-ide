@@ -46,6 +46,7 @@ const ENGLISH_PACK: LanguagePack = {
     "app.tools": "Tools",
     "app.view": "View",
     "app.session": "Session",
+    "app.library": "Library",
     "composer.builder": "Builder",
     "composer.openPromptBuilder": "Open prompt builder",
     "composer.openPromptBuilderTitle": "Open prompt builder ({shortcut})",
@@ -400,6 +401,7 @@ const ENGLISH_PACK: LanguagePack = {
     "palette.addFolder": "Add Folder...",
     "palette.scanCurrentDirectory": "Scan Current Directory",
     "palette.promptComposer": "Prompt Composer",
+    "palette.openLibrary": "Open the prompt library",
     "palette.keyboardShortcuts": "Keyboard Shortcuts",
     "palette.toggleGitPanel": "Toggle Git Panel",
     "palette.reviewDesk": "Review Desk",
@@ -1864,6 +1866,19 @@ export function ensureLanguageLoaded(locale: string): Promise<void> {
     lazyLoads.set(entry, load);
   }
   return load;
+}
+
+/**
+ * Adds strings to a registered language (English included): the strings of
+ * a view that loads on demand, so they stay out of the startup bundle. False
+ * when no pack is registered for `locale`.
+ */
+export function extendMessages(locale: string, messages: TranslationMessages): boolean {
+  const pack = packs.get(locale);
+  if (!pack) return false;
+  Object.assign(pack.messages, messages);
+  notify();
+  return true;
 }
 
 // Cached snapshot so getI18nSnapshot() returns a referentially stable value
