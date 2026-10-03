@@ -44,7 +44,7 @@ const CAPTURED_RELEASES = ["0.6.16", "1.1.3", "1.2.5", "1.3.2", "1.4.0"];
 const PREVIOUS_RELEASE = "1.4.0";
 const NEWER_VERSION = 99;
 /** The schema version this build writes. */
-const SCHEMA_VERSION = 6;
+const SCHEMA_VERSION = 7;
 /** Dropped on purpose by schema step 2 (F03); kept in the backup. */
 const DROPPED = new Set(["execution_nodes"]);
 

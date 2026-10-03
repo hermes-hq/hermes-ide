@@ -106,6 +106,9 @@
 //                 Code 2.1.283 does
 //   server-error  the same, but the turn ends on `error: "server_error"` —
 //                 not a limit (the negative control for the limit checks)
+//   bracketed-paste  ask the terminal for bracketed paste (DECSET 2004)
+//                 when ready, as the real Claude Code and Codex TUIs do, so
+//                 the terminal knows a multi-line paste is safe to send
 //   ask-at-start  once ready, ask permission for a command at once (the
 //                 `PermissionRequest` hooks) and wait for y/n — an agent that
 //                 is blocked on the person as soon as it starts or resumes
@@ -1024,6 +1027,7 @@ async function main() {
 		return;
 	}
 	out("fake-cli: type q to quit\r\n");
+	if (has("bracketed-paste")) out("\x1b[?2004h");
 	if (has("no-start-hook")) note("start-hook-skipped");
 	else await runHooks("SessionStart", { source: resumed ? "resume" : "startup" });
 	out(`fake-cli: ready\r\n`);
