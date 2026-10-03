@@ -6,7 +6,7 @@
  */
 import { describe, it, expect } from "vitest";
 // @ts-expect-error — plain .mjs script without type declarations
-import { requirementsOf, probesFor, helpMentions, findDrift, formatReport, stripAnsi } from "../../scripts/agent-catalog-drift.mjs";
+import { requirementsOf, probesFor, helpMentions, findDrift, formatReport, stripAnsi, withRetries } from "../../scripts/agent-catalog-drift.mjs";
 import catalog from "../catalog/agents.json";
 
 type Probe = { path: string[]; kind: string; token: string; where: string; flag?: string };
@@ -103,5 +103,35 @@ describe("drift check: reporting", () => {
 		const report = formatReport([{ id: "goose", status: "missing", installError: "exit 1", problems: [], checked: 0 }]);
 		expect(report).toContain("- goose: CLI not found (install failed: exit 1)");
 		expect(formatReport([{ id: "goose", status: "missing", problems: [], checked: 0 }], { requireAll: false })).toContain("skipped");
+	});
+});
+
+describe("drift check: installing", () => {
+	const quiet = { wait: () => {}, log: () => {} };
+
+	it("tries a failed install again, so one bad download is not a missing CLI", () => {
+		// The 2.0.0 push run: the install script came back as a compressed
+		// body once (bash: syntax error), and passed on the next nightly run.
+		const outcomes = ["exit 2", null];
+		const waits: number[] = [];
+		const error = withRetries(() => outcomes.shift() ?? null, { ...quiet, delayMs: 10, wait: (ms: number) => waits.push(ms) });
+		expect(error).toBeNull();
+		expect(outcomes).toEqual([]);
+		expect(waits).toEqual([10]);
+	});
+
+	it("gives up after the last attempt and says how many it made", () => {
+		let calls = 0;
+		const waits: number[] = [];
+		const error = withRetries(() => { calls++; return `exit ${calls}`; }, { ...quiet, attempts: 3, delayMs: 10, wait: (ms: number) => waits.push(ms) });
+		expect(calls).toBe(3);
+		expect(error).toBe("exit 3, 3 attempts");
+		expect(waits).toEqual([10, 20]);
+	});
+
+	it("does not wait or retry after a success", () => {
+		let calls = 0;
+		expect(withRetries(() => { calls++; return null; }, quiet)).toBeNull();
+		expect(calls).toBe(1);
 	});
 });
