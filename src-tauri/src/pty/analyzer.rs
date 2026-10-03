@@ -1034,6 +1034,120 @@ mod tests {
         assert!(out.contains("after the delete") && !out.contains("secret line"));
     }
 
+    /// What the scrollback snapshot shows after these reads.
+    fn snapshot_of(reads: &[&[u8]]) -> String {
+        let mut s = SnapshotLines::default();
+        for r in reads {
+            s.feed(r);
+        }
+        s.text()
+    }
+
+    #[test]
+    fn the_snapshot_moves_the_cursor_like_the_terminal_does() {
+        // Cursor back (D), forward past the end (C pads with spaces) and to
+        // a column (G, 1-based), then a character written over.
+        assert_eq!(snapshot_of(&[b"abc\x1b[2Dx"]), "axc\n");
+        assert_eq!(snapshot_of(&[b"ab\x1b[3Cc"]), "ab   c\n");
+        assert_eq!(snapshot_of(&[b"ab\x1b[Cc"]), "ab c\n", "no count is 1");
+        assert_eq!(snapshot_of(&[b"abcdef\x1b[3Gx"]), "abxdef\n");
+        assert_eq!(snapshot_of(&[b"abc\x1b[Gx"]), "xbc\n", "no column is 1");
+        // Back past the start stops at the start.
+        assert_eq!(snapshot_of(&[b"ab\x1b[9Dx"]), "xb\n");
+    }
+
+    #[test]
+    fn the_snapshot_erases_in_line_from_to_or_all_of_the_cursor() {
+        assert_eq!(snapshot_of(&[b"abcdef\x1b[3D\x1b[K"]), "abc\n");
+        assert_eq!(snapshot_of(&[b"abcdef\x1b[3D\x1b[0K"]), "abc\n");
+        assert_eq!(snapshot_of(&[b"abcdef\x1b[3D\x1b[1K"]), "    ef\n");
+        assert_eq!(snapshot_of(&[b"abcdef\x1b[3D\x1b[2Kx"]), "   x\n");
+    }
+
+    #[test]
+    fn the_snapshot_ignores_line_edits_inside_a_full_screen_program_or_with_a_marker() {
+        // An erase on the alternate screen does not reach the line below it.
+        assert_eq!(
+            snapshot_of(&[b"keep me", b"\x1b[?1049h\x1b[2K\x1b[5D", b"\x1b[?1049l"]),
+            "keep me\n"
+        );
+        // A private-marker sequence (`CSI > ... K`) is not an erase.
+        assert_eq!(snapshot_of(&[b"keep me\x1b[>2K"]), "keep me\n");
+    }
+
+    #[test]
+    fn the_snapshot_expands_tabs_to_the_next_multiple_of_eight() {
+        assert_eq!(snapshot_of(&[b"a\tb"]), "a       b\n");
+        assert_eq!(snapshot_of(&[b"\tb"]), "        b\n");
+        assert_eq!(snapshot_of(&[b"12345678\tx"]), "12345678        x\n");
+        assert_eq!(snapshot_of(&[b"1234567\tx"]), "1234567 x\n");
+        assert_eq!(snapshot_of(&[b"123456789\tx"]), "123456789       x\n");
+    }
+
+    #[test]
+    fn a_snapshot_line_stops_growing_at_its_limit() {
+        let long = vec![b'a'; SnapshotLines::MAX_LINE + 10];
+        let text = snapshot_of(&[&long]);
+        assert_eq!(text.trim_end().len(), SnapshotLines::MAX_LINE);
+        // Overwriting inside the limit still works once the line is full.
+        let mut s = SnapshotLines::default();
+        s.feed(&long);
+        s.feed(b"\rZ");
+        assert!(s.text().starts_with("Za"));
+        assert_eq!(s.text().trim_end().len(), SnapshotLines::MAX_LINE);
+    }
+
+    #[test]
+    fn clearing_the_snapshot_inside_a_full_screen_program_keeps_it_out() {
+        let mut s = SnapshotLines::default();
+        s.feed(b"before\r\n\x1b[?1049h");
+        s.clear();
+        s.feed(b"full screen\r\n\x1b[?1049lafter\r\n");
+        assert_eq!(s.text(), "after\n");
+    }
+
+    #[test]
+    fn the_snapshot_keeps_its_byte_limit_by_dropping_whole_old_lines() {
+        // 100-byte lines (99 + newline): exactly at the limit nothing goes.
+        let line = |i: usize| format!("{:099}\n", i);
+        let mut s = SnapshotLines::default();
+        let count = SnapshotLines::MAX_BYTES / 100;
+        for i in 0..count {
+            s.feed(line(i).as_bytes());
+        }
+        assert_eq!(s.text().len(), SnapshotLines::MAX_BYTES);
+        assert!(s.text().starts_with(&line(0)));
+        // One more line: the cut lands on the start of line 1, and the
+        // line the cut is in is dropped whole with everything before it.
+        s.feed(line(count).as_bytes());
+        let text = s.text();
+        assert_eq!(text.len(), SnapshotLines::MAX_BYTES - 100);
+        assert!(text.starts_with(&line(2)), "{}", &text[..120]);
+        assert!(text.ends_with(&line(count)));
+        // Many more lines: never over the limit, newest line kept.
+        for i in count + 1..count * 3 {
+            s.feed(line(i).as_bytes());
+            assert!(s.text().len() <= SnapshotLines::MAX_BYTES);
+        }
+        assert!(s.text().ends_with(&line(count * 3 - 1)));
+        assert!(s.text().len() > SnapshotLines::MAX_BYTES - 200);
+    }
+
+    #[test]
+    fn the_snapshot_cuts_old_lines_on_a_character_boundary() {
+        // A first line of two-byte characters: the cut lands inside one.
+        let mut s = SnapshotLines::default();
+        let first = format!("{}\n", "é".repeat(3000));
+        s.feed(first.as_bytes());
+        let line = |i: usize| format!("{:099}\n", i);
+        for i in 0..100 {
+            s.feed(line(i).as_bytes());
+        }
+        let text = s.text();
+        assert!(text.starts_with(&line(0)), "{}", &text[..40]);
+        assert_eq!(text.len(), 100 * 100);
+    }
+
     #[test]
     fn alt_screen_enter_sets_state() {
         let mut s = false;
@@ -1328,6 +1442,8 @@ mod tests {
         // Other ConEmu commands (prompt marks, titles, progress) say nothing.
         a.process(b"\x1b]9;12\x07\x1b]9;3;title\x07\x1b]9;4;1;50\x07\x1b]9;2;hi\x07");
         assert!(a.take_pending_notifications().is_empty());
+        // ...and they never move the folder: only `9;9` reports one.
+        assert_eq!(a.current_cwd.as_deref(), Some("/srv/demo"));
         // A plain OSC 9 notification is still one.
         a.process(b"\x1b]9;Build finished\x07");
         let got = a.take_pending_notifications();

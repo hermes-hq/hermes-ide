@@ -870,6 +870,12 @@ const CLOSED_WHILE_OPENING: &str = "The session was closed while it was being op
 /// in the background (CHAOS-05).
 const BACKGROUND_WRITE_BYTES: usize = 64 * 1024;
 
+/// Whether input of `len` bytes is written in the background (a paste)
+/// rather than right away (typing); see [`BACKGROUND_WRITE_BYTES`].
+fn writes_in_background(len: usize) -> bool {
+    len > BACKGROUND_WRITE_BYTES
+}
+
 // Tauri command handler — params come from frontend invocation. Off the main
 // thread: starting the session host can take seconds, and on the main thread
 // that would freeze the window.
@@ -2102,7 +2108,7 @@ pub fn write_to_session(
     // Written here, it would hold the session list (and the window, whose
     // thread runs this command) until then. It is written in the
     // background instead; a failure is reported on `pty-write-failed-<id>`.
-    if bytes.len() > BACKGROUND_WRITE_BYTES {
+    if writes_in_background(bytes.len()) {
         let writer = Arc::clone(&session.writer);
         drop(mgr);
         let id = session_id.clone();
@@ -4144,6 +4150,44 @@ pub fn ssh_get_remote_git_info(
 }
 
 // ─── Tests ─────────────────────────────────────────────────────────
+
+#[cfg(test)]
+mod write_and_shell_list_tests {
+    use super::{available_shells, writes_in_background, BACKGROUND_WRITE_BYTES};
+
+    #[test]
+    fn typing_is_written_right_away_and_a_big_paste_in_the_background() {
+        // CHAOS-05: a paste over 64 KiB would hold the window while the
+        // program reads it.
+        assert_eq!(BACKGROUND_WRITE_BYTES, 65_536);
+        assert!(!writes_in_background(1));
+        assert!(!writes_in_background(4 * 1024));
+        assert!(!writes_in_background(BACKGROUND_WRITE_BYTES));
+        assert!(writes_in_background(BACKGROUND_WRITE_BYTES + 1));
+        assert!(writes_in_background(1024 * 1024));
+    }
+
+    #[test]
+    fn the_shell_list_offers_the_shells_this_machine_has_once_each() {
+        let shells = available_shells();
+        assert!(!shells.is_empty());
+        let mut names: Vec<&str> = shells.iter().map(|s| s.name.as_str()).collect();
+        names.sort_unstable();
+        let before = names.len();
+        names.dedup();
+        assert_eq!(names.len(), before, "a shell listed twice: {names:?}");
+        #[cfg(unix)]
+        {
+            // Every Unix has /bin/sh.
+            assert!(shells.iter().any(|s| s.name == "sh" && s.path == "/bin/sh"));
+            for s in &shells {
+                assert!(std::path::Path::new(&s.path).exists(), "{}", s.path);
+            }
+        }
+        #[cfg(windows)]
+        assert!(shells.iter().any(|s| s.name == "Command Prompt"));
+    }
+}
 
 #[cfg(test)]
 mod shell_kind_tests {
