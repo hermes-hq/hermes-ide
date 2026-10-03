@@ -2482,6 +2482,114 @@ fn ends_launch_watch(event: &crate::contract::SessionEvent) -> bool {
     }
 }
 
+/// What one spool record may act on: whether it is this launch's own (it
+/// carries the launch's nonce), and whether it is read live rather than
+/// replayed after a reattach (LEAD-01: a replay rebuilds the status and acts
+/// on nothing it asked for then).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RecordScope {
+    own: bool,
+    live: bool,
+}
+
+impl RecordScope {
+    fn of(record_nonce: &str, nonce: &str, replaying: bool) -> Self {
+        Self {
+            own: record_nonce == nonce,
+            live: !replaying,
+        }
+    }
+
+    /// The first turn's hold reads the launch's own records while it holds.
+    fn feeds_first_turn(self, holding: bool) -> bool {
+        self.own && holding
+    }
+
+    /// The launch's own record, read live: it can act on the launch.
+    fn acts(self) -> bool {
+        self.live && self.own
+    }
+
+    /// The CLI sent the person's message (live, this launch): its answer
+    /// may be a refusal.
+    fn sent_the_message(self, event: &str) -> bool {
+        self.acts() && crate::agent_caps::watch::PROMPT_SENT_EVENTS.contains(&event)
+    }
+
+    /// Whether the launch counts as refused at this record: it was refused
+    /// when the message went out (`at_send`), or, for a live record of its
+    /// own, its refusal was found on screen (`was_refused`, asked last).
+    fn refused(self, at_send: bool, was_refused: impl FnOnce() -> bool) -> bool {
+        at_send || (self.acts() && was_refused())
+    }
+}
+
+/// A message went out while the launch is not taken yet (`untaken`, asked
+/// only for a sent message): its first turn's start waits.
+fn sent_while_untaken(event: &str, untaken: impl FnOnce() -> bool) -> bool {
+    crate::agent_caps::watch::PROMPT_SENT_EVENTS.contains(&event) && untaken()
+}
+
+/// A refused launch took no turn: its turn starts are dropped (a start
+/// would also clear the refusal the person must see).
+fn drop_turn_starts(events: &mut Vec<crate::contract::SessionEvent>) {
+    events.retain(|e| !matches!(e, crate::contract::SessionEvent::TurnStart { .. }));
+}
+
+/// What a session event says about the agent's status: the status it
+/// reports (an exit reads as `Exited`), and, when the record is the
+/// launch's own, that status with how sure it is.
+#[allow(clippy::type_complexity)]
+fn status_of(
+    event: &crate::contract::SessionEvent,
+    own: bool,
+) -> (
+    Option<crate::contract::AgentStatusKind>,
+    Option<(
+        crate::contract::AgentStatusKind,
+        crate::contract::Confidence,
+    )>,
+) {
+    use crate::contract::{AgentStatusKind, SessionEvent};
+    match event {
+        SessionEvent::Status { status, .. } => (
+            Some(status.kind),
+            own.then_some((status.kind, status.confidence)),
+        ),
+        SessionEvent::Exit { .. } => (Some(AgentStatusKind::Exited), None),
+        _ => (None, None),
+    }
+}
+
+/// An exact ask of the person: their next key answers it.
+fn asks_the_person(
+    kind: crate::contract::AgentStatusKind,
+    sure: crate::contract::Confidence,
+) -> bool {
+    use crate::contract::{AgentStatusKind as K, Confidence};
+    sure == Confidence::Exact && matches!(kind, K::NeedsApproval | K::NeedsAnswer)
+}
+
+/// Subagents running after a record started (`delta` > 0) or ended some;
+/// never below none.
+fn subagents_after(running: i32, delta: i32) -> i32 {
+    (running + delta).max(0)
+}
+
+/// What a helper spool event asks of a live read: a new attempt (a resume
+/// fell back to a fresh start), and a Done-When check report to act on. A
+/// replay acts on neither.
+fn live_spool_actions(event: &SpoolEvent, replaying: bool) -> (bool, Option<&serde_json::Value>) {
+    if replaying {
+        return (false, None);
+    }
+    match event {
+        SpoolEvent::ResumeFallback { .. } => (true, None),
+        SpoolEvent::Check(report) => (false, Some(report)),
+        _ => (false, None),
+    }
+}
+
 pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, watch: SignalWatch) {
     let SignalWatch {
         session_dir,
@@ -2572,7 +2680,8 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 let Ok(record) = parse_signal_line(line) else {
                     continue;
                 };
-                if record.nonce == nonce && first_turn.is_holding() {
+                let scope = RecordScope::of(&record.nonce, &nonce, replaying);
+                if scope.feeds_first_turn(first_turn.is_holding()) {
                     let mapped = map_signal_record(&record, &nonce, confidence, &source);
                     let untaken = crate::agent_caps::watch::is_untaken(&session_id);
                     match first_turn.on_record(&record, &mapped, untaken) {
@@ -2592,10 +2701,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 // for a quota notice) is not sent as well.
                 // The CLI refused the launch at this message: no turn runs.
                 let mut refused = false;
-                if !replaying
-                    && record.nonce == nonce
-                    && crate::agent_caps::watch::PROMPT_SENT_EVENTS.contains(&record.event.as_str())
-                {
+                if scope.sent_the_message(&record.event) {
                     // The CLI sent the person's message: a resume's replay
                     // is over, and its answer may already be a refusal.
                     if let Some(found) = crate::agent_caps::watch::message_sent(&session_id) {
@@ -2624,10 +2730,9 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     // The CLI refused this launch (its words were found on
                     // screen, maybe before this record was read): whatever
                     // it reports now starts no turn.
-                    let refused = refused
-                        || (!replaying
-                            && record.nonce == nonce
-                            && crate::agent_caps::watch::was_refused(&session_id));
+                    let refused = scope.refused(refused, || {
+                        crate::agent_caps::watch::was_refused(&session_id)
+                    });
                     let mut framed = match turns.lock() {
                         Ok(mut t) => {
                             let mut framed = t.frame(mapped);
@@ -2636,36 +2741,29 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                                 // would also clear the refusal the person
                                 // must see).
                                 t.abandon();
-                                framed.retain(|e| {
-                                    !matches!(e, crate::contract::SessionEvent::TurnStart { .. })
-                                });
+                                drop_turn_starts(&mut framed);
                             }
                             framed
                         }
                         Err(_) => mapped,
                     };
-                    if !replaying && record.nonce == nonce {
+                    if scope.acts() {
                         first_turn.take_first_start(
                             &mut framed,
-                            crate::agent_caps::watch::PROMPT_SENT_EVENTS
-                                .contains(&record.event.as_str())
-                                && crate::agent_caps::watch::is_untaken(&session_id),
+                            sent_while_untaken(&record.event, || {
+                                crate::agent_caps::watch::is_untaken(&session_id)
+                            }),
                             Instant::now(),
                         );
                     }
                     for event in framed {
                         let event = identity.merge(event, &mut named_model);
-                        match &event {
-                            crate::contract::SessionEvent::Status { status, .. } => {
-                                reported = Some(status.kind);
-                                if record.nonce == nonce {
-                                    record_status = Some((status.kind, status.confidence));
-                                }
-                            }
-                            crate::contract::SessionEvent::Exit { .. } => {
-                                reported = Some(crate::contract::AgentStatusKind::Exited);
-                            }
-                            _ => {}
+                        let (said, own_status) = status_of(&event, scope.own);
+                        if let Some(kind) = said {
+                            reported = Some(kind);
+                        }
+                        if let Some(status) = own_status {
+                            record_status = Some(status);
                         }
                         if ends_launch_watch(&event) {
                             // A finished turn: the CLI took the launch (a
@@ -2733,9 +2831,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     if let Some((kind, sure)) = record_status {
                         // An exact ask of the person: their next key answers
                         // it (os_activity, `note_person_input`).
-                        use crate::contract::{AgentStatusKind as K, Confidence};
-                        let asks = sure == Confidence::Exact
-                            && matches!(kind, K::NeedsApproval | K::NeedsAnswer);
+                        let asks = asks_the_person(kind, sure);
                         super::os_activity::note_agent_status(
                             &session_id,
                             asks.then_some(source.as_str()),
@@ -2743,7 +2839,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                     }
                     let delta = subagent_delta(&record);
                     if delta != 0 {
-                        subagents = (subagents + delta).max(0);
+                        subagents = subagents_after(subagents, delta);
                         out.push(crate::contract::SessionEvent::Subagents {
                             at: record.at_ms(),
                             source: Some(source.clone()),
@@ -2795,7 +2891,8 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                 }
                 for line in &lines {
                     if let Some(event) = parse_spool_line(line, &nonce) {
-                        if !replaying && matches!(event, SpoolEvent::ResumeFallback { .. }) {
+                        let (new_attempt, check) = live_spool_actions(&event, replaying);
+                        if new_attempt {
                             guess.new_attempt(Instant::now());
                             // The fresh start replays nothing.
                             crate::agent_caps::watch::fresh_start(&session_id);
@@ -2805,10 +2902,8 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
                             // output is no longer of interest.
                             end_output_watch(&session_id);
                         }
-                        if let SpoolEvent::Check(report) = &event {
-                            if !replaying {
-                                checks.push(report.clone());
-                            }
+                        if let Some(report) = check {
+                            checks.push(report.clone());
                         }
                         if let SpoolEvent::Exited { .. } = &event {
                             crate::agent_caps::watch::end_soon(&session_id);
@@ -2882,7 +2977,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     mod launch_route {
         use super::super::*;
 
@@ -3484,6 +3579,173 @@ mod tests {
         assert!(!ends_launch_watch(&first));
         assert!(ran_a_tool("PostToolUse") && ran_a_tool("PostToolUse:Bash"));
         assert!(!ran_a_tool("PreToolUse") && !ran_a_tool("UserPromptSubmit"));
+    }
+
+    #[test]
+    fn a_record_acts_only_when_it_is_the_launchs_own_and_read_live() {
+        let live_own = RecordScope::of("n", "n", false);
+        let replayed_own = RecordScope::of("n", "n", true);
+        let live_other = RecordScope::of("old", "n", false);
+        assert_eq!(
+            live_own,
+            RecordScope {
+                own: true,
+                live: true
+            }
+        );
+        assert_eq!(
+            replayed_own,
+            RecordScope {
+                own: true,
+                live: false
+            }
+        );
+        assert_eq!(
+            live_other,
+            RecordScope {
+                own: false,
+                live: true
+            }
+        );
+
+        // The first turn's hold: the launch's own records, while it holds
+        // (a replay included: it rebuilds the turn).
+        assert!(live_own.feeds_first_turn(true));
+        assert!(replayed_own.feeds_first_turn(true));
+        assert!(!live_own.feeds_first_turn(false));
+        assert!(!live_other.feeds_first_turn(true));
+
+        assert!(live_own.acts());
+        assert!(!replayed_own.acts());
+        assert!(!live_other.acts());
+
+        // The message went out: only a live record of this launch, and
+        // only for the events that mean it.
+        assert!(live_own.sent_the_message("UserPromptSubmit"));
+        assert!(live_own.sent_the_message("BeforeAgent"));
+        assert!(!live_own.sent_the_message("Stop"));
+        assert!(!replayed_own.sent_the_message("UserPromptSubmit"));
+        assert!(!live_other.sent_the_message("UserPromptSubmit"));
+    }
+
+    #[test]
+    fn a_refusal_counts_from_the_send_or_from_the_screen_for_live_own_records() {
+        let live_own = RecordScope::of("n", "n", false);
+        let unasked = || -> bool { panic!("already refused at the send") };
+        assert!(live_own.refused(true, unasked));
+        assert!(RecordScope::of("x", "n", true).refused(true, unasked));
+        assert!(live_own.refused(false, || true), "found on screen");
+        assert!(!live_own.refused(false, || false));
+        let never = || -> bool { panic!("a replayed or foreign record never asks") };
+        assert!(!RecordScope::of("n", "n", true).refused(false, never));
+        assert!(!RecordScope::of("x", "n", false).refused(false, never));
+    }
+
+    #[test]
+    fn a_first_start_waits_only_for_a_message_sent_before_the_launch_was_taken() {
+        assert!(sent_while_untaken("UserPromptSubmit", || true));
+        assert!(!sent_while_untaken("UserPromptSubmit", || false));
+        assert!(!sent_while_untaken("Stop", || panic!(
+            "untaken is asked only for a sent message"
+        )));
+    }
+
+    #[test]
+    fn a_refused_launch_keeps_its_events_but_no_turn_start() {
+        use crate::contract::signal::{map_signal_record, parse_signal_line, TurnTracker};
+        use crate::contract::{Confidence, SessionEvent};
+        let record = parse_signal_line(
+            r#"{"v":1,"ts":1,"session":"s","agent":"claude","nonce":"n","event":"UserPromptSubmit","payload":{}}"#,
+        )
+        .unwrap();
+        let mut framed = TurnTracker::default().frame(map_signal_record(
+            &record,
+            "n",
+            Confidence::Exact,
+            "hook:claude",
+        ));
+        assert!(framed
+            .iter()
+            .any(|e| matches!(e, SessionEvent::TurnStart { .. })));
+        let before = framed.len();
+        drop_turn_starts(&mut framed);
+        assert_eq!(framed.len(), before - 1);
+        assert!(!framed
+            .iter()
+            .any(|e| matches!(e, SessionEvent::TurnStart { .. })));
+        assert!(framed
+            .iter()
+            .any(|e| matches!(e, SessionEvent::Status { .. })));
+    }
+
+    #[test]
+    fn the_status_an_event_reports_and_how_sure_its_own_record_is() {
+        use crate::contract::{AgentStatus, AgentStatusKind as K, Confidence, SessionEvent};
+        let status = SessionEvent::Status {
+            at: 1,
+            source: None,
+            tags: None,
+            status: AgentStatus {
+                kind: K::NeedsApproval,
+                confidence: Confidence::Signal,
+                detail: String::new(),
+            },
+        };
+        assert_eq!(
+            status_of(&status, true),
+            (
+                Some(K::NeedsApproval),
+                Some((K::NeedsApproval, Confidence::Signal))
+            )
+        );
+        assert_eq!(status_of(&status, false), (Some(K::NeedsApproval), None));
+        let exit = SessionEvent::Exit {
+            at: 2,
+            source: None,
+            tags: None,
+            code: Some(0),
+            signal: None,
+        };
+        assert_eq!(status_of(&exit, true), (Some(K::Exited), None));
+        let other = SessionEvent::Subagents {
+            at: 3,
+            source: None,
+            tags: None,
+            running: 1,
+        };
+        assert_eq!(status_of(&other, true), (None, None));
+    }
+
+    #[test]
+    fn only_an_exact_approval_or_question_waits_on_the_persons_key() {
+        use crate::contract::{AgentStatusKind as K, Confidence as C};
+        assert!(asks_the_person(K::NeedsApproval, C::Exact));
+        assert!(asks_the_person(K::NeedsAnswer, C::Exact));
+        assert!(!asks_the_person(K::NeedsApproval, C::Signal));
+        assert!(!asks_the_person(K::NeedsAnswer, C::Guessed));
+        assert!(!asks_the_person(K::Working, C::Exact));
+    }
+
+    #[test]
+    fn subagents_add_up_and_never_go_below_none() {
+        assert_eq!(subagents_after(0, 1), 1);
+        assert_eq!(subagents_after(2, 3), 5);
+        assert_eq!(subagents_after(3, -1), 2);
+        assert_eq!(subagents_after(0, -1), 0);
+    }
+
+    #[test]
+    fn a_replay_starts_no_new_attempt_and_acts_on_no_check() {
+        let fallback = SpoolEvent::ResumeFallback {
+            vendor_session_id: None,
+        };
+        let report = serde_json::json!({"ok": true});
+        let check = SpoolEvent::Check(report.clone());
+        assert_eq!(live_spool_actions(&fallback, false), (true, None));
+        assert_eq!(live_spool_actions(&check, false), (false, Some(&report)));
+        assert_eq!(live_spool_actions(&SpoolEvent::Ended, false), (false, None));
+        assert_eq!(live_spool_actions(&fallback, true), (false, None));
+        assert_eq!(live_spool_actions(&check, true), (false, None));
     }
 
     #[test]
@@ -5108,7 +5370,8 @@ mod tests {
         assert_eq!(s.task_prompt, None);
     }
 
-    fn test_session() -> Session {
+    /// A plain terminal session for tests (also used by `session_host`).
+    pub(crate) fn test_session() -> Session {
         use super::super::models::{SessionMetrics, SessionMode};
         use std::collections::HashMap;
         Session {

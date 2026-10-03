@@ -2515,6 +2515,56 @@ mod tests {
         assert!(rows.is_empty());
     }
 
+    // ── worktree base branch ───────────────────────────────────────────
+
+    #[test]
+    fn test_worktree_base_branch_round_trip() {
+        let db = test_db();
+        db.insert_session_worktree("wt1", "sess1", "project1", "/path/wt1", Some("task"), false)
+            .unwrap();
+        db.insert_session_worktree(
+            "wt2",
+            "sess2",
+            "project1",
+            "/path/wt2",
+            Some("other"),
+            false,
+        )
+        .unwrap();
+
+        // Nothing recorded yet, and no worktree at all, both read as None.
+        assert_eq!(
+            db.get_worktree_base_branch("sess1", "project1").unwrap(),
+            None
+        );
+        assert_eq!(
+            db.get_worktree_base_branch("nobody", "project1").unwrap(),
+            None
+        );
+
+        db.set_worktree_base_branch("wt1", "develop").unwrap();
+        assert_eq!(
+            db.get_worktree_base_branch("sess1", "project1").unwrap(),
+            Some("develop".to_string())
+        );
+        // Only that worktree, and only in its project.
+        assert_eq!(
+            db.get_worktree_base_branch("sess2", "project1").unwrap(),
+            None
+        );
+        assert_eq!(
+            db.get_worktree_base_branch("sess1", "project2").unwrap(),
+            None
+        );
+
+        // An empty base is no base.
+        db.set_worktree_base_branch("wt1", "").unwrap();
+        assert_eq!(
+            db.get_worktree_base_branch("sess1", "project1").unwrap(),
+            None
+        );
+    }
+
     // ── update_worktree_branch ─────────────────────────────────────────
 
     #[test]
