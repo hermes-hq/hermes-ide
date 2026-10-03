@@ -328,28 +328,19 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                     }
                     let path_str = path.to_string_lossy().to_string();
 
-                    // Check if this directory has a DB record
-                    if !known_paths.contains(&path_str) {
-                        log::info!("Removing orphaned worktree directory: {}", path_str);
-                        // Try git worktree prune first, then remove directory
-                        let _ = crate::git::cli::git_command()
-                            .arg("-C")
-                            .arg(&proj.path)
-                            .arg("worktree")
-                            .arg("prune")
-                            .output();
-                        match std::fs::remove_dir_all(&path) {
-                            Ok(_) => {
-                                cleanup_count += 1;
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "[worktree-cleanup] Failed to remove orphan {}: {}",
-                                    path_str,
-                                    e
-                                );
-                            }
-                        }
+                    // Check if this directory has a DB record. Only a folder
+                    // git vouches has nothing to lose goes now; anything else
+                    // stays for Settings > Storage (backup first, the
+                    // person decides).
+                    if !known_paths.contains(&path_str)
+                        && git::hygiene::remove_orphan_if_nothing_to_lose(
+                            &app_data_dir,
+                            Path::new(&proj.path),
+                            &path,
+                        )
+                    {
+                        log::info!("Removed orphaned worktree directory: {}", path_str);
+                        cleanup_count += 1;
                     }
                 }
             }

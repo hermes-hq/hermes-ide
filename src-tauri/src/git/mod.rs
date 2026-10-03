@@ -2,6 +2,7 @@ pub mod cli;
 pub mod cow_clone;
 pub mod disk_guard;
 pub mod fast_setup;
+pub mod hygiene;
 pub mod journal;
 pub mod recipe;
 pub mod safety;

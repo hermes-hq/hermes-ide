@@ -504,6 +504,31 @@ pub fn sweep_orphan_folders(
             });
             continue;
         }
+        // Work in it (uncommitted files, commits only it holds, or a folder
+        // git cannot read) is saved as a backup in the repo first; when that
+        // fails the folder stays.
+        if let (Some(repo), true) = (&orphan.repo_path, orphan.repo_exists) {
+            let repo = Path::new(repo);
+            let facts = super::hygiene::work_facts(repo, &dir);
+            if !facts.git_knows || facts.has_work() {
+                let app_data = base.parent().unwrap_or(base);
+                if let Err(e) = super::hygiene::snapshot_backup(
+                    app_data,
+                    repo,
+                    &dir,
+                    facts.git_knows,
+                    facts.branch.as_deref(),
+                ) {
+                    results.push(SweepResult {
+                        path: path.clone(),
+                        removed: false,
+                        freed_bytes: 0,
+                        error: Some(format!("{e}. Left alone.")),
+                    });
+                    continue;
+                }
+            }
+        }
         let size = dir_size(&dir);
         match fs::remove_dir_all(&dir) {
             Ok(()) => {
@@ -911,6 +936,27 @@ mod tests {
             list
         );
         assert!(list.contains("aaaaaaaa_owned"));
+    }
+
+    #[test]
+    fn sweep_backs_up_uncommitted_work_before_removing_an_orphan() {
+        let l = layout();
+        let orphan = add_worktree(&l, "bbbbbbbb_orphan", "orphan");
+        fs::write(orphan.join("draft.md"), "only copy").unwrap();
+        let known = HashSet::new();
+        let results =
+            sweep_orphan_folders(&l.base, &known, &[orphan.to_string_lossy().to_string()]);
+        assert!(results[0].removed, "{:?}", results);
+        let app_data = l.base.parent().unwrap();
+        let backups = super::super::hygiene::list_backups(app_data, 10);
+        assert_eq!(backups.len(), 1);
+        let shown = Command::new("git")
+            .arg("-C")
+            .arg(&l.repo)
+            .args(["show", &format!("{}:draft.md", backups[0].ref_name)])
+            .output()
+            .unwrap();
+        assert_eq!(String::from_utf8_lossy(&shown.stdout), "only copy");
     }
 
     #[test]
