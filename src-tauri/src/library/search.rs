@@ -505,9 +505,14 @@ pub fn match_expr(q: &ParsedQuery, vocab: &Vocab) -> Option<String> {
     match_expr_with(q, vocab, false)
 }
 
-/// Up to `CANDIDATES` rowids after `after`, in static order.
-fn candidates(conn: &Connection, expr: Option<&str>, after: i64) -> Result<Vec<i64>, String> {
-    let limit = CANDIDATES as i64;
+/// Up to `limit` rowids after `after`, in static order.
+fn candidates(
+    conn: &Connection,
+    expr: Option<&str>,
+    after: i64,
+    limit: usize,
+) -> Result<Vec<i64>, String> {
+    let limit = limit as i64;
     match expr {
         Some(expr) => {
             let mut stmt = conn
@@ -617,6 +622,9 @@ struct Pass {
     /// the exact checks. When it is not full it holds every match, so no
     /// second scan is needed to count them.
     first_window: Option<(usize, usize)>,
+    /// With `count_first`: the matches of the first page's scan, up to
+    /// `COUNT_CAP + 1` (the same scan that found the first window).
+    matched: Option<i64>,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -631,6 +639,7 @@ fn pass(
     new_ids: &HashSet<String>,
     (mut after, mut offset): (i64, usize),
     mode: &str,
+    count_first: bool,
 ) -> Result<Pass, String> {
     let limit = req.limit.unwrap_or(MAX_PAGE).clamp(1, MAX_PAGE);
     let sort = req.sort.as_deref().unwrap_or("you");
@@ -638,10 +647,20 @@ fn pass(
         hits: Vec::new(),
         next_cursor: None,
         first_window: None,
+        matched: None,
     };
     // A window whose candidates all fail the exact checks moves on to the next.
     for _ in 0..8 {
-        let window = candidates(conn, expr, after)?;
+        // A first page that shows a count reads on to COUNT_CAP + 1 matches
+        // in the one scan, instead of scanning the same lists again to count.
+        let window = if count_first && after == 0 && out.matched.is_none() {
+            let mut all = candidates(conn, expr, 0, COUNT_CAP as usize + 1)?;
+            out.matched = Some(all.len() as i64);
+            all.truncate(CANDIDATES);
+            all
+        } else {
+            candidates(conn, expr, after, CANDIDATES)?
+        };
         let full = window.len() == CANDIDATES;
         let last = window.last().copied();
         let ranked = rank(
@@ -703,6 +722,7 @@ pub fn search(
         signals
     };
     let new_ids: HashSet<String> = store::new_ids(conn).into_iter().collect();
+    let want_count = req.counts || req.cursor.is_none();
     // ":p" on a cursor: the page came from the every-word-a-prefix form.
     let cursor = req.cursor.as_deref();
     let prefix_cursor = cursor.is_some_and(|c| c.ends_with(":p"));
@@ -720,6 +740,7 @@ pub fn search(
         &new_ids,
         position,
         if prefix_all { ":p" } else { "" },
+        want_count && position.0 == 0,
     )?;
     // Nothing with whole words: try every word as a prefix ("flak test").
     if run.hits.is_empty() && cursor.is_none() && !prefix_all && !q.terms.is_empty() {
@@ -738,6 +759,7 @@ pub fn search(
                 &new_ids,
                 (0, 0),
                 ":p",
+                want_count,
             )?;
         }
     }
@@ -746,9 +768,10 @@ pub fn search(
         next_cursor: run.next_cursor,
         ..Default::default()
     };
-    if req.counts || req.cursor.is_none() {
-        page.total = match run.first_window {
-            Some((n, passed)) if n < CANDIDATES => passed as i64,
+    if want_count {
+        page.total = match (run.first_window, run.matched) {
+            (Some((n, passed)), _) if n < CANDIDATES => passed as i64,
+            (_, Some(matched)) => matched,
             _ => count(conn, expr.as_deref()),
         };
         page.total_capped = page.total > COUNT_CAP;
