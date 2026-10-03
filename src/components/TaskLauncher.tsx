@@ -646,9 +646,10 @@ export function TaskLauncher({
 
   useEffect(() => {
     if (branchEdited || branchEditedRef.current) return;
-    const auto = autoTaskBranch(task, localBranches, fallbackId);
+    // A library prompt's text opens with markup ("<context>"): its title names the branch.
+    const auto = autoTaskBranch(libPrompt?.title || task, localBranches, fallbackId);
     setBranch((cur) => (branchEditedRef.current ? cur : auto));
-  }, [task, branchEdited, localBranches, fallbackId]);
+  }, [task, libPrompt, branchEdited, localBranches, fallbackId]);
 
   // Another project: its usual combination, when the person has not made
   // this one their own; when they have, the launcher only says what the
@@ -1021,7 +1022,7 @@ export function TaskLauncher({
         }
       }
       if (next) {
-        setLaunched((l) => [...l, { label: taskLabel(trimmed), queued: result === "queued" }]);
+        setLaunched((l) => [...l, { label: taskLabel(libPrompt?.title || trimmed), queued: result === "queued" }]);
         // What was typed while the launch ran is the next task: only the launched text is cleared.
         if (latestTask.current.trim() === trimmed) {
           setTask((cur) => (cur.trim() === trimmed ? "" : cur));

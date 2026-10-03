@@ -102,6 +102,15 @@ export function normalizeRepoPath(path: string, windows = false): string {
  * prompt for a Full track), and a library persona where it goes for that
  * agent — its system prompt, or the start of its first prompt.
  */
+/**
+ * What a launch is named after (session label, slug): the title of the
+ * library prompt the task came from, whose text opens with markup such as
+ * "<context>"; else the task; else the persona alone.
+ */
+function nameOf(task: string, library: TaskLaunchRequest["library"]): string {
+  return library?.prompt?.title || task || library?.persona?.title || "";
+}
+
 function promptsFor(launch: QueuedLaunch): { firstPrompt: string; systemPrompt: string | null } {
   const agent = launch.req.agents[launch.agentIndex];
   return launchPrompts(agent.id, agent.mode, launch.firstPrompt, launch.req.library?.persona);
@@ -114,7 +123,7 @@ function sessionOpts(launch: QueuedLaunch): CreateSessionOpts {
   const custom = getAgent(agent.id)?.custom === true;
   const { firstPrompt, systemPrompt } = promptsFor(launch);
   return {
-    label: taskLabel(req.task || req.library?.persona?.title || ""),
+    label: taskLabel(nameOf(req.task.trim(), req.library)),
     aiProvider: agent.id,
     mode: agent.mode,
     projectIds: [projectId],
@@ -152,7 +161,7 @@ async function finishAgent(launch: QueuedLaunch, sessionId: string, deps: Launch
     console.warn("[launchTask] could not read the session's worktree:", err);
   }
   if (req.track === "Full") {
-    const slug = taskSlug(task) || "task";
+    const slug = taskSlug(nameOf(task, req.library)) || "task";
     // A session on the current checkout has no worktree: the feature lives in the repository's own folder.
     const checkout = worktree ?? (agent.worktree ? null : req.repoRoot);
     try {
@@ -209,8 +218,8 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
   if ((!task && !req.library?.persona?.text.trim()) || req.agents.length === 0) return result;
 
   const projectId = await deps.projectFor(req.repoRoot);
-  const label = taskLabel(task || req.library?.persona?.title || "");
-  const slug = taskSlug(task) || "task";
+  const label = taskLabel(nameOf(task, req.library));
+  const slug = taskSlug(nameOf(task, req.library)) || "task";
   // A Full track drives the agent phase by phase from its first prompt. When
   // the prompt cannot be built the launch still goes, with the bare task.
   let firstPrompt = task;

@@ -104,11 +104,19 @@ describe("launching with library picks", () => {
     expect(created[1].initialPrompt).toContain('Reply "ready" and wait for my task.');
   });
 
+  it("names the session after the library prompt, not the markup its text opens with", async () => {
+    const { deps, created } = fake();
+    await launchTask(req([agent("claude")], { task: "<context>\nYou are reviewing a change before it merges.", library: { prompt: PROMPT } }), deps);
+    expect(created[0].label).toBe("Review a pull request");
+    expect(created[0].initialPrompt).toBe("<context>\nYou are reviewing a change before it merges.");
+  });
+
   it("changes nothing without library picks", async () => {
     const { deps, created } = fake();
     await launchTask(req([agent("claude")], { library: undefined }), deps);
     expect(created[0].systemPrompt).toBeUndefined();
     expect(created[0].initialPrompt).toBe("Review feat/checkout for correctness.");
+    expect(created[0].label).toBe("Review feat/checkout for correctness.");
   });
 
   it("a queued launch starts with the same prompts", () => {
