@@ -2,11 +2,11 @@
   "_note": "The prompt library catalog bundled into Hermes builds, pinned to a release tag of hermes-hq/hodios-dist. scripts/fetch-prompt-library.mjs downloads it, checks the manifest against manifest_sha256 and every object against its own sha256, and writes src-tauri/library/. The app checks the same manifest hash before it imports the bundled copy. Bump only with `npm run library:bump -- <tag>`.",
   "schema": 1,
   "source": "hermes-hq/hodios-dist",
-  "tag": "v2026.1003.1",
-  "catalog": "2026.1003.1",
-  "seq": 4,
+  "tag": "v2026.1003.2",
+  "catalog": "2026.1003.2",
+  "seq": 5,
   "rows": 2570,
-  "manifest_sha256": "e9703382375838c03729fca9e13e215e9ab917b45aa0211a291161ea41ef977c",
+  "manifest_sha256": "2113547283c7684f8567f61b23e6043c90d8d1f23f9e22bb5bc1b84c091602fb",
   "mirrors": [
     "https://cdn.jsdelivr.net/gh/hermes-hq/hodios-dist@{tag}/catalog/v1",
     "https://raw.githubusercontent.com/hermes-hq/hodios-dist/{tag}/catalog/v1"

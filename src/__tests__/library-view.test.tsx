@@ -94,7 +94,7 @@ const ENTRY = {
 function backend(cmd: string, args: Record<string, unknown>) {
   switch (cmd) {
     case "library_status":
-      return { ready: true, catalog: { catalog: "2026.1003.1", seq: 4, manifestSha256: "x", source: "bundled", rows: 2570, appliedAt: 1 }, bundled: ["2026.1003.1", 4], hasBundledArchive: true, offlineBodies: 2570, updates: "auto", lastCheck: null, lastSuccess: null, lastError: null, trustedKeys: 0, importMs: 120, lastOutcome: null, checking: false, error: null };
+      return { ready: true, catalog: { catalog: "2026.1003.2", seq: 5, manifestSha256: "x", source: "bundled", rows: 2570, appliedAt: 1 }, bundled: ["2026.1003.2", 5], hasBundledArchive: true, offlineBodies: 2570, updates: "auto", lastCheck: null, lastSuccess: null, lastError: null, trustedKeys: 0, importMs: 120, lastOutcome: null, checking: false, error: null };
     case "library_item_states":
       return [];
     case "library_shelves":
