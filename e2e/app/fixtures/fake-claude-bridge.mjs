@@ -10,7 +10,9 @@
 //
 //   HERMES_FAKE_BRIDGE_PLAN  path to a JSON file: { "mode": "<mode>" }
 //   HERMES_FAKE_BRIDGE_LOG   path of an NDJSON log this process appends to:
-//                            {"event":"start"|"input"|"exit", "pid", ...}
+//                            {"event":"start"|"input"|"exit", "pid", ...};
+//                            a user message's "input" entry lists its content
+//                            blocks (an image as media type, size and sha256)
 //   HERMES_FAKE_MCP_SERVERS  comma-separated MCP server names the init
 //                            message reports as connected
 //
@@ -26,6 +28,7 @@
 //
 // The replies are synthetic; nothing here was recorded from a real account.
 
+import { createHash } from "node:crypto";
 import { appendFileSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline";
 
@@ -140,6 +143,27 @@ function onUserMessage(text) {
   out({ type: "result", subtype: "success", is_error: false, result: reply, session_id: sessionId, num_turns: turn });
 }
 
+/**
+ * What one content block of a user message carried, for the log: its type,
+ * and for an image the media type, byte count and a hash of the decoded
+ * bytes (so a scenario can check the pixels arrived unchanged without
+ * logging them).
+ */
+function describeBlock(b) {
+  if (b?.type === "image") {
+    const bytes = Buffer.from(String(b.source?.data ?? ""), "base64");
+    return {
+      type: "image",
+      source_type: b.source?.type,
+      media_type: b.source?.media_type,
+      bytes: bytes.length,
+      sha256: createHash("sha256").update(bytes).digest("hex"),
+    };
+  }
+  if (b?.type === "text") return { type: "text", text: b.text };
+  return { type: b?.type ?? null };
+}
+
 const rl = createInterface({ input: process.stdin });
 rl.on("line", (line) => {
   let msg;
@@ -148,9 +172,9 @@ rl.on("line", (line) => {
   } catch {
     return;
   }
-  log({ event: "input", type: msg.type });
-  if (msg.type !== "user") return;
   const content = msg.message?.content;
+  log({ event: "input", type: msg.type, ...(msg.type === "user" && Array.isArray(content) ? { blocks: content.map(describeBlock) } : {}) });
+  if (msg.type !== "user") return;
   const text = typeof content === "string"
     ? content
     : Array.isArray(content)
