@@ -643,6 +643,13 @@ pub async fn run_check(app: &AppHandle, manual: bool, apply_now: Option<bool>) -
             set_setting(app, "library_last_success", &t);
             set_setting(app, "library_last_error", "");
         }
+        o if o.awaiting_signed_release() => {
+            log::info!(
+                "[library] update: the catalog has no signed release yet; keeping the one here"
+            );
+            set_setting(app, "library_last_success", &t);
+            set_setting(app, "library_last_error", "");
+        }
         update::Outcome::Refused { reason, .. } | update::Outcome::Failed { reason } => {
             log::warn!("[library] update: {reason}");
             set_setting(app, "library_last_error", reason);
@@ -760,9 +767,8 @@ pub fn start_updates(app: &AppHandle) {
             let mode = setting(&app, "library_updates").unwrap_or_else(|| "auto".into());
             let last_check = setting(&app, "library_last_check").and_then(|v| v.parse().ok());
             let last_success = setting(&app, "library_last_success").and_then(|v| v.parse().ok());
-            // No trusted key yet (hodios does not sign its manifest): every
-            // download would be refused, so none is made. "Check now" still
-            // asks and shows the refusal.
+            // A build that trusts no key would refuse every download, so it
+            // makes none. "Check now" still asks and shows the refusal.
             let signed = !verify::trusted_keys().is_empty();
             if mode != "off" && signed && update::due(now(), last_check, last_success) {
                 let outcome = run_check(&app, false, None).await;

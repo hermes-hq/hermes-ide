@@ -39,14 +39,21 @@ export function outcomeText(t: T, o: UpdateOutcome | null | undefined): string |
         ? t("library.update.refusedUnsigned")
         : o.code === "signature"
           ? t("library.update.refusedSignature")
-          : o.code === "older"
-            ? t("library.update.refusedOlder")
-            : t("library.update.refused", { reason: o.reason });
+          : o.code === "key"
+            ? t("library.update.refusedKey")
+            : o.code === "older"
+              ? t("library.update.refusedOlder")
+              : t("library.update.refused", { reason: o.reason });
     case "failed":
       return t("library.update.failed");
     case "off":
       return t("library.update.isOff");
   }
+}
+
+/** The mirror has no signed release yet: not an error, the bundled catalog stays. */
+export function awaitingSignedRelease(o: UpdateOutcome | null | undefined): boolean {
+  return o?.outcome === "refused" && o.code === "unsigned";
 }
 
 export function LibraryUpdatePanel({ status, onChanged }: { status: LibraryStatus; onChanged: () => void }) {
@@ -99,6 +106,11 @@ export function LibraryUpdatePanel({ status, onChanged }: { status: LibraryStatu
       </dl>
       {status.lastError && <p className="lib-blocked" role="status">{outcomeText(t, status.lastOutcome) ?? status.lastError}</p>}
       {status.trustedKeys === 0 && <p className="lib-muted">{t("library.update.noKeyNote")}</p>}
+      {status.trustedKeys > 0 && !status.lastError && !message && awaitingSignedRelease(status.lastOutcome) && (
+        <p className="lib-muted" data-testid="library-update-waiting">
+          {t("library.update.refusedUnsigned")}
+        </p>
+      )}
       <div className="lib-update-row">
         <span className="lib-muted">{t("library.update.updates")}</span>
         <Segmented

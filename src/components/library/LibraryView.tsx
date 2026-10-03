@@ -479,7 +479,11 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
           />
           <span className="lib-search-hint">{t("library.search.hint")}</span>
         </div>
-        <LibraryUpdateBadge status={status} fresh={fresh} open={updateOpen} onToggle={() => setUpdateOpen((o) => !o)} />
+        <LibraryUpdateBadge status={status} fresh={fresh} open={updateOpen} onToggle={() => {
+            // The background check may have run since: show its verdict.
+            refreshStatus();
+            setUpdateOpen((o) => !o);
+          }} />
         <CloseButton label={t("library.close")} onClick={onClose} />
       </div>
       {updateOpen && status && (

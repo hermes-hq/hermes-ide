@@ -162,7 +162,7 @@ export type UpdateOutcome =
   | { outcome: "upToDate"; catalog: string; seq: number }
   | { outcome: "available"; catalog: string; seq: number }
   | { outcome: "applied"; summary: ApplySummary; bytes: number }
-  | { outcome: "refused"; reason: string; code: "unsigned" | "signature" | "older" | "hash" | "schema" | "format" | string }
+  | { outcome: "refused"; reason: string; code: "unsigned" | "signature" | "key" | "older" | "hash" | "schema" | "format" | string }
   | { outcome: "failed"; reason: string };
 
 export interface ApplySummary {

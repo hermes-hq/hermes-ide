@@ -134,6 +134,15 @@ pub enum Outcome {
     },
 }
 
+impl Outcome {
+    /// The mirror has no signed release yet. Nothing is applied, but nothing
+    /// is wrong either: the check counts as done (next one in 12 hours), and
+    /// it is neither logged as a warning nor shown as an error.
+    pub fn awaiting_signed_release(&self) -> bool {
+        matches!(self, Outcome::Refused { code, .. } if code == "unsigned")
+    }
+}
+
 /// (catalog, seq) of `a` is newer than `b`.
 pub fn newer(a: (&str, i64), b: (&str, i64)) -> bool {
     if a.0 == b.0 {
@@ -160,14 +169,18 @@ pub async fn fetch_manifest(fetcher: &dyn Fetcher, keys: &[String]) -> Result<Ca
         Err(e) => return Err(Outcome::Failed { reason: e }),
     };
     let sig = match fetcher.get("manifest.json.minisig").await {
-        Ok(Some(s)) => String::from_utf8(s).ok(),
-        _ => None,
+        // Not valid UTF-8: unreadable, not absent.
+        Ok(Some(s)) => Some(String::from_utf8(s).unwrap_or_default()),
+        // No mirror publishes one: the catalog has no signed release yet.
+        Ok(None) => None,
+        // Offline or a mirror error: not a verdict on the catalog.
+        Err(e) => return Err(Outcome::Failed { reason: e }),
     };
     if let Err(e) = verify::verify_manifest(&bytes, sig.as_deref(), keys) {
         let code = match e {
-            VerifyError::NoTrustedKey => "unsigned",
-            VerifyError::Missing(_) => "unsigned",
-            VerifyError::Invalid => "signature",
+            VerifyError::NoTrustedKey | VerifyError::NotPublished => "unsigned",
+            VerifyError::UnknownKey(_) => "key",
+            VerifyError::Malformed(_) | VerifyError::Invalid => "signature",
         };
         return Err(Outcome::Refused {
             reason: e.to_string(),
@@ -427,15 +440,7 @@ mod tests {
         }
     }
 
-    /// minisign signature of `data` with the throwaway test key.
-    fn sign(data: &[u8]) -> String {
-        // Signatures are made by Node in the e2e rig; here a fixed one is
-        // only valid for b"hello manifest", so tests that need a valid
-        // signature use `TEST_KEYS` with a manifest of exactly those bytes,
-        // and the rest check the refusals.
-        let _ = data;
-        crate::library::verify::tests::TEST_SIG.to_string()
-    }
+    use crate::library::verify::tests::TestKey;
 
     fn served(f: &Fixture, manifest: &[u8], sig: Option<String>) -> Arc<Mem> {
         let mut files = f.objects.clone();
@@ -447,10 +452,6 @@ mod tests {
             files,
             hits: Mutex::new(Vec::new()),
         })
-    }
-
-    fn keys() -> Vec<String> {
-        vec![crate::library::verify::tests::TEST_PUBKEY.to_string()]
     }
 
     #[test]
@@ -471,25 +472,71 @@ mod tests {
         assert!(!newer(("2026.1002.9", 9), ("2026.1003.0", 1)));
     }
 
+    fn refused_code(r: Result<Candidate, Outcome>) -> String {
+        match r {
+            Err(Outcome::Refused { code, .. }) => code,
+            Err(o) => panic!("expected a refusal, got {o:?}"),
+            Ok(_) => panic!("expected a refusal, got a verified manifest"),
+        }
+    }
+
     #[tokio::test]
-    async fn refuses_an_unsigned_or_badly_signed_catalog() {
+    async fn accepts_a_manifest_signed_with_a_trusted_key() {
         let f = three();
+        let key = TestKey::generate();
+        let server = served(&f, &f.manifest, Some(key.sign(&f.manifest)));
+        let c = fetch_manifest(server.as_ref(), std::slice::from_ref(&key.public))
+            .await
+            .expect("a good signature verifies");
+        assert_eq!(c.manifest.catalog, "2026.0101.0");
+        assert_eq!(c.bytes, f.manifest);
+    }
+
+    #[tokio::test]
+    async fn refuses_unsigned_unknown_key_and_bad_signatures() {
+        let f = three();
+        let key = TestKey::generate();
+        let keys = vec![key.public.clone()];
+        // No signature published: waiting for a signed release, not an error.
         let unsigned = served(&f, &f.manifest, None);
-        match fetch_manifest(unsigned.as_ref(), &keys()).await {
-            Err(Outcome::Refused { code, .. }) => assert_eq!(code, "unsigned"),
-            _ => panic!("an unsigned manifest must be refused"),
+        let r = fetch_manifest(unsigned.as_ref(), &keys).await;
+        assert!(matches!(&r, Err(o) if o.awaiting_signed_release()));
+        assert_eq!(refused_code(r), "unsigned");
+        // Signed by a key this build does not know.
+        let stranger = TestKey::generate();
+        let other = served(&f, &f.manifest, Some(stranger.sign(&f.manifest)));
+        match fetch_manifest(other.as_ref(), &keys).await {
+            Err(o @ Outcome::Refused { .. }) => {
+                assert!(!o.awaiting_signed_release());
+                let Outcome::Refused { code, reason } = o else {
+                    unreachable!()
+                };
+                assert_eq!(code, "key");
+                assert!(reason.contains(&stranger.key_id()), "{reason}");
+            }
+            _ => panic!("a stranger's signature must be refused"),
         }
-        let bad = served(&f, &f.manifest, Some(sign(&f.manifest)));
-        match fetch_manifest(bad.as_ref(), &keys()).await {
-            Err(Outcome::Refused { code, .. }) => assert_eq!(code, "signature"),
-            _ => panic!("a signature over other bytes must be refused"),
-        }
-        // No trusted key at all (production today): refused, nothing fetched beyond the manifest.
-        match fetch_manifest(bad.as_ref(), &[]).await {
-            Err(Outcome::Refused { code, .. }) => assert_eq!(code, "unsigned"),
-            _ => panic!("no key, no update"),
-        }
-        assert!(bad
+        // The trusted key, over other bytes (the manifest was altered).
+        let mut altered = f.manifest.clone();
+        altered.extend_from_slice(b" ");
+        let bad = served(&f, &altered, Some(key.sign(&f.manifest)));
+        assert_eq!(
+            refused_code(fetch_manifest(bad.as_ref(), &keys).await),
+            "signature"
+        );
+        // Garbage where the signature should be.
+        let garbled = served(&f, &f.manifest, Some("not a signature".into()));
+        assert_eq!(
+            refused_code(fetch_manifest(garbled.as_ref(), &keys).await),
+            "signature"
+        );
+        // No trusted key at all: refused, nothing fetched beyond the manifest.
+        let signed = served(&f, &f.manifest, Some(key.sign(&f.manifest)));
+        assert_eq!(
+            refused_code(fetch_manifest(signed.as_ref(), &[]).await),
+            "unsigned"
+        );
+        assert!(signed
             .hits
             .lock()
             .unwrap()
@@ -498,16 +545,95 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn a_signed_manifest_passes_verification() {
-        // The fixed test signature covers exactly b"hello manifest".
-        let f = three();
-        let server = served(&f, b"hello manifest", Some(sign(b"hello manifest")));
-        match fetch_manifest(server.as_ref(), &keys()).await {
-            Err(Outcome::Refused { code, .. }) => {
-                assert_eq!(code, "format", "verified, then not a manifest")
+    async fn a_mirror_error_on_the_signature_is_a_failure_not_a_verdict() {
+        struct Flaky(Vec<u8>);
+        impl Fetcher for Flaky {
+            fn get<'a>(&'a self, rel: &'a str) -> FetchFuture<'a> {
+                let r = if rel == "manifest.json" {
+                    Ok(Some(self.0.clone()))
+                } else {
+                    Err("connection reset".to_string())
+                };
+                Box::pin(async move { r })
             }
-            _ => panic!("expected the signature to verify and the JSON to fail"),
         }
+        let f = three();
+        let key = TestKey::generate();
+        match fetch_manifest(
+            &Flaky(f.manifest.clone()),
+            std::slice::from_ref(&key.public),
+        )
+        .await
+        {
+            Err(Outcome::Failed { reason }) => assert!(reason.contains("connection reset")),
+            _ => panic!("an unreachable signature is a failed check"),
+        }
+    }
+
+    #[tokio::test]
+    async fn a_signed_newer_catalog_is_applied_and_a_tampered_one_is_not() {
+        let old = three();
+        let new = fixture(
+            "2026.0102.0",
+            2,
+            &[("brand-new", serde_json::json!({}), "New.")],
+        );
+        let key = TestKey::generate();
+        let keys = vec![key.public.clone()];
+        let bundled = || {
+            let mut conn = store::open_in_memory().unwrap();
+            let mut src = old.objects.clone();
+            let cat = catalog::collect(&old.manifest, &mut src, true, &HashSet::new()).unwrap();
+            store::apply(&mut conn, &cat, "bundled").unwrap();
+            conn
+        };
+        async fn run(server: Arc<Mem>, keys: &[String], conn: Connection) -> (Outcome, Connection) {
+            let current = store::info(&conn).map(|i| (i.catalog, i.seq));
+            let known = store::known_bodies(&conn);
+            let shared = Arc::new(Mutex::new(conn));
+            let s2 = Arc::clone(&shared);
+            let local = move |hex: &str| store::stored_object(&s2.lock().unwrap(), hex);
+            let s3 = Arc::clone(&shared);
+            let mut apply =
+                move |cat: &VerifiedCatalog| store::apply(&mut s3.lock().unwrap(), cat, "update");
+            let o = check(server, keys, current, &[], &local, &known, true, &mut apply).await;
+            drop(local);
+            drop(apply);
+            let conn = Arc::try_unwrap(shared).ok().unwrap().into_inner().unwrap();
+            (o, conn)
+        }
+        // Tampered: the signature is good, a body is not.
+        let mut files = new.objects.clone();
+        for bytes in files.values_mut() {
+            if String::from_utf8_lossy(bytes).contains("New.") {
+                bytes.extend_from_slice(b" evil");
+            }
+        }
+        files.insert("manifest.json".into(), new.manifest.clone());
+        files.insert(
+            "manifest.json.minisig".into(),
+            key.sign(&new.manifest).into_bytes(),
+        );
+        let tampered = Arc::new(Mem {
+            files,
+            hits: Mutex::new(Vec::new()),
+        });
+        let (o, conn) = run(tampered, &keys, bundled()).await;
+        assert!(
+            matches!(&o, Outcome::Refused { code, .. } if code == "hash"),
+            "{o:?}"
+        );
+        assert_eq!(store::info(&conn).unwrap().catalog, "2026.0101.0");
+        // Intact: applied in one go.
+        let good = served(&new, &new.manifest, Some(key.sign(&new.manifest)));
+        let (o, conn) = run(good, &keys, conn).await;
+        match o {
+            Outcome::Applied { summary, .. } => {
+                assert_eq!(summary.added, vec!["brand-new".to_string()])
+            }
+            o => panic!("expected the signed catalog to apply, got {o:?}"),
+        }
+        assert_eq!(store::info(&conn).unwrap().catalog, "2026.0102.0");
     }
 
     #[test]

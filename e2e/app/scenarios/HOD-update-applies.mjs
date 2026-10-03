@@ -9,8 +9,11 @@
 // only); the newer catalog is the bundled one plus one new entry, as the
 // next sequence number.
 //
-//   1. signed with another key            -> refused ("signature"), nothing changes
-//   2. no signature                       -> refused ("unsigned")
+//   1. signed with another key            -> refused ("key"), nothing changes
+//   1b. the trusted key, other bytes      -> refused ("signature")
+//   2. no signature                       -> "unsigned": waiting for a signed
+//                                            release, no error recorded, a quiet
+//                                            note in the update panel
 //   3. signed, but a body was altered     -> refused ("hash"), the entry is not there
 //   4. signed and intact, "Check now" in the Library's update panel
 //                                         -> applied in one go: the new entry is
@@ -58,6 +61,8 @@ const probeRef = newer.rows.find((r) => r.id === PROBE_ID).body;
 
 const signedNewer = mirrorFiles(newer, key.sign(newer.manifestBytes));
 const otherSigned = mirrorFiles(newer, otherKey.sign(newer.manifestBytes));
+// The trusted key's signature of the bundled manifest, served with the newer one.
+const badSignature = mirrorFiles(newer, key.sign(base.manifestBytes));
 const unsigned = mirrorFiles(newer, null);
 const tampered = (() => {
   const files = mirrorFiles(newer, key.sign(newer.manifestBytes));
@@ -99,11 +104,27 @@ try {
       mirror.serve(otherSigned);
       let o = await check_(bridge);
       log(`  1. other key: ${JSON.stringify(o)}`);
-      check(o.outcome === "refused" && o.code === "signature", "a catalog signed with another key is refused");
+      check(o.outcome === "refused" && o.code === "key", "a catalog signed with an unknown key is refused");
+      check(/does not trust/.test(o.reason ?? ""), "and the reason names the untrusted key");
+      mirror.serve(badSignature);
+      o = await check_(bridge);
+      log(`  1b. bad signature: ${JSON.stringify(o)}`);
+      check(o.outcome === "refused" && o.code === "signature", "a signature over other bytes is refused");
       mirror.serve(unsigned);
       o = await check_(bridge);
       log(`  2. unsigned: ${JSON.stringify(o)}`);
-      check(o.outcome === "refused" && o.code === "unsigned", "an unsigned catalog is refused");
+      check(o.outcome === "refused" && o.code === "unsigned", "an unsigned catalog is not applied");
+      const sw = await invoke(bridge, "library_status");
+      check(!sw.lastError, `waiting for a signed release is not recorded as an error (lastError ${JSON.stringify(sw.lastError)})`);
+      await bridge.click(".lib-badge-btn");
+      const note = await bridge
+        .waitFor("the waiting note", `return e2e.first('[data-testid="library-update-waiting"]')?.textContent || false;`, { timeoutMs: 5_000 })
+        .catch(() => null);
+      log(`  2. panel note: ${JSON.stringify(note)}`);
+      const blocked = await bridge.eval(`return !!e2e.first(".lib-blocked");`);
+      check(!!note && /signed library release/.test(note) && !blocked, "the panel says updates wait for a signed release, without an error");
+      await bridge.click(".lib-badge-btn").catch(() => null);
+      await sleep(300);
       mirror.serve(tampered);
       o = await check_(bridge);
       log(`  3. tampered body: ${JSON.stringify(o)}`);

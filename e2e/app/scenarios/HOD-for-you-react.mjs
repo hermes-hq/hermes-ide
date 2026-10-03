@@ -13,7 +13,9 @@
 //   - "Show everything" turns personalisation off: no personal shelves, no
 //     reasons, plain quality order. Turning it back on restores them.
 //   - Nothing about the project is sent anywhere: the mirror URL points at a
-//     local server that records every request, and no request arrives.
+//     local server that records every request. The only requests allowed
+//     are the background update check's catalog manifest and signature,
+//     the same two files for everyone.
 //
 // Negative control: HERMES_E2E_HOD_NEGATIVE=plain gives the "React" project
 // no package.json or tsconfig.json; the stack checks must then fail.
@@ -113,7 +115,9 @@ try {
       await bridge.waitFor("personalised again", `return e2e.first(".lib-context")?.getAttribute("data-personalised") === "true";`, { timeoutMs: 15_000 });
       check(projectShelf(await libraryState(bridge)) !== null, "turning it back on brings the project shelf back");
 
-      check(mirror.hits.length === 0, `nothing was sent anywhere (${mirror.hits.length} requests to the catalog mirror)`);
+      const asked = mirror.hits.filter((h) => !/^manifest\.json(\.minisig)?$/.test(h));
+      log(`  mirror requests: ${JSON.stringify(mirror.hits)}`);
+      check(asked.length === 0, `nothing about the project was sent (${mirror.hits.length} requests, all for the catalog manifest)`);
     },
     { env: { HERMES_E2E_LIBRARY_URL: mirror.url, HERMES_LIBRARY_FIRST_CHECK_SECS: "1" }, tag: "hod-foryou" },
   );

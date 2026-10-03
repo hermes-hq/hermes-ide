@@ -129,6 +129,8 @@ hermes-pty-host = { path = "pty-host" }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
+# Signs test catalogs with a fresh minisign key (already in the tree via rustls).
+ring = "0.17"
 
 [[bench]]
 name = "analyzer"
