@@ -129,7 +129,7 @@ fn keep_missing_worktree_link(
 /// setting the frontend writes) restores at the next launch. Empty when
 /// there is no saved workspace or it cannot be read: then nothing is
 /// restored.
-fn saved_workspace_session_ids(saved_workspace: Option<&str>) -> HashSet<String> {
+pub(crate) fn saved_workspace_session_ids(saved_workspace: Option<&str>) -> HashSet<String> {
     saved_workspace
         .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
         .and_then(|v| v.get("sessions")?.as_array().cloned())
@@ -328,28 +328,19 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                     }
                     let path_str = path.to_string_lossy().to_string();
 
-                    // Check if this directory has a DB record
-                    if !known_paths.contains(&path_str) {
-                        log::info!("Removing orphaned worktree directory: {}", path_str);
-                        // Try git worktree prune first, then remove directory
-                        let _ = crate::git::cli::git_command()
-                            .arg("-C")
-                            .arg(&proj.path)
-                            .arg("worktree")
-                            .arg("prune")
-                            .output();
-                        match std::fs::remove_dir_all(&path) {
-                            Ok(_) => {
-                                cleanup_count += 1;
-                            }
-                            Err(e) => {
-                                log::warn!(
-                                    "[worktree-cleanup] Failed to remove orphan {}: {}",
-                                    path_str,
-                                    e
-                                );
-                            }
-                        }
+                    // Check if this directory has a DB record. Only a folder
+                    // git vouches has nothing to lose goes now; anything else
+                    // stays for Settings > Storage (backup first, the
+                    // person decides).
+                    if !known_paths.contains(&path_str)
+                        && git::hygiene::remove_orphan_if_nothing_to_lose(
+                            &app_data_dir,
+                            Path::new(&proj.path),
+                            &path,
+                        )
+                    {
+                        log::info!("Removed orphaned worktree directory: {}", path_str);
+                        cleanup_count += 1;
                     }
                 }
             }
@@ -740,6 +731,8 @@ pub fn run() {
             app.manage(inline_pty::InlinePtyManager::new());
             // Turn ledger (F20): off until the frontend says the flag is on.
             app.manage(turn_ledger::TurnLedger::default());
+            // Worktree hygiene: keeps old worktrees from filling the disk.
+            git::hygiene_app::start(app.handle().clone());
 
             // The agent bridge is NOT warmed at startup: the frontend asks
             // for it (warm_agent_bridge) once an Agent-view session exists,
@@ -1014,6 +1007,12 @@ pub fn run() {
             git::git_reclaim_build_output,
             git::git_list_orphan_folders,
             git::git_sweep_orphan_folders,
+            // Worktree hygiene (Settings > Storage)
+            git::hygiene_app::worktree_storage_report,
+            git::hygiene_app::worktree_storage_clean_up,
+            git::hygiene_app::worktree_storage_remove,
+            git::hygiene_app::worktree_storage_remove_build_output,
+            git::hygiene_app::worktree_storage_backups,
             // Fast worktrees
             git::git_prepare_worktree,
             // Menu
