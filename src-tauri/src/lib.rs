@@ -129,7 +129,7 @@ fn keep_missing_worktree_link(
 /// setting the frontend writes) restores at the next launch. Empty when
 /// there is no saved workspace or it cannot be read: then nothing is
 /// restored.
-fn saved_workspace_session_ids(saved_workspace: Option<&str>) -> HashSet<String> {
+pub(crate) fn saved_workspace_session_ids(saved_workspace: Option<&str>) -> HashSet<String> {
     saved_workspace
         .and_then(|json| serde_json::from_str::<serde_json::Value>(json).ok())
         .and_then(|v| v.get("sessions")?.as_array().cloned())
@@ -731,6 +731,8 @@ pub fn run() {
             app.manage(inline_pty::InlinePtyManager::new());
             // Turn ledger (F20): off until the frontend says the flag is on.
             app.manage(turn_ledger::TurnLedger::default());
+            // Worktree hygiene: keeps old worktrees from filling the disk.
+            git::hygiene_app::start(app.handle().clone());
 
             // The agent bridge is NOT warmed at startup: the frontend asks
             // for it (warm_agent_bridge) once an Agent-view session exists,
@@ -1005,6 +1007,12 @@ pub fn run() {
             git::git_reclaim_build_output,
             git::git_list_orphan_folders,
             git::git_sweep_orphan_folders,
+            // Worktree hygiene (Settings > Storage)
+            git::hygiene_app::worktree_storage_report,
+            git::hygiene_app::worktree_storage_clean_up,
+            git::hygiene_app::worktree_storage_remove,
+            git::hygiene_app::worktree_storage_remove_build_output,
+            git::hygiene_app::worktree_storage_backups,
             // Fast worktrees
             git::git_prepare_worktree,
             // Menu

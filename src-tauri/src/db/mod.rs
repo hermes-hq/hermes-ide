@@ -1852,6 +1852,55 @@ impl Database {
         Ok(())
     }
 
+    /// Every link to a linked worktree (not the project folder), with the
+    /// project's path, for the worktree hygiene scan.
+    pub fn get_worktree_links(&self) -> Result<Vec<crate::git::hygiene::LinkRow>, String> {
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT sw.session_id, sw.worktree_path, r.path, sw.created_at, sw.last_activity_at
+                 FROM session_worktrees sw LEFT JOIN realms r ON r.id = sw.realm_id
+                 WHERE sw.is_main_worktree = 0",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok(crate::git::hygiene::LinkRow {
+                    session_id: row.get(0)?,
+                    worktree_path: row.get(1)?,
+                    project_path: row.get(2)?,
+                    created_at: row.get::<_, Option<String>>(3)?.unwrap_or_default(),
+                    last_activity_at: row.get(4)?,
+                })
+            })
+            .map_err(|e| e.to_string())?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())
+    }
+
+    /// Stamp "last used" on every worktree of these (open) sessions.
+    pub fn touch_worktrees_of_sessions(&self, session_ids: &[String]) -> Result<(), String> {
+        for id in session_ids {
+            self.conn
+                .execute(
+                    "UPDATE session_worktrees SET last_activity_at = datetime('now') WHERE session_id = ?1",
+                    params![id],
+                )
+                .map_err(|e| e.to_string())?;
+        }
+        Ok(())
+    }
+
+    /// Drop every session's link to the worktree at `path` (it was removed).
+    pub fn delete_worktree_links_at(&self, path: &str) -> Result<usize, String> {
+        self.conn
+            .execute(
+                "DELETE FROM session_worktrees WHERE worktree_path = ?1 AND is_main_worktree = 0",
+                params![path],
+            )
+            .map_err(|e| e.to_string())
+    }
+
     pub fn update_worktree_last_activity(
         &self,
         session_id: &str,
@@ -1986,6 +2035,10 @@ const E2E_FLAG_DEFAULTS_KEY: &str = "e2e_flag_defaults";
 /// ║  adding a migration note in the import path.                       ║
 /// ╚══════════════════════════════════════════════════════════════════════╝
 const VALID_SETTING_KEYS: &[&str] = &[
+    // Worktree hygiene (Settings > Storage)
+    "worktree_auto_cleanup",
+    "worktree_idle_days",
+    "worktree_low_disk_gb",
     // Window geometry (excluded from export — machine-specific)
     "window_width",
     "window_height",

@@ -102,6 +102,12 @@ fn os_free_space(path: &Path) -> Result<u64, String> {
     Ok(available)
 }
 
+/// True when a test build pretends a free-space figure (see below): a
+/// before/after difference then measures nothing.
+pub fn free_space_overridden() -> bool {
+    free_space_override().is_some()
+}
+
 /// Test builds only: `HERMES_E2E_FREE_SPACE_BYTES` pretends the disk has that
 /// much free space, so the real-app scenario can prove the refusal without
 /// filling a disk. Needs the `e2e` cargo feature (never in a release build)

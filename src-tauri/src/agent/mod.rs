@@ -59,6 +59,19 @@ impl AgentState {
     fn handle(&self) -> SessionMap {
         Arc::clone(&self.sessions)
     }
+
+    /// Ids of the sessions whose agent process is running, or None when
+    /// the registry stayed busy for two seconds (callers that delete
+    /// anything must then hold off). Call it from a blocking thread.
+    pub fn live_session_ids(&self) -> Option<Vec<String>> {
+        for _ in 0..100 {
+            if let Ok(m) = self.sessions.try_lock() {
+                return Some(m.keys().cloned().collect());
+            }
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        None
+    }
 }
 
 struct AgentChild {
