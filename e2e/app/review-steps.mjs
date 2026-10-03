@@ -159,9 +159,15 @@ export async function openReviewDesk(bridge) {
 export async function agentTurn(bridge, sid, during, { ms = 2500 } = {}) {
   const count = () => bridge.eval(`return (await window.__TAURI_INTERNALS__.invoke("list_turns", { sessionId: ${JSON.stringify(sid)} })).length;`);
   const n0 = await count();
+  // The times of the prompt and of the agent's edits (ms), next to the
+  // turn ledger's own (its debug lines in the app log).
+  const stamp = (what) => console.log(`[agentTurn] ${what} at ${Date.now()}`);
+  stamp("typing the prompt");
   await bridge.typeInTerminal(sid, `work ${ms}\n`);
+  stamp("prompt typed");
   await sleep(700);
   during?.();
+  stamp("agent's edits written");
   await bridge.waitFor(
     "the turn to be recorded",
     `return (await window.__TAURI_INTERNALS__.invoke("list_turns", { sessionId: ${JSON.stringify(sid)} })).length > ${n0};`,
@@ -195,6 +201,8 @@ async function taskSetupWith({ work, repo, git, fake, undoPath }, tag, evidenceD
   // A crowded developer disk would block the launcher's new worktree (it
   // wants 10 GB free); the test worktrees are a few KB.
   if (process.env.HERMES_E2E_FREE_SPACE_BYTES) env = { HERMES_E2E_FREE_SPACE_BYTES: process.env.HERMES_E2E_FREE_SPACE_BYTES, ...env };
+  // The turn ledger says in the app log what it decided at every boundary.
+  env = { RUST_LOG: process.env.RUST_LOG || "info,hermes_ide_lib::turn_ledger=debug", ...env };
   const app = await launchApp(
     onWindows
       ? { runDir: join(evidenceDir, "run-1"), log, home: "real", resetData: true, flagDefaults: null, env: { ...fake.env, ...env } }

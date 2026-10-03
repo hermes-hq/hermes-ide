@@ -496,13 +496,28 @@ impl TurnLedger {
             }
         };
         if state.last_tree.as_deref() == Some(tree.as_str()) {
+            log::debug!(
+                "[turn-ledger] {session_id}: baseline (start {turn_started_at:?}) unchanged at {}",
+                short(&tree)
+            );
             return Ok(SnapshotOutcome::NoChange);
         }
         if let (Some(at), Some(last)) = (turn_started_at, state.last_tree.as_deref()) {
             if written_since(&repo, last, &tree, at) {
+                log::debug!(
+                    "[turn-ledger] {session_id}: baseline kept at {} (the turn started at {at} already wrote; tree now {})",
+                    short(last),
+                    short(&tree)
+                );
                 return Ok(SnapshotOutcome::NoChange);
             }
         }
+        log::debug!(
+            "[turn-ledger] {session_id}: baseline (start {turn_started_at:?}, now {}) {} -> {}",
+            now_ms(),
+            state.last_tree.as_deref().map(short).unwrap_or("none"),
+            short(&tree)
+        );
         let Some(parent) = state.last_commit.clone() else {
             // No turn recorded yet: the repository stays untouched.
             self.remember_baseline(session_id, &tree, None);
@@ -577,6 +592,12 @@ impl TurnLedger {
             },
         };
         if tree == before_tree {
+            log::debug!(
+                "[turn-ledger] {session_id}: turn end (at {ended_at}, now {}) finds {} as before ({})",
+                now_ms(),
+                short(&tree),
+                if state.last_tree.is_some() { "baseline" } else { "HEAD" }
+            );
             self.with_session(session_id, |s| s.turn_started_at = None);
             return Ok(SnapshotOutcome::NoChange);
         }
@@ -1040,6 +1061,11 @@ fn spawn_in_order(
     }
 }
 
+/// A tree id, shortened for the debug log.
+fn short(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
+}
+
 /// How long before a turn's reported start a write still counts as the
 /// turn's (file times are coarse on some file systems).
 const TURN_START_SLACK_MS: i64 = 1_000;
@@ -1089,7 +1115,13 @@ pub fn on_turn_started(app: &AppHandle, session_id: &str, at: i64, exact: bool) 
     let Some(ledger) = app.try_state::<TurnLedger>() else {
         return;
     };
-    if !ledger.is_enabled() || !ledger.note_turn_started(session_id, at, exact) {
+    let accepted = ledger.is_enabled() && ledger.note_turn_started(session_id, at, exact);
+    log::debug!(
+        "[turn-ledger] {session_id}: turn start at {at} (exact {exact}, now {}): {}",
+        now_ms(),
+        if accepted { "taken" } else { "ignored" }
+    );
+    if !accepted {
         return;
     }
     let Some(cwd) = session_cwd(app, session_id) else {
@@ -1114,7 +1146,13 @@ pub fn on_turn_ended(app: &AppHandle, session_id: &str, at: i64, exact: bool) {
     let Some(ledger) = app.try_state::<TurnLedger>() else {
         return;
     };
-    if !ledger.is_enabled() || !ledger.accepts_turn_end(session_id, exact) {
+    let accepted = ledger.is_enabled() && ledger.accepts_turn_end(session_id, exact);
+    log::debug!(
+        "[turn-ledger] {session_id}: turn end at {at} (exact {exact}, now {}): {}",
+        now_ms(),
+        if accepted { "taken" } else { "ignored" }
+    );
+    if !accepted {
         return;
     }
     let Some(cwd) = session_cwd(app, session_id) else {
@@ -1122,6 +1160,7 @@ pub fn on_turn_ended(app: &AppHandle, session_id: &str, at: i64, exact: bool) {
         return;
     };
     if !ledger.queue_turn_end(session_id) {
+        log::debug!("[turn-ledger] {session_id}: a turn-end snapshot is already queued");
         return;
     }
     let sid = session_id.to_string();
@@ -1183,6 +1222,7 @@ pub fn on_phase_change(
         return;
     }
     let at = now_ms();
+    log::debug!("[turn-ledger] {session_id}: terminal {from:?} -> {to:?} at {at}");
     match (from, to) {
         (SessionPhase::Busy, SessionPhase::Idle)
         | (SessionPhase::Busy, SessionPhase::NeedsInput) => {
@@ -1199,6 +1239,7 @@ pub fn on_phase_change(
                 move |app, state, ledger| match ledger.record_turn(&state.db, &sid, &cwd, None, at)
                 {
                     Ok(SnapshotOutcome::Recorded(turn)) | Ok(SnapshotOutcome::Degraded(turn)) => {
+                        log::debug!("[turn-ledger] {sid}: guessed turn {} recorded", turn.n);
                         emit(
                             app,
                             TurnLedgerEvent {
