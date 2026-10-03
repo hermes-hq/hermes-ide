@@ -1831,3 +1831,42 @@ features:
       QA-launcher-12:
         text: "Presets: names are unique whatever their case, an empty offer name keeps the offer, typed Claude model ids launch, and the preview says what the launch passes"
         scenarios: [QA-launcher-preset-names.mjs, QA-launcher-offer-empty-name.mjs, QA-launcher-typed-model.mjs, QA-launcher-preview.mjs]
+  REAL-HOD:
+    name: "The prompt library with the real Claude Code and Codex CLIs"
+    # Local only, like REAL above: needs the signed-in CLIs and costs a tiny
+    # turn each, so the scenario says SKIP in CI (e2e/app/ci-plan.mjs
+    # excludes it) and this entry asks for no result.
+    status: planned
+    criteria:
+      REAL-HOD-1:
+        text: "A library persona launched from the task launcher reaches the real Claude Code (system prompt) and Codex (first prompt), and each answers in that role; Use in session puts a rendered prompt into the real TUI's input without sending it"
+        scenarios: ["REAL-library-agents.mjs@darwin,linux"]
+  HOD:
+    # Hermes 2.1: Hodios, the open-source prompt library, imported by default
+    # (src-tauri/src/library, src/library, src/components/library). Fake
+    # agents stand in for Claude Code and Codex; the catalog mirror and its
+    # signing key are local and throwaway (test builds only).
+    name: "The prompt library is there by default, offline, fits the person, works with every agent and keeps what 2.0 saved"
+    status: shipped
+    criteria:
+      HOD-1:
+        text: "A fresh install with no network has the whole bundled catalog: the Library opens, every pinned row of every tier is there with its body, search works, an entry renders; a relaunch needs no second import"
+        scenarios: [HOD-offline-first-open.mjs]
+      HOD-2:
+        text: "Search answers at p95 <= 50 ms in the app (300 mixed queries), results follow typing within 500 ms, late answers are dropped, and paging is by cursor with a virtualized list"
+        scenarios: [HOD-search-latency.mjs]
+      HOD-3:
+        text: "For you is computed on the device: a TypeScript + React project leads with its stack and says why, a Python project changes the shelf, Show everything removes personalisation, and nothing is sent"
+        scenarios: [HOD-for-you-react.mjs]
+      HOD-4:
+        text: "Use in session puts the rendered prompt into a Claude Code and a Codex terminal session as one bracketed paste with no Enter; required arguments block it until filled"
+        scenarios: [HOD-use-in-session.mjs]
+      HOD-5:
+        text: "A persona at launch reaches every agent: Claude Code as --append-system-prompt, Codex in its first prompt before the task, a persona alone asks the agent to wait; the launcher's From library fills the task"
+        scenarios: [HOD-persona-launch.mjs]
+      HOD-6:
+        text: "A newer signed catalog is applied at runtime; unsigned, wrongly signed, tampered and older catalogs are refused; rollback returns to the bundle; project files never change"
+        scenarios: [HOD-update-applies.mjs]
+      HOD-7:
+        text: "Updating from 2.0 keeps every saved prompt, role, style, group and pin byte-identical; the Library lists them under My templates and the 2.0 built-ins as Hermes classics; old ids resolve"
+        scenarios: [HOD-migrate-saved.mjs]

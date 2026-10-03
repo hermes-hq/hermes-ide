@@ -327,6 +327,10 @@
         "initial_prompt": {
           "$ref": "#/definitions/shellArgsOrNull"
         },
+        "system_prompt": {
+          "description": "Arguments that add a role (a library persona) to the agent's system prompt ({prompt}). Only flags proven with the real CLI; absent or null: the persona goes into the first message instead.",
+          "$ref": "#/definitions/shellArgsOrNull"
+        },
         "signals": {
           "$ref": "#/definitions/signals"
         },

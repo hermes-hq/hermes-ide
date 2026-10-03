@@ -7,8 +7,9 @@
 //   run 2  - ⌘N / Ctrl+Shift+N opens the launcher with the task field focused
 //            (nothing is focused by the script).
 //          - a real mouse click puts the OS focus in the task field; then,
-//            with real key presses only: Tab reaches the agent chip, Tab Tab
-//            Tab the approval chip; Return opens its menu on the current mode;
+//            with real key presses only: Tab reaches "From library" (the
+//            prompt library, under the task field), Tab the agent chip, Tab
+//            Tab Tab the approval chip; Return opens its menu on the current mode;
 //            Tab moves to Plan first and Return picks it, which closes the
 //            menu and gives the task field the keyboard; Return launches.
 //          - the agent started with Plan first and the task.
@@ -60,6 +61,7 @@ const focusNow = (bridge) =>
     const el = document.activeElement;
     if (!el) return "none";
     if (el.classList.contains("task-launcher-task")) return "task";
+    if (el.classList.contains("task-launcher-from-library")) return "from-library";
     if (el.getAttribute("data-chip")) return "chip:" + el.getAttribute("data-chip");
     if (el.getAttribute("data-mode")) return "mode:" + el.getAttribute("data-mode");
     return el.tagName.toLowerCase() + "." + String(el.className).split(" ")[0];
@@ -107,7 +109,9 @@ try {
 
   log("real keys: Tab to the chips, Return, Tab, Return, Escape, Shift+Tab back, Return");
   await press(pid, "tab", await taskFieldCenter(bridge));
-  await expectFocus(bridge, "chip:agent", "Tab from the task field reaches the first chip");
+  await expectFocus(bridge, "from-library", "Tab from the task field reaches From library, under it");
+  await press(pid, "tab");
+  await expectFocus(bridge, "chip:agent", "the next Tab reaches the first chip");
   const tabs = CONTROL === "one-tab-short" ? 2 : 3;
   for (let i = 0; i < tabs; i++) await press(pid, "tab");
   await expectFocus(bridge, "chip:approval", `Tab ×${tabs} more reaches the approval chip`);

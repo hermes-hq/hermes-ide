@@ -31,6 +31,8 @@ interface CommandPaletteProps {
   onAttachProject?: () => void;
   onScanCwd?: () => void;
   onOpenComposer?: () => void;
+  /** The prompt library. */
+  onOpenLibrary?: () => void;
   onOpenShortcuts?: () => void;
   onToggleGit?: () => void;
   /** F21: label the git entry "Review Desk" when the flag routes ⌘G there. */
@@ -56,7 +58,7 @@ interface Command {
 }
 
 export function CommandPalette({
-  onClose, sessions, onCloseSession, onCloseSessionRemoveWorktree, activeSessionId, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
+  onClose, sessions, onCloseSession, onCloseSessionRemoveWorktree, activeSessionId, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenLibrary, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -92,6 +94,7 @@ export function CommandPalette({
     ...(onAttachProject ? [{ id: "attach-project", label: t("palette.addFolder"), category: t("app.folders"), action: () => { onAttachProject(); onClose(); } }] : []),
     ...(onScanCwd ? [{ id: "scan-cwd", label: t("palette.scanCurrentDirectory"), category: t("app.folders"), action: () => { onScanCwd(); onClose(); } }] : []),
     ...(onOpenComposer ? [{ id: "composer", label: t("palette.promptComposer"), category: t("app.tools"), shortcut: shortcutLabel("view.prompt-composer"), action: () => { onOpenComposer(); onClose(); } }] : []),
+    ...(onOpenLibrary ? [{ id: "library", label: t("palette.openLibrary"), category: t("app.tools"), action: () => { onOpenLibrary(); onClose(); } }] : []),
     ...(onOpenShortcuts ? [{ id: "shortcuts", label: t("palette.keyboardShortcuts"), category: t("app.help"), shortcut: fmt("{mod}/"), action: () => { onOpenShortcuts(); onClose(); } }] : []),
     ...(onToggleGit ? [{ id: "git", label: reviewDesk ? t("palette.reviewDesk") : t("palette.toggleGitPanel"), category: t("app.view"), shortcut: shortcutLabel("view.git-panel"), action: () => { onToggleGit(); onClose(); } }] : []),
     ...(onToggleSearch ? [{ id: "search", label: t("palette.searchInFolder"), category: t("app.view"), shortcut: fmt("{mod}{shift}F"), action: () => { onToggleSearch(); onClose(); } }] : []),
@@ -115,7 +118,7 @@ export function CommandPalette({
   // currentLanguage is intentionally in the deps: t() is referentially stable,
   // so without it the memoized labels would never update on a language switch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [sessions, onCloseSession, onCloseSessionRemoveWorktree, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenShortcuts, onToggleGit, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
+  ], [sessions, onCloseSession, onCloseSessionRemoveWorktree, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenLibrary, onOpenShortcuts, onToggleGit, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.filter((c) => !c.hidden);

@@ -352,6 +352,14 @@ jobs:
       - name: Run Rust tests
         working-directory: src-tauri
         run: cargo test --locked
+      # The prompt library's search budget: a synthetic one-million-row index,
+      # 300 mixed queries, p95 at most 50 ms (src-tauri/src/library/bench.rs).
+      # Optimised, as the app ships; Linux only (one runner is enough to catch
+      # a query plan that stops scaling).
+      - name: Library search budget (1M rows)
+        if: runner.os == 'Linux'
+        working-directory: src-tauri
+        run: cargo test --locked --release --lib library::bench -- --ignored --nocapture
       # The launch helper that ships next to the app (src-tauri/hi): its tests
       # run the built binary the way a Hermes terminal does, on every OS.
       - name: Test the hi helper
@@ -433,6 +441,14 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
       - run: npm ci
+
+      # The prompt library the app bundles (scripts/fetch-prompt-library.mjs
+      # checks every object again when it reuses the cache).
+      - name: Cache the bundled prompt library
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/hermes-library
+          key: hermes-library-${{ hashFiles('prompt-library.lock.json') }}
 
       - name: Build the test app
         shell: bash

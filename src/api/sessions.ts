@@ -54,6 +54,8 @@ export function createSession(opts: {
   sessionHost?: boolean;
   /** Task launcher (F15): the agent's first prompt (helper only). */
   initialPrompt?: string | null;
+  /** A library persona for the agent's system prompt, for agents with a proven flag (helper only). */
+  systemPrompt?: string | null;
   /** N19 handoff: the first prompt, passed as a launch argument (helper only). */
   seedPrompt?: string | null;
   /** N19 handoff: the session this one continues or duplicates. */

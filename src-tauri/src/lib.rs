@@ -25,6 +25,7 @@ mod git;
 mod inline_pty;
 mod instance;
 mod land;
+mod library;
 mod limits;
 mod menu;
 mod platform;
@@ -740,6 +741,10 @@ pub fn run() {
             app.manage(inline_pty::InlinePtyManager::new());
             // Turn ledger (F20): off until the frontend says the flag is on.
             app.manage(turn_ledger::TurnLedger::default());
+            // Prompt library: opened on first use; a background task checks
+            // for a signed catalog update every 12 hours.
+            app.manage(library::LibraryState::default());
+            library::start_updates(app.handle());
 
             // The agent bridge is NOT warmed at startup: the frontend asks
             // for it (warm_agent_bridge) once an Agent-view session exists,
@@ -1137,6 +1142,28 @@ pub fn run() {
             inline_pty::write_inline_pty,
             inline_pty::resize_inline_pty,
             inline_pty::kill_inline_pty,
+            // Prompt library (src/library): search, shelves, entries,
+            // updates and installs into projects.
+            library::library_status,
+            library::library_search,
+            library::library_shelves,
+            library::library_get,
+            library::library_hits,
+            library::library_resolve,
+            library::library_vocab,
+            library::library_detect,
+            library::library_record_use,
+            library::library_set_item,
+            library::library_item_states,
+            library::library_get_profile,
+            library::library_set_profile,
+            library::library_reset_personalisation,
+            library::library_check_update,
+            library::library_rollback,
+            library::library_install_preview,
+            library::library_install_apply,
+            library::library_installs,
+            library::library_uninstall,
         ])
         .build(context)
         .expect("error while building HERMES-IDE")

@@ -215,6 +215,11 @@ pub struct Terminal {
     /// Arguments that pass a first prompt (`{prompt}`), or null.
     #[serde(default)]
     pub initial_prompt: Option<Vec<String>>,
+    /// Arguments that add a role (a library persona) to the agent's system
+    /// prompt (`{prompt}`), or null: then the persona is part of the first
+    /// prompt instead. Only flags proven with the real CLI.
+    #[serde(default)]
+    pub system_prompt: Option<Vec<String>>,
     /// How the agent tells Hermes what it is doing, per launch.
     pub signals: Signals,
     /// Permission mode (`default`, `acceptEdits`, ...) -> extra arguments.
@@ -460,6 +465,13 @@ mod tests {
                 assert!(
                     prompt.iter().any(|x| x == "{prompt}"),
                     "{}: initial_prompt has no {{prompt}}",
+                    a.id
+                );
+            }
+            if let Some(system) = &a.terminal.system_prompt {
+                assert!(
+                    system.iter().any(|x| x == "{prompt}"),
+                    "{}: system_prompt has no {{prompt}}",
                     a.id
                 );
             }

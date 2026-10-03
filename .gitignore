@@ -4,6 +4,9 @@ src-tauri/bridge/node_modules/
 # Packed by scripts/pack-bridge-runtime.mjs (npm run prepare:bridge)
 src-tauri/bridge/runtime/*
 !src-tauri/bridge/runtime/README.md
+# Fetched and verified by scripts/fetch-prompt-library.mjs (npm run prepare:library)
+src-tauri/library/*
+!src-tauri/library/README.md
 
 # Build outputs
 dist/
