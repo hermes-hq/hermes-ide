@@ -44,7 +44,7 @@ Hermes IDE is not affiliated with Nous Research or its Hermes Agent.
 - **Push with your own credentials** — pushes sign in with your git credential helper (such as Git Credential Manager) or a `GITHUB_TOKEN`, and say how to sign in when nothing works <!-- claim:git-auth -->
 
 ### AI Intelligence
-- **Ghost-text suggestions** — completions from your command history as you type; → accepts them <!-- claim:ghost-text -->
+- **Ghost-text suggestions** — completions from your command history as you type; → accepts them (in shells without suggestions of their own) <!-- claim:ghost-text -->
 - **Prompt Composer** — build a structured prompt from a template, a task and a scope, and send it to the session <!-- claim:prompt-composer -->
 - **Stuck detection** — when an Agent-view session ignores Stop, Hermes tells you it isn't responding and offers Force stop, keeping the conversation <!-- claim:stuck-detection -->
 

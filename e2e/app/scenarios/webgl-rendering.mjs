@@ -109,13 +109,15 @@ await runScenario(SCENARIO, async ({ log, assert, apps, evidenceDir }) => {
   `, { timeoutMs: 10_000 }).catch(() => {});
   await bridge.typeInTerminal(id, `echo 'plain-words-here ${URL}'\n`);
   await bridge.waitForTerminal(id, new RegExp(`^plain-words-here ${URL.replace(/[.*+?^${}()|[\]\\/]/g, "\\$&")}$`), { timeoutMs: 20_000 });
-  // Where the printed line is on screen (viewport row) and where the address starts.
+  // Where the printed line is on screen (viewport row) and where the address
+  // starts. The last `rows` rows of the buffer are the screen; they are read
+  // unjoined, so a command line that wraps in a narrow window (CI) cannot
+  // shift the row.
   const where = await bridge.eval(`
-    const lines = window.__HERMES_E2E__.readTerminal(${JSON.stringify(id)}) || [];
     const { rows } = window.__HERMES_E2E__.terminalInfo(${JSON.stringify(id)});
-    const index = lines.findIndex((l) => l.startsWith("plain-words-here https://"));
-    const top = Math.max(0, lines.length - rows);
-    return { row: index - top, col: lines[index].indexOf("https://"), total: lines.length, rows };
+    const screen = window.__HERMES_E2E__.terminalTail(${JSON.stringify(id)}, rows) || [];
+    const index = screen.findIndex((l) => l.startsWith("plain-words-here https://"));
+    return { row: index, col: index >= 0 ? screen[index].indexOf("https://") : -1, total: screen.length, rows };
   `);
   log(`  the address is on screen row ${where.row}, column ${where.col} (${where.total} lines, ${where.rows} rows)`);
   assert(where.row >= 0 && where.col > 0, "the printed line is on screen");

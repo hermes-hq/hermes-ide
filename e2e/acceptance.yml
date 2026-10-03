@@ -1857,8 +1857,11 @@ features:
         text: "The terminal on screen draws with WebGL where the webview has it (and falls back where it has not), shows the link pointer over a printed web address, and refits its columns and rows when the window is resized"
         scenarios: [webgl-rendering.mjs]
       README-7:
+        # Not on Windows: PowerShell predicts from its own history there
+        # (PSReadLine), and Hermes leaves the prompt to it, as it does for
+        # any shell with suggestions of its own.
         text: "Typing the start of an earlier command shows the rest as ghost text, → accepts it, and a prefix that matches nothing shows none"
-        scenarios: [ghost-text.mjs]
+        scenarios: ["ghost-text.mjs@darwin,linux"]
       README-8:
         text: "The Prompt Composer, opened from the command palette, builds a prompt from a template, a task and a scope and sends exactly the preview to the session"
         scenarios: [prompt-composer.mjs]

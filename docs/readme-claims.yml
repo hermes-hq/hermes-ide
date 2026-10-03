@@ -90,6 +90,8 @@ claims:
     scenario: git-auth.mjs
   ghost-text:
     text: "Ghost-text suggestions"
+    # macOS and Linux: Windows PowerShell has its own predictions, which
+    # Hermes leaves alone (hence "in shells without suggestions of their own").
     scenario: ghost-text.mjs
   prompt-composer:
     text: "Prompt Composer"

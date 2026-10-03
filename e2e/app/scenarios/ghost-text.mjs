@@ -14,8 +14,9 @@
 //   4. press →. EXPECT: the ghost text is gone and the prompt line holds the
 //      whole command; Enter runs it (its output appears a second time)
 
+import { platform } from "node:os";
 import { join } from "node:path";
-import { launchApp, sleep } from "../harness.mjs";
+import { launchApp, skipScenario, sleep } from "../harness.mjs";
 import { completeOnboarding, createPlainTerminal, runScenario } from "../n11-steps.mjs";
 import { domKey } from "../qa-host-steps.mjs";
 
@@ -34,6 +35,11 @@ async function eraseTyped(bridge, id, count) {
 }
 
 await runScenario(SCENARIO, async ({ log, assert, apps, evidenceDir }) => {
+  if (platform() === "win32") {
+    // PowerShell predicts from its own history (PSReadLine); Hermes leaves
+    // the prompt to a shell with suggestions of its own.
+    skipScenario({ scenario: SCENARIO, evidenceDir, reason: "Windows PowerShell shows its own predictions, and Hermes draws no ghost text over them", log });
+  }
   log("step 1: launch, open a plain terminal, run a command nobody has run before");
   const app = await launchApp({ runDir: join(evidenceDir, "run"), log });
   apps.push(app);

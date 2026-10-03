@@ -19,7 +19,7 @@
 import { execFileSync } from "node:child_process";
 import { mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { REPO_ROOT, launchApp } from "../harness.mjs";
+import { REPO_ROOT, launchApp, sleep } from "../harness.mjs";
 import { completeOnboarding, runScenario } from "../n11-steps.mjs";
 import { sendAgentMessage, startAgentViewSession } from "../agent-setup-steps.mjs";
 
@@ -74,13 +74,19 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   assert(exec.status === "success", "the card shows the command finished");
 
   log("step 4: the edit's diff preview");
+  // Messages off screen are not laid out (content-visibility: auto), and
+  // WebKit reports no innerText for them: bring the card into view first and
+  // read textContent.
+  const FILE_CARD = `[...(${VIEW}?.querySelectorAll(".agent-tool-file") || [])].find((c) => (c.querySelector(".agent-tool-file-path")?.textContent || "").includes("greet.js"))`;
+  await bridge.waitFor("the file card", `const card = ${FILE_CARD}; if (!card) return false; card.scrollIntoView({ block: "center" }); return true;`, { timeoutMs: 10_000 }).catch(() => null);
+  await sleep(300);
   const diff = await bridge.eval(`
-    const card = [...(${VIEW}?.querySelectorAll(".agent-tool-file") || [])].find((c) => (c.querySelector(".agent-tool-file-path")?.innerText || "").includes("greet.js"));
+    const card = ${FILE_CARD};
     if (!card) return null;
     const rows = (type) => [...card.querySelectorAll(".agent-diff-row.agent-diff-" + type)].map((r) => ({
-      marker: e2e.norm(r.querySelector(".agent-diff-marker")?.innerText || ""),
-      text: r.querySelector(".agent-diff-text")?.innerText || "" }));
-    return { path: e2e.norm(card.querySelector(".agent-tool-file-path")?.innerText || ""), removed: rows("remove"), added: rows("add"), hasDiff: !!card.querySelector(".agent-diff") };`);
+      marker: e2e.norm(r.querySelector(".agent-diff-marker")?.textContent || ""),
+      text: r.querySelector(".agent-diff-text")?.textContent || "" }));
+    return { path: e2e.norm(card.querySelector(".agent-tool-file-path")?.textContent || ""), removed: rows("remove"), added: rows("add"), hasDiff: !!card.querySelector(".agent-diff") };`);
   log(`  ${JSON.stringify(diff)}`);
   assert(!!diff && diff.hasDiff, "the Edit call is rendered as a file card with a diff preview");
   assert(diff.removed.some((r) => r.marker === "-" && r.text.includes('() => "hello";')), "the old line is shown removed (-)");

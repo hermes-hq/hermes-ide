@@ -150,8 +150,10 @@ try {
 
   // The committed map has no backlog left, so cases 8 and 9 put a claim back
   // on it in a copy: multi-session, unproven, planned on a scenario.
+  // (A Windows checkout may have CRLF line ends.)
+  const eol = claimsYml.includes("\r\n") ? "\r\n" : "\n";
   const backlogged = (planned) =>
-    claimsYml.replace(/(\n  multi-session:\n    text: [^\n]*\n)((?:    #[^\n]*\n)*)    scenario: \S+\n/, `$1$2    unproven: "Not proven yet"\n    planned: ${planned}\n`);
+    claimsYml.replace(/(\r?\n  multi-session:\r?\n    text: [^\r\n]*\r?\n)((?:    #[^\r\n]*\r?\n)*)    scenario: \S+\r?\n/, `$1$2    unproven: "Not proven yet"${eol}    planned: ${planned}${eol}`);
 
   log("case 8: a backlog claim whose planned scenario has landed");
   const landed = backlogged("N23-docs-gates.mjs");
