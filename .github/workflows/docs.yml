@@ -94,8 +94,9 @@ jobs:
         run: node scripts/check-readme-claims.mjs $BASELINE
 
   # ── README claims that still have no scenario ──────────────────────────
-  # The backlog from before the gate existed. Fails on every run so it stays
-  # visible; non-blocking until the backlog is proven or removed.
+  # The backlog from before the gate existed. Every claim now names a
+  # scenario, so this passes; it goes red again (visibly, non-blocking) if a
+  # claim is ever moved back to unproven.
   readme-claims-unproven:
     name: README claims with no scenario yet (non-blocking)
     runs-on: ubuntu-24.04
