@@ -749,7 +749,7 @@ export function WorktreeOverviewPanel() {
           <span className="worktree-overview-confirm-text">
             Clean up {selectedOrphans.size} orphan{selectedOrphans.size > 1 ? "s" : ""}
             {diskGuard && selectedOrphanBytes > 0 ? ` (${formatDiskBytes(selectedOrphanBytes)})` : ""}?
-            {diskGuard && " Their files are deleted, including uncommitted changes."}
+            {diskGuard && " Their files are deleted; uncommitted work is first saved as a backup in its repo when the repo still exists."}
           </span>
           <Button
             size="sm"

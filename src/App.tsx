@@ -100,6 +100,7 @@ import { PanelResizeHandle } from "./components/PanelResizeHandle";
 import { useFleetControls } from "./fleet/useFleetControls";
 import { TASK_QUEUE_KEY, getOccupancy, listQueuedTasks, restoreTaskQueue, serializeTaskQueue, startTaskNow, subscribeTaskQueue, type QueuedTask } from "./fleet/taskQueue";
 import { useOverlay } from "./state/overlays";
+import { useWorktreeStorageNotices } from "./hooks/useWorktreeStorageNotices";
 import type { CreateSessionOpts } from "./types/session";
 
 // Loaded on demand, off the startup path: the editor (CodeMirror) with the
@@ -1068,6 +1069,12 @@ function AppContent() {
     setSettingsOpen(null);
     if (launcherReturnRef.current?.kind === "settings") void openTaskLauncher();
   }, [openTaskLauncher]);
+
+  // Old worktrees filling the disk: low space, space freed, space held (Settings > Storage).
+  useWorktreeStorageNotices(
+    useCallback((toast) => toastStoreRef.current.addToast(toast), []),
+    useCallback(() => openSettings("storage"), [openSettings]),
+  );
 
   // One overlay at a time (state/overlays.ts): Settings, Keyboard Shortcuts,
   // the cost dashboard and the New Session wizard close when another overlay

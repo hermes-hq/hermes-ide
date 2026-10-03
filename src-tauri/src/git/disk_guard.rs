@@ -159,7 +159,7 @@ impl LowDiskSpace {
     pub fn message(&self) -> String {
         format!(
             "{}: {} free, {} needed to create a worktree. Nothing was created. \
-             Free up space (Git panel > Worktrees can remove orphaned folders and build output), then try again.",
+             Free up space (Settings > Storage shows what can go without losing work), then try again.",
             LOW_DISK_MESSAGE_PREFIX,
             format_gb(self.free_bytes),
             format_gb(self.required_bytes),
