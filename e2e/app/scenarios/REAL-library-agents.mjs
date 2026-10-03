@@ -4,6 +4,11 @@
 // Hermes profile. Each agent that is installed and signed in here runs; the
 // others are reported as not proven.
 //
+// Once, through the real UI:
+//   0. A terminal in a real TypeScript project (this checkout, or
+//      HERMES_E2E_REAL_TS_PROJECT): the Library's first shelf is "For this
+//      project", names TypeScript, and its cards say why.
+//
 // Per agent, through the real UI:
 //   1. ⌘N, the agent on its chip, "From library" -> the "Code reviewer"
 //      persona, and a task asking the agent to name its role in a fixed
@@ -16,6 +21,10 @@
 //      session: the real TUI shows the text as a paste in its input box and
 //      the agent does NOT start a turn (nothing was sent). The paste is then
 //      cleared (Ctrl+C), so this step costs nothing.
+//   3. Library -> "Review a pull request" with a one-line diff -> Start task:
+//      the launcher opens with the rendered prompt as the task. A line asking
+//      for a fixed acknowledgement is added, the agent is picked, Launch: the
+//      agent's first prompt is the library text and it answers "ACK-libs".
 //
 // The cheapest model and low effort; the person's agent settings files are
 // byte-identical afterwards (a folder-trust answer the CLI writes itself is
@@ -30,8 +39,8 @@ import { execFileSync, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, platform, tmpdir } from "node:os";
 import { join } from "node:path";
-import { IS_CI, createLogger, finishScenario, launchApp, outDir, sleep, skipScenario } from "../harness.mjs";
-import { chooseTarget, fillArg, openEntry, openLibrary, search, waitPreview } from "../library-steps.mjs";
+import { IS_CI, REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep, skipScenario } from "../harness.mjs";
+import { chooseTarget, closeLibrary, fillArg, invoke, libraryState, openEntry, openLibrary, search, waitPreview } from "../library-steps.mjs";
 
 const SCENARIO = "REAL-library-agents";
 const startedAt = Date.now();
@@ -79,6 +88,9 @@ git("commit", "-q", "-m", "init");
 
 const TASK = "Reply with exactly one line in the form ROLE=<the role you are acting as, two words> and nothing else. Do not read, run or change anything.";
 const PERSONA_HEAD = "From now on, work as this persona: Code reviewer.";
+const DIFF = "diff --git a/README.md b/README.md\n-# throwaway\n+# scratch";
+const ACK_ASK = "Before anything else: do not read, run or change anything, answer from this message alone in at most three lines, and make the first line ACK-<the word sbil spelled backwards>.";
+const ACK = /ACK-libs/;
 
 const typeInto = (bridge, selector, value) =>
   bridge.eval(`
@@ -174,6 +186,32 @@ try {
   const { bridge } = app;
   await welcome(bridge);
 
+  log("step 0: For you, in a real TypeScript project");
+  const tsProject = process.env.HERMES_E2E_REAL_TS_PROJECT || REPO_ROOT;
+  log(`  project: ${tsProject === REPO_ROOT ? "this checkout" : "HERMES_E2E_REAL_TS_PROJECT"}`);
+  const tsTerm = await bridge.eval(`return await window.__HERMES_E2E__.newTerminal(${JSON.stringify({ label: "ts-project", cwd: tsProject })});`, { timeoutMs: 30_000 });
+  await bridge.waitFor("the project terminal", `const i = window.__HERMES_E2E__.terminalInfo(${JSON.stringify(tsTerm)}); return !!i && i.opened;`, { timeoutMs: 30_000 });
+  await sleep(800);
+  await openLibrary(bridge);
+  await bridge.waitFor("the project shelf", `return !!e2e.first('.lib-shelf[data-shelf="project"] .lib-card');`, { timeoutMs: 30_000 }).catch(() => null);
+  const home0 = await libraryState(bridge);
+  await bridge.screenshot(join(evidenceDir, "00-for-you-typescript.png"));
+  const shelf0 = home0.shelves.find((s) => s.id === "project");
+  log(`  shelves: ${home0.shelves.map((s) => `${s.id}(${s.cards.length})`).join(", ")}`);
+  log(`  project shelf: ${shelf0 ? `"${shelf0.why}" -> ${shelf0.cards.map((c) => `${c.id}[${c.reasons.join("+")}] "${c.why}"`).join(", ")}` : "none"}`);
+  const leadRows = [];
+  for (const c of shelf0?.cards.slice(0, 3) ?? []) leadRows.push((await invoke(bridge, "library_get", { id: c.id })).row);
+  log(`  leading entries' stacks: ${leadRows.map((r) => `${r.id}:${(r.stack ?? []).join("/")}`).join(", ")}`);
+  check(home0.personalised === "true" && home0.shelves[0]?.id === "project", "the first shelf is For this project");
+  check(!!shelf0 && /TypeScript/.test(shelf0.why), `it names TypeScript ("${shelf0?.why ?? ""}")`);
+  check(
+    leadRows.length > 0 && (shelf0?.cards.slice(0, 3) ?? []).every((c) => { const m = c.why.match(/uses (.+)$/); return !!m && shelf0.why.includes(m[1]); }),
+    "its leading entries are for a stack the project uses",
+  );
+  check(!!shelf0 && shelf0.cards.slice(0, 3).every((c) => c.reasons.includes("stack") && c.why), "and each says why");
+  check(!home0.shelves.some((s) => s.cards.length > 12), "no shelf dumps the catalog (12 cards at most)");
+  await closeLibrary(bridge);
+
   for (const agent of AGENTS) {
     log(`— ${agent.name}`);
     log("step 1: ⌘N, the agent, the Code reviewer persona from the library, the task");
@@ -254,6 +292,61 @@ try {
     await sleep(500);
     await pressKey(bridge, sid, "ctrlC");
     await sleep(1500);
+
+    log("step 3: Library -> Review a pull request -> Start task -> Launch");
+    await openLibrary(bridge);
+    await search(bridge, "review a pull request");
+    await openEntry(bridge, "review-pull-request");
+    await fillArg(bridge, "diff", DIFF);
+    const rendered = await waitPreview(bridge, "+# scratch");
+    await bridge.click(".lib-start");
+    await bridge.waitFor("the launcher", `return e2e.first(".task-launcher")?.getAttribute("data-ready") === "true";`, { timeoutMs: 30_000 });
+    const seeded = await bridge.eval(`return { task: e2e.first(".task-launcher-task")?.value ?? "", chip: e2e.norm(e2e.first(".task-launcher-library-prompt")?.innerText ?? "") };`);
+    log(`  launcher: chip "${seeded.chip}", task ${seeded.task.length} chars starting ${JSON.stringify(seeded.task.slice(0, 60))}`);
+    const head = rendered.trim().split("\n")[0];
+    check(seeded.task.startsWith(head) && seeded.task.includes("+# scratch"), "the launcher's task is the rendered library prompt");
+    check(/Review a pull request/i.test(seeded.chip), "with the entry's chip");
+    await typeInto(bridge, ".task-launcher-task", `${seeded.task}\n\n${ACK_ASK}`);
+    if (await bridge.exists(".task-launcher-repo")) await typeInto(bridge, ".task-launcher-repo", repo);
+    else {
+      await pickInMenu(bridge, "project");
+      await typeInto(bridge, ".task-launcher-repo", repo);
+    }
+    await sleep(800);
+    await pickInMenu(bridge, "agent", `[data-agent-id="${agent.id}"]`);
+    if (agent.model) await pickInMenu(bridge, "model", `[data-model-id="${agent.model}"]`).catch(() => log(`  (no ${agent.model} on the model chip; the default model)`));
+    await bridge.waitFor("Launch to be enabled", `const b = e2e.first(".task-launcher-launch"); return !!b && !b.disabled;`, { timeoutMs: 60_000 });
+    await bridge.screenshot(join(evidenceDir, `04-${agent.id}-start-task.png`));
+    const ids3 = await bridge.terminalIds();
+    await bridge.click(".task-launcher-launch");
+    await bridge.waitFor("the launcher to close", `return !e2e.first(".task-launcher-sheet");`, { timeoutMs: 30_000 });
+    const [sid3] = await bridge.waitFor("the task's terminal", `
+      const ids = window.__HERMES_E2E__.terminalIds().filter((id) => !${JSON.stringify(ids3)}.includes(id));
+      return ids.length >= 1 ? ids : null;
+    `, { timeoutMs: 30_000 });
+    const dir3 = join(app.dataDir, "launch", sid3);
+    const until3 = Date.now() + 20_000;
+    while (!existsSync(join(dir3, "launch.json")) && Date.now() < until3) await sleep(200);
+    const spec3 = JSON.parse(readFileSync(join(dir3, "launch.json"), "utf8"));
+    const first3 = spec3.args[spec3.args.length - 1] ?? "";
+    log(`  launch: ${spec3.program}, first prompt ${first3.length} chars starting ${JSON.stringify(first3.slice(0, 60))}`);
+    check(first3.startsWith(head) && first3.includes("+# scratch") && first3.includes(ACK_ASK), `${agent.name}'s first prompt is the library prompt`);
+    const readName = `
+      const el = e2e.first('[data-session-item-id="${sid3}"]');
+      return { label: e2e.norm(el?.querySelector(".session-item-name")?.innerText ?? ""), branch: e2e.norm(el?.querySelector(".session-item-git-branch")?.innerText ?? "") };
+    `;
+    const named = await bridge
+      .waitFor("the session's branch in the sidebar", `const n = (() => { ${readName} })(); return n.branch ? n : false;`, { timeoutMs: 20_000 })
+      .catch(() => bridge.eval(readName));
+    log(`  session: ${JSON.stringify(named)}`);
+    check(named.label === "Review a pull request" && /review-a-pull-request/.test(named.branch), "the session and its branch are named after the library entry, not its markup");
+    const ack = await waitAnswering(bridge, sid3, (t) => ACK.test(t.split("sbil spelled backwards").pop() ?? ""), `${agent.name}'s acknowledgement`).catch((e) => {
+      log(`  ${e.message}`);
+      return null;
+    });
+    await bridge.screenshot(join(evidenceDir, `05-${agent.id}-start-task-answer.png`));
+    if (ack) log(`  ${agent.name} replied: ${JSON.stringify((ack.split("sbil spelled backwards").pop() ?? "").trim().split("\n").filter((l) => l.trim()).slice(0, 6).join(" | ").slice(0, 300))}`);
+    check(!!ack, `${agent.name} received it as its first prompt and answered ACK-libs`);
   }
 
   const exit = await app.stop();
