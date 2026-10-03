@@ -13,7 +13,8 @@
 //
 // Options:
 //   --install        run each agent's documented install command first
-//                    (install.ci when the documented one asks questions)
+//                    (install.ci when the documented one asks questions);
+//                    a failed install is tried up to 3 times
 //   --require-all    fail when an agent's CLI cannot be found
 //                    (implied by --install)
 //   --only a,b       check only these agent ids
@@ -215,16 +216,43 @@ function run(file, args, env, timeoutMs = 60_000) {
   return { status: r.status, text: `${r.stdout ?? ""}\n${r.stderr ?? ""}`, error: r.error?.message };
 }
 
+/**
+ * Runs `attempt()` (returns null on success, an error string otherwise) up to
+ * `attempts` times, calling `wait(ms)` between tries. An install script
+ * fetched over the network sometimes fails for reasons that have nothing to
+ * do with the CLI (a CDN handing curl a compressed or truncated body, a
+ * registry hiccup); one bad download must not read as a missing CLI.
+ * Returns null, or the last error with how many tries it took.
+ */
+export function withRetries(attempt, { attempts = 3, delayMs = 20_000, wait = sleepMs, log = console.log } = {}) {
+  let error = null;
+  for (let i = 1; i <= attempts; i++) {
+    error = attempt();
+    if (error == null) return null;
+    if (i < attempts) {
+      log(`  attempt ${i} of ${attempts} failed (${error}); trying again in ${Math.round((delayMs * i) / 1000)} s`);
+      wait(delayMs * i);
+    }
+  }
+  return attempts > 1 ? `${error}, ${attempts} attempts` : error;
+}
+
+function sleepMs(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 function install(agent, PATH) {
   const cmd = agent.install?.ci ?? agent.install?.command;
   if (!cmd) return "no install command";
   console.log(`install ${agent.id}: ${cmd}`);
-  const r = spawnSync("bash", ["-c", cmd], {
-    stdio: ["ignore", "inherit", "inherit"],
-    env: { ...process.env, PATH, CI: "true", NONINTERACTIVE: "1" },
-    timeout: 15 * 60_000,
+  return withRetries(() => {
+    const r = spawnSync("bash", ["-c", cmd], {
+      stdio: ["ignore", "inherit", "inherit"],
+      env: { ...process.env, PATH, CI: "true", NONINTERACTIVE: "1" },
+      timeout: 15 * 60_000,
+    });
+    return r.status === 0 ? null : `exit ${r.status ?? r.signal ?? r.error?.message}`;
   });
-  return r.status === 0 ? null : `exit ${r.status ?? r.signal ?? r.error?.message}`;
 }
 
 export function main(argv = process.argv.slice(2)) {
