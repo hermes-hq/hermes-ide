@@ -48,6 +48,10 @@ function cargoTargetDir() {
 
 const npx = isWindows ? "npx.cmd" : "npx";
 
+// The bundled prompt library (src-tauri/library): fetched and verified once,
+// then reused from the cache; the test app reads it from the checkout.
+run("node", [join("scripts", "fetch-prompt-library.mjs")]);
+
 if (!rustOnly) {
   run(npx, ["vite", "build"], { env: { ...process.env, VITE_HERMES_E2E: "1" } });
 }
@@ -142,5 +146,13 @@ for (const { built: helperBin, name } of helpers) {
   if (!isWindows) chmodSync(stagedHelper, 0o755);
   console.log(`[e2e build] staged helper ${stagedHelper}`);
 }
+
+// The bundled prompt library, next to the binary as an installer's resource
+// folder would be, so the staged app works wherever it is copied (CI shards).
+mkdirSync(join(outDir(), "bin", "library"), { recursive: true });
+for (const name of ["catalog-v1.tar.zst", "catalog-v1.json"]) {
+  copyFileSync(join(REPO_ROOT, "src-tauri", "library", name), join(outDir(), "bin", "library", name));
+}
+console.log(`[e2e build] staged the bundled prompt library in ${join(outDir(), "bin", "library")}`);
 
 console.log(`\n[e2e build] test app ready: ${staged} (stamp ${stamp})`);

@@ -6,7 +6,7 @@
   "build": {
     "beforeDevCommand": "npm run dev",
     "devUrl": "http://localhost:1420",
-    "beforeBuildCommand": "npm run prepare:bridge && npm run build",
+    "beforeBuildCommand": "npm run prepare:bridge && npm run prepare:library && npm run build",
     "frontendDist": "../dist"
   },
   "app": {
@@ -34,7 +34,8 @@
     "targets": "all",
     "createUpdaterArtifacts": true,
     "resources": [
-      "bridge/runtime"
+      "bridge/runtime",
+      "library"
     ],
     "icon": [
       "icons/32x32.png",
