@@ -2486,8 +2486,8 @@ mod tests {
     #[cfg(unix)]
     fn deaf_child() -> std::process::Child {
         use std::io::BufRead;
-        let mut child = std::process::Command::new("sh")
-            .args(["-c", "trap '' INT; echo ready; exec sleep 30"])
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", "trap '' INT; echo ready; exec /bin/sleep 30"])
             .stdout(Stdio::piped())
             .spawn()
             .unwrap();
@@ -2519,7 +2519,7 @@ mod tests {
     #[cfg(unix)]
     #[test]
     fn a_stop_signal_is_sigint_and_a_kill_is_sigkill() {
-        let mut child = std::process::Command::new("sleep")
+        let mut child = std::process::Command::new("/bin/sleep")
             .arg("30")
             .spawn()
             .unwrap();
@@ -2545,7 +2545,7 @@ mod tests {
     #[cfg(unix)]
     #[tokio::test]
     async fn force_stop_stops_at_the_interrupt_when_the_agent_goes() {
-        let child = std::process::Command::new("sleep")
+        let child = std::process::Command::new("/bin/sleep")
             .arg("30")
             .spawn()
             .unwrap();
