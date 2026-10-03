@@ -161,6 +161,13 @@ features:
       N14-3:
         text: "Orphaned worktree folders are listed and removable in one action"
         scenarios: [N14-disk-guard.mjs]
+      N14-4:
+        # Settings > Storage and the background pass. Free space is the
+        # test-only override; the pass runs seconds after launch
+        # (HERMES_E2E_HYGIENE_START_SECS / _TICK_SECS, e2e builds only).
+        # Negative control: HERMES_E2E_N14S_NEGATIVE=1 must FAIL.
+        text: "Old worktrees never silently fill the disk: low space is announced, merged and orphaned worktrees with nothing to lose and build output are reclaimed (automatically when turned on), work is backed up before any removal, and an open session's worktree is never touched"
+        scenarios: [N14-storage-hygiene.mjs]
   N17:
     name: "Fast worktrees: shared dependencies and ports"
     # Behind the diskGuard flag, with N14. Copy-on-write needs the repo and
