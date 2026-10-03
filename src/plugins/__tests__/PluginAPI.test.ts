@@ -281,6 +281,49 @@ describe("createPluginAPI", () => {
 			const api = createPluginAPI("test", "tok-test", new Set(), undefined, callbacks, commandHandlers, panelComponents);
 			expect(() => api.network.fetch("https://example.com")).toThrow(PermissionDeniedError);
 		});
+
+		it("network.request should pass method, url, headers, and body to invoke", async () => {
+			mockInvoke.mockResolvedValue({ status: 204, headers: {}, body: "" });
+			const api = createPluginAPI("my-plugin", new Set(["network"]), undefined, callbacks, commandHandlers, panelComponents);
+			await api.network.request("PUT", "https://example.com", {
+				headers: { "Content-Type": "application/json" },
+				body: "{}",
+			});
+			expect(mockInvoke).toHaveBeenCalledWith("plugin_http_request", {
+				method: "PUT",
+				url: "https://example.com",
+				headers: { "Content-Type": "application/json" },
+				body: "{}",
+				pluginId: "my-plugin",
+			});
+		});
+
+		it("network.request should default headers and body to null when omitted", async () => {
+			mockInvoke.mockResolvedValue({ status: 200, headers: {}, body: "" });
+			const api = createPluginAPI("my-plugin", new Set(["network"]), undefined, callbacks, commandHandlers, panelComponents);
+			await api.network.request("DELETE", "https://example.com");
+			expect(mockInvoke).toHaveBeenCalledWith("plugin_http_request", {
+				method: "DELETE",
+				url: "https://example.com",
+				headers: null,
+				body: null,
+				pluginId: "my-plugin",
+			});
+		});
+
+		it("network.request should resolve with status, headers, and body", async () => {
+			mockInvoke.mockResolvedValue({ status: 201, headers: { "content-type": "application/json" }, body: "{\"ok\":true}" });
+			const api = createPluginAPI("my-plugin", new Set(["network"]), undefined, callbacks, commandHandlers, panelComponents);
+			const result = await api.network.request("POST", "https://example.com");
+			expect(result.status).toBe(201);
+			expect(result.headers).toEqual({ "content-type": "application/json" });
+			expect(result.body).toBe("{\"ok\":true}");
+		});
+
+		it("network.request should throw without network permission", () => {
+			const api = createPluginAPI("test", new Set(), undefined, callbacks, commandHandlers, panelComponents);
+			expect(() => api.network.request("GET", "https://example.com")).toThrow(PermissionDeniedError);
+		});
 	});
 
 	describe("shell.exec", () => {

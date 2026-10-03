@@ -58,6 +58,11 @@ export interface HermesPluginAPI {
 	network: {
 		fetch(url: string, headers?: Record<string, string>): Promise<string>;
 		postJson(url: string, body: string, headers?: Record<string, string>): Promise<string>;
+		request(
+			method: string,
+			url: string,
+			options?: { headers?: Record<string, string>; body?: string },
+		): Promise<{ status: number; headers: Record<string, string>; body: string }>;
 	};
 	shell: {
 		openExternal(url: string): Promise<void>;
@@ -396,6 +401,22 @@ export function createPluginAPI(
 					throw new PermissionDeniedError(pluginId, "network");
 				}
 				return call("plugin_post_json", { url, body, headers: headers ?? null });
+			},
+			request(
+				method: string,
+				url: string,
+				options?: { headers?: Record<string, string>; body?: string },
+			): Promise<{ status: number; headers: Record<string, string>; body: string }> {
+				if (!permissions.has("network")) {
+					throw new PermissionDeniedError(pluginId, "network");
+				}
+				return invoke("plugin_http_request", {
+					method,
+					url,
+					headers: options?.headers ?? null,
+					body: options?.body ?? null,
+					pluginId,
+				});
 			},
 		},
 		shell: {
