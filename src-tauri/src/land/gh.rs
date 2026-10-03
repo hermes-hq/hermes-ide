@@ -565,6 +565,9 @@ mod tests {
         assert_eq!(remote_host("file:///srv/git/repo.git"), None);
         assert_eq!(remote_host("C:\\repos\\x.git"), None);
         assert_eq!(remote_host("../sibling.git"), None);
+        // A colon after a slash (or a backslash) is a path, not host:path.
+        assert_eq!(remote_host("some/dir:thing"), None);
+        assert_eq!(remote_host("some\\dir:thing"), None);
     }
 
     #[cfg(unix)]
@@ -676,5 +679,27 @@ mod tests {
         let (gh, _) = script_gh(dir.path(), "echo 'HTTP 404' >&2\nexit 1");
         let err = failed_log(&gh, dir.path(), "https://github.com/o/r/actions/runs/1").unwrap_err();
         assert_eq!(err, "gh could not fetch the log: HTTP 404");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_pull_request_gh_refuses_for_a_non_github_remote_says_which_remote() {
+        let dir = TempDir::new().unwrap();
+        let repo = dir.path().join("r");
+        fs::create_dir_all(&repo).unwrap();
+        let r = git2::Repository::init(&repo).unwrap();
+        r.remote("origin", "git@gitlab.example.com:team/x.git")
+            .unwrap();
+        for said in [
+            "none of the git remotes configured for this repository point to a known GitHub host",
+            "the current directory is not a GitHub repository",
+        ] {
+            let (gh, _) = script_gh(dir.path(), &format!("echo '{said}' >&2\nexit 1"));
+            let err = create_pr(&gh, &repo, "main", "task", "Title", "Body").unwrap_err();
+            assert_eq!(
+                err, "origin (git@gitlab.example.com:team/x.git) is not a GitHub repository",
+                "gh said: {said}"
+            );
+        }
     }
 }

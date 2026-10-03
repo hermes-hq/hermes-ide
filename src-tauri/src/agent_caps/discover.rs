@@ -709,7 +709,7 @@ pub(crate) mod tests {
             bin: &Path,
             args: &[String],
             env: &[(String, String)],
-            _cap: usize,
+            cap: usize,
             _t: Duration,
         ) -> Probe {
             let mut key = format!(
@@ -722,10 +722,17 @@ pub(crate) mod tests {
             }
             self.ran.borrow_mut().push(key.clone());
             match self.outputs.get(&key) {
-                Some((code, output)) => Probe::Exited {
-                    code: *code,
-                    output: output.clone(),
-                },
+                // Like the real probe: at most `cap` bytes of output.
+                Some((code, output)) => {
+                    let mut end = output.len().min(cap);
+                    while !output.is_char_boundary(end) {
+                        end -= 1;
+                    }
+                    Probe::Exited {
+                        code: *code,
+                        output: output[..end].to_string(),
+                    }
+                }
                 None => Probe::Failed,
             }
         }
@@ -1086,5 +1093,31 @@ pub(crate) mod tests {
             peek(&caps.agent_id).is_some(),
             "a probe started after it is kept"
         );
+    }
+
+    #[test]
+    fn the_version_is_read_from_up_to_16_kib_of_output() {
+        // A CLI that prints a long notice before its version.
+        let notice = "notice: an update is available for this tool\n".repeat(60);
+        assert!(notice.len() > 2 * 1024 && notice.len() < 16 * 1024);
+        let host = FakeHost::new(&["claude"]).out(
+            "claude --version",
+            0,
+            &format!("{notice}2.1.284 (Claude Code)\n"),
+        );
+        let caps = discover(agent("claude"), &[], None, &none, &host);
+        assert_eq!(caps.cli_version.as_deref(), Some("2.1.284"));
+    }
+
+    #[test]
+    fn the_real_host_reads_a_set_variable_and_treats_an_empty_one_as_unset() {
+        let host = RealHost::new();
+        let name = "HERMES_TEST_DISCOVER_ENV_7F3A";
+        std::env::set_var(name, "value");
+        assert_eq!(host.env(name).as_deref(), Some("value"));
+        std::env::set_var(name, "");
+        assert_eq!(host.env(name), None);
+        std::env::remove_var(name);
+        assert_eq!(host.env(name), None);
     }
 }

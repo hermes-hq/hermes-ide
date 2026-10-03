@@ -762,6 +762,10 @@ mod tests {
         let conflict =
             review_revert_preview(repo.to_string_lossy().to_string(), turn1.clone()).unwrap();
         assert!(!conflict.clean && !conflict.already_reverted);
+        // ...and reverting it goes to the three-way merge, never "already".
+        let result =
+            review_revert_patch(repo.to_string_lossy().to_string(), turn1.clone()).unwrap();
+        assert_eq!(result.method, "3way", "{}", result.message);
     }
 
     #[test]

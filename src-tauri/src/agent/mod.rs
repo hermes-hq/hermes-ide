@@ -1171,17 +1171,22 @@ pub async fn force_stop_agent(
     state: State<'_, AgentState>,
     session_id: String,
 ) -> Result<(), String> {
-    let handle = state.handle();
+    force_stop(state.handle(), &session_id).await
+}
+
+/// `force_stop_agent` on the session map: SIGINT, then SIGKILL when the
+/// session's process is still registered two seconds later.
+async fn force_stop(handle: SessionMap, session_id: &str) -> Result<(), String> {
     let pid = handle
         .lock()
         .await
-        .get(&session_id)
+        .get(session_id)
         .and_then(|e| e.pid)
         .ok_or_else(|| format!("Agent session '{}' has no live process", session_id))?;
     signal_agent_pid(pid, false);
     for _ in 0..20 {
         tokio::time::sleep(Duration::from_millis(100)).await;
-        if !handle.lock().await.contains_key(&session_id) {
+        if !handle.lock().await.contains_key(session_id) {
             return Ok(());
         }
     }
@@ -2461,5 +2466,108 @@ mod tests {
         // buf is taken — caller's slot now holds an empty Vec with the
         // original capacity for reuse.
         assert!(buf.is_empty());
+    }
+
+    #[cfg(unix)]
+    fn signal_of(child: &mut std::process::Child) -> Option<i32> {
+        use std::os::unix::process::ExitStatusExt;
+        for _ in 0..100 {
+            if let Some(status) = child.try_wait().unwrap() {
+                return status.signal();
+            }
+            std::thread::sleep(Duration::from_millis(20));
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        None
+    }
+
+    /// A process that ignores SIGINT (as a wedged agent effectively does).
+    #[cfg(unix)]
+    fn deaf_child() -> std::process::Child {
+        use std::io::BufRead;
+        let mut child = std::process::Command::new("sh")
+            .args(["-c", "trap '' INT; echo ready; exec sleep 30"])
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        // Nothing signals it before the shell has installed the trap.
+        let mut line = String::new();
+        std::io::BufReader::new(child.stdout.take().unwrap())
+            .read_line(&mut line)
+            .unwrap();
+        assert_eq!(line.trim(), "ready");
+        child
+    }
+
+    #[cfg(unix)]
+    fn registered(pid: u32) -> SessionMap {
+        let map: SessionMap = Arc::new(Mutex::new(HashMap::new()));
+        map.try_lock().unwrap().insert(
+            "s1".to_string(),
+            AgentChild {
+                child: None,
+                stdin: None,
+                pid: Some(pid),
+                agent_session_id: "a1".to_string(),
+                task_handles: Vec::new(),
+            },
+        );
+        map
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_stop_signal_is_sigint_and_a_kill_is_sigkill() {
+        let mut child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        signal_agent_pid(child.id(), false);
+        assert_eq!(signal_of(&mut child), Some(libc::SIGINT));
+        let mut deaf = deaf_child();
+        signal_agent_pid(deaf.id(), false);
+        std::thread::sleep(Duration::from_millis(200));
+        assert!(deaf.try_wait().unwrap().is_none(), "SIGINT is ignored");
+        signal_agent_pid(deaf.id(), true);
+        assert_eq!(signal_of(&mut deaf), Some(libc::SIGKILL));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn force_stop_kills_an_agent_that_ignores_the_interrupt() {
+        let mut deaf = deaf_child();
+        let map = registered(deaf.id());
+        force_stop(Arc::clone(&map), "s1").await.unwrap();
+        assert_eq!(signal_of(&mut deaf), Some(libc::SIGKILL));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn force_stop_stops_at_the_interrupt_when_the_agent_goes() {
+        let child = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let map = registered(child.id());
+        // The child waiter: unregisters the session once its process exits.
+        let waiter_map = Arc::clone(&map);
+        let waiter = std::thread::spawn(move || {
+            let mut child = child;
+            let signal = signal_of(&mut child);
+            waiter_map.blocking_lock().remove("s1");
+            signal
+        });
+        let started = std::time::Instant::now();
+        force_stop(Arc::clone(&map), "s1").await.unwrap();
+        assert!(started.elapsed() < Duration::from_millis(1500));
+        assert_eq!(waiter.join().unwrap(), Some(libc::SIGINT));
+    }
+
+    #[tokio::test]
+    async fn force_stop_needs_a_live_process() {
+        let map: SessionMap = Arc::new(Mutex::new(HashMap::new()));
+        let err = force_stop(map, "nope").await.unwrap_err();
+        assert_eq!(err, "Agent session 'nope' has no live process");
     }
 }

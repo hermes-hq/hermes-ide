@@ -1183,9 +1183,8 @@ pub fn on_phase_change(
         return;
     }
     let at = now_ms();
-    match (from, to) {
-        (SessionPhase::Busy, SessionPhase::Idle)
-        | (SessionPhase::Busy, SessionPhase::NeedsInput) => {
+    match phase_edge(from, to) {
+        Some(PhaseEdge::TurnEnd) => {
             if !ledger.accepts_turn_end(session_id, false) || !ledger.queue_turn_end(session_id) {
                 return;
             }
@@ -1213,7 +1212,7 @@ pub fn on_phase_change(
                 },
             );
         }
-        (from, SessionPhase::Busy) if !matches!(from, SessionPhase::Busy) => {
+        Some(PhaseEdge::TurnStart) => {
             // A guessed turn start takes the baseline too, like an exact
             // one: the person's edits since the last turn are theirs.
             if !ledger.note_turn_started(session_id, at, false) {
@@ -1233,7 +1232,28 @@ pub fn on_phase_change(
                 },
             );
         }
-        _ => {}
+        None => {}
+    }
+}
+
+/// What a PTY phase change means for an agent's turn (the heuristic of
+/// [`on_phase_change`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PhaseEdge {
+    /// Busy -> Idle or NeedsInput: the turn ended.
+    TurnEnd,
+    /// Anything else -> Busy: a turn started.
+    TurnStart,
+}
+
+fn phase_edge(from: &SessionPhase, to: &SessionPhase) -> Option<PhaseEdge> {
+    match (from, to) {
+        (SessionPhase::Busy, SessionPhase::Idle)
+        | (SessionPhase::Busy, SessionPhase::NeedsInput) => Some(PhaseEdge::TurnEnd),
+        (from, SessionPhase::Busy) if !matches!(from, SessionPhase::Busy) => {
+            Some(PhaseEdge::TurnStart)
+        }
+        _ => None,
     }
 }
 
@@ -2158,5 +2178,85 @@ mod tests {
             GcReport::default()
         );
         assert!(gc_cutoff_now().len() == 19);
+    }
+
+    #[test]
+    fn a_pty_phase_change_ends_or_starts_a_turn_only_at_busy() {
+        use SessionPhase::*;
+        assert_eq!(phase_edge(&Busy, &Idle), Some(PhaseEdge::TurnEnd));
+        assert_eq!(phase_edge(&Busy, &NeedsInput), Some(PhaseEdge::TurnEnd));
+        assert_eq!(phase_edge(&Idle, &Busy), Some(PhaseEdge::TurnStart));
+        assert_eq!(phase_edge(&NeedsInput, &Busy), Some(PhaseEdge::TurnStart));
+        assert_eq!(phase_edge(&ShellReady, &Busy), Some(PhaseEdge::TurnStart));
+        assert_eq!(phase_edge(&Busy, &Busy), None);
+        assert_eq!(phase_edge(&Idle, &NeedsInput), None);
+        assert_eq!(phase_edge(&Busy, &Closing), None);
+        assert_eq!(phase_edge(&Idle, &Idle), None);
+    }
+
+    #[test]
+    fn a_first_change_of_only_hermes_review_files_records_nothing() {
+        let t = TestRepo::new();
+        let (_d, db) = open_db();
+        let db = Mutex::new(db);
+        let l = ledger();
+        l.ensure_baseline(&db, "s1", t.root()).unwrap();
+        write(
+            t.root(),
+            ".hermes/features/demo/review-1.md",
+            "# Review 1\n",
+        );
+        assert_eq!(
+            l.record_turn(&db, "s1", t.root(), None, 1).unwrap(),
+            SnapshotOutcome::NoChange
+        );
+        assert!(
+            t.repo.refs_under("refs/hermes/").is_empty(),
+            "no baseline commit for a change that was not the agent's"
+        );
+        // The agent's first real change is turn 1, without the review file.
+        write(t.root(), "agent.txt", "x\n");
+        let one = recorded(l.record_turn(&db, "s1", t.root(), None, 2).unwrap());
+        assert_eq!((one.n, one.diffstat.files), (1, 1));
+    }
+
+    #[test]
+    fn a_write_counts_for_a_turn_from_a_second_before_its_start() {
+        let t = TestRepo::new();
+        let tree = |r: &snapshot::Repo| match r.write_tree(Duration::from_secs(30)).unwrap() {
+            snapshot::WriteTree::Tree(t) => t,
+            other => panic!("{other:?}"),
+        };
+        let before = tree(&t.repo);
+        write(t.root(), "new.txt", "x\n");
+        let after = tree(&t.repo);
+        let mtime = std::fs::metadata(t.root().join("new.txt"))
+            .unwrap()
+            .modified()
+            .unwrap()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_millis() as i64;
+        assert!(written_since(&t.repo, &before, &after, mtime));
+        assert!(written_since(
+            &t.repo,
+            &before,
+            &after,
+            mtime + TURN_START_SLACK_MS / 2
+        ));
+        assert!(written_since(
+            &t.repo,
+            &before,
+            &after,
+            mtime + TURN_START_SLACK_MS
+        ));
+        assert!(!written_since(
+            &t.repo,
+            &before,
+            &after,
+            mtime + TURN_START_SLACK_MS + 1
+        ));
+        // Nothing differs: nothing was written.
+        assert!(!written_since(&t.repo, &after, &after, 0));
     }
 }

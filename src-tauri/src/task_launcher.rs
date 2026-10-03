@@ -504,4 +504,35 @@ mod tests {
         let plain = tempfile::tempdir().unwrap();
         assert!(write_feature_file(plain.path(), "ok", "x").is_err());
     }
+
+    #[test]
+    fn a_repository_whose_head_is_unborn_but_has_branches_has_commits() {
+        // `git checkout --orphan`: HEAD names a branch with no commit yet,
+        // but the repository has commits on other branches to start from.
+        let dir = tempfile::tempdir().unwrap();
+        let repo = repo_with_commit(dir.path());
+        repo.set_head("refs/heads/orphan").unwrap();
+        assert!(repo.head().is_err(), "HEAD is unborn");
+        assert!(probe_repo(dir.path(), None).has_commits);
+    }
+
+    #[test]
+    fn the_commands_write_the_checks_and_build_the_first_prompt() {
+        let dir = tempfile::tempdir().unwrap();
+        repo_with_commit(dir.path());
+        let checkout = dir.path().to_string_lossy().to_string();
+        let path = task_write_done_when(checkout.clone(), vec!["npm test".into()]).unwrap();
+        assert!(path.ends_with(DONE_WHEN_FILE), "{path}");
+        let body: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(body["done_when"], serde_json::json!(["npm test"]));
+        let prompt =
+            task_track_prompt(checkout.clone(), "demo".into(), "Do the thing".into()).unwrap();
+        assert_eq!(
+            prompt,
+            track_prompt(dir.path(), "demo", "Do the thing").unwrap()
+        );
+        assert!(prompt.contains("Do the thing"), "{prompt}");
+        assert!(task_track_prompt(checkout, "Bad Slug".into(), "x".into()).is_err());
+    }
 }
