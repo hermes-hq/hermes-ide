@@ -53,7 +53,7 @@ import {
   wasOfferedThisSession,
 } from "../launcher/draft";
 import { overlayOpened } from "../state/overlays";
-import { takeLauncherSeed } from "../library/launcherSeed";
+import { clearLauncherSeed, peekLauncherSeed } from "../library/launcherSeed";
 import { personaDelivery, systemPromptFlag, type LibraryLaunchPersona, type LibraryLaunchPick } from "../library/delivery";
 import { useLibraryMessages } from "../library/messages";
 import { worksTarget } from "../library/targets";
@@ -239,8 +239,11 @@ export function TaskLauncher({
   const agentIds = useMemo(() => agents.map((a) => a.id), [agents]);
 
   // ── state ────────────────────────────────────────────────────────
-  // "Start a task with this" from the Library: taken once, at mount.
-  const [librarySeed] = useState(() => (inline ? null : takeLauncherSeed()));
+  // "Start a task with this" from the Library: read at mount, used up once the sheet is on screen.
+  const [librarySeed] = useState(() => (inline ? null : peekLauncherSeed()));
+  useEffect(() => {
+    if (librarySeed) clearLauncherSeed(librarySeed);
+  }, [librarySeed]);
   const [task, setTask] = useState(librarySeed?.task ?? initialTask ?? "");
   const [libPrompt, setLibPrompt] = useState<LibraryLaunchPick | null>(librarySeed?.prompt ?? null);
   const [libPersona, setLibPersona] = useState<LibraryLaunchPersona | null>(librarySeed?.persona ?? null);
