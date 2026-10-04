@@ -1862,11 +1862,14 @@ features:
         text: "Use in session puts the rendered prompt into a Claude Code and a Codex terminal session as one bracketed paste with no Enter; required arguments block it until filled"
         scenarios: [HOD-use-in-session.mjs]
       HOD-5:
-        text: "A persona at launch reaches every agent: Claude Code as --append-system-prompt, Codex in its first prompt before the task, a persona alone asks the agent to wait; the launcher's From library fills the task"
+        text: "A persona at launch reaches every agent: Claude Code as --append-system-prompt, Codex in its first prompt before the task, a persona alone asks the agent to wait; the launcher's Prompts fills the task"
         scenarios: [HOD-persona-launch.mjs]
       HOD-6:
         text: "A newer signed catalog is applied at runtime; unsigned, wrongly signed, tampered and older catalogs are refused; rollback returns to the bundle; project files never change"
         scenarios: [HOD-update-applies.mjs]
       HOD-7:
-        text: "Updating from 2.0 keeps every saved prompt, role, style, group and pin byte-identical; the Library lists them under My templates; every 2.0 built-in id resolves to its library entry (a pin on one is carried); the Builder's picker opens on the Library with no Built-in tab"
+        text: "Updating from 2.0 keeps every saved prompt, role, style, group and pin byte-identical; they are under Mine in the Library and in Prompts (one list, no template tabs), with the text 2.0 sent; every 2.0 built-in id resolves to its library entry (a pin on one is carried)"
         scenarios: [HOD-migrate-saved.mjs]
+      HOD-8:
+        text: "Prompts (⌘J) works by keyboard from a session and from the launcher: filters, arrows, a readable preview with no template tags, Return to an empty required blank, ⌘Return inserts into Claude Code as a typed lead line plus one paste with no Enter; in the launcher it takes the sheet's place, the typed task fills the first blank and Return uses it as the task"
+        scenarios: [HOD-prompts-keyboard.mjs]

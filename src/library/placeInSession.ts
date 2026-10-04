@@ -1,9 +1,9 @@
 // ─── "Use in session": put text where the person sends from ──────────
 //
 // A terminal session (any agent, any shell) gets the text as one bracketed
-// paste and no Enter: the person reads it and presses Enter themselves
-// (Hermes never types on its own). An Agent-view session gets it in its
-// message box. Nothing is sent either way.
+// paste and no Enter: the person reads it and presses Enter themselves. Only
+// when the person asks to send (Insert and send) does an Enter follow. An
+// Agent-view session gets it in its message box, never sent.
 //
 // A program that has not asked for bracketed paste (DECSET 2004) would run
 // each line of a multi-line paste as it arrives, so such text goes to the
@@ -27,17 +27,34 @@ export interface SessionTarget {
   draft?: string;
 }
 
+export interface PlaceOptions {
+  /**
+   * One short line typed before the paste (no Enter), for an agent that acts
+   * on a folded paste only when the typed message asks it to.
+   */
+  lead?: string | null;
+  /** Press Enter after the text (the person asked to send). */
+  send?: boolean;
+}
+
+/** How long the agent gets to take in a paste before the Enter that sends it. */
+export const SEND_AFTER_PASTE_MS = 120;
+
 export interface PlaceDeps {
   setDraft(sessionId: string, draft: string): void;
   write(sessionId: string, base64: string): Promise<void>;
   /** Whether the program in the terminal accepts a bracketed paste; null when unknown. */
   bracketed(sessionId: string): boolean | null;
   copy(text: string): Promise<void>;
+  /** Waits before the Enter (tests pass a no-op). */
+  wait?(ms: number): Promise<void>;
 }
 
-export type PlaceResult = "draft" | "pasted" | "copied" | "empty";
+const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
-export async function placeInSession(target: SessionTarget, text: string, deps: PlaceDeps = defaultDeps): Promise<PlaceResult> {
+export type PlaceResult = "draft" | "pasted" | "sent" | "copied" | "empty";
+
+export async function placeInSession(target: SessionTarget, text: string, deps: PlaceDeps = defaultDeps, opts: PlaceOptions = {}): Promise<PlaceResult> {
   const body = text.trim();
   if (!body) return "empty";
   if (target.mode === "agent") {
@@ -51,8 +68,14 @@ export async function placeInSession(target: SessionTarget, text: string, deps: 
     await deps.copy(body);
     return "copied";
   }
-  await deps.write(target.id, utf8ToBase64(bracketed === false ? body : pasteBytes(body)));
-  return "pasted";
+  // The lead line is typed (outside the paste brackets) so the agent reads it as the person's own message.
+  const lead = opts.lead?.replace(/[\r\n]+/g, " ").trim();
+  const typed = lead && bracketed !== false ? `${lead} ` : "";
+  await deps.write(target.id, utf8ToBase64(typed + (bracketed === false ? body : pasteBytes(body))));
+  if (!opts.send) return "pasted";
+  await (deps.wait ?? wait)(SEND_AFTER_PASTE_MS);
+  await deps.write(target.id, utf8ToBase64("\r"));
+  return "sent";
 }
 
 const defaultDeps: PlaceDeps = {

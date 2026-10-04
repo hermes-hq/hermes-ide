@@ -1,8 +1,8 @@
 // ─── Hermes 2.0 prompts inside the Library ───────────────────────────
 //
-// Nothing the person saved moves or changes: their templates, groups, pins,
-// custom roles and styles stay in the same settings keys and the Builder
-// reads them as before. The Library shows them as "My templates". The 2.0
+// The person's 2.0 templates, groups, pins, custom roles and styles are
+// migrated into Mine (myPrompts.ts) and their settings keys are left as
+// they were. The Library and the Prompts palette show them as "Mine". The 2.0
 // built-ins are library entries now (by id or reviewed alias); one the
 // catalog has no entry for stays as a read-only "Hermes classic". An old id
 // resolves in this order:
@@ -12,7 +12,6 @@
 //   3. the classic copy (the 2.0 arrays, unchanged);
 //   4. kept as it is and shown as missing — never dropped.
 
-import { getSetting } from "../api/settings";
 import type { PromptTemplate } from "../lib/templates";
 import type { RoleDefinition } from "../lib/roles";
 import type { StyleDefinition } from "../lib/styles";
@@ -34,15 +33,6 @@ type Compile = typeof import("../lib/compilePrompt");
 
 let compileModule: Promise<Compile> | null = null;
 const loadCompile = () => (compileModule ??= import("../lib/compilePrompt"));
-
-function parseList<T>(raw: string): T[] {
-  try {
-    const v = JSON.parse(raw);
-    return Array.isArray(v) ? (v as T[]) : [];
-  } catch {
-    return [];
-  }
-}
 
 function templateText(c: Compile, tpl: PromptTemplate, roles: RoleDefinition[], styles: StyleDefinition[]): string {
   const fields = (tpl.fields ?? {}) as Record<string, unknown>;
@@ -96,34 +86,42 @@ export async function loadClassics(): Promise<LegacyItem[]> {
   return out;
 }
 
-/** The person's saved templates, with their own roles and styles. */
-export async function loadMine(): Promise<LegacyItem[]> {
+/**
+ * What each 2.0 template sends, keyed by its id: compiled exactly as the
+ * 2.0 composer did, its built-in role and style ids resolved to their
+ * library entries (the 2.0 text only when the catalog has none), its own
+ * roles and styles from `roles` / `styles`.
+ */
+export async function legacyTemplateText(
+  saved: readonly PromptTemplate[],
+  ownRoles: readonly RoleDefinition[],
+  ownStyles: readonly StyleDefinition[],
+): Promise<Map<string, string>> {
   const c = await loadCompile();
-  const [rawTemplates, rawRoles, rawStyles] = await Promise.all([
-    getSetting("prompt_templates").catch(() => ""),
-    getSetting("custom_roles").catch(() => ""),
-    getSetting("custom_styles").catch(() => ""),
-  ]);
-  const saved = parseList<PromptTemplate>(rawTemplates).filter((t) => t && typeof t.id === "string");
-  // Built-in role and style ids in a saved template resolve to their
-  // library entries (the 2.0 text only when the catalog has none).
-  const roleIds = saved.flatMap((t) => [...(t.fields?.roleIds ?? []), ...(t.recommendedRoles ?? [])]);
-  const styleIds = saved.flatMap((t) => [...(t.fields?.styleSelections ?? []), ...(t.recommendedStyles ?? [])].map((s) => s?.id));
+  const list = saved.filter((t) => t && typeof t.id === "string");
+  const roleIds = list.flatMap((t) => [...(t.fields?.roleIds ?? []), ...(t.recommendedRoles ?? [])]);
+  const styleIds = list.flatMap((t) => [...(t.fields?.styleSelections ?? []), ...(t.recommendedStyles ?? [])].map((s) => s?.id));
   const { definitionsFor } = await import("./parts");
   const lib = await definitionsFor(roleIds.filter((id): id is string => typeof id === "string"), styleIds.filter((id): id is string => typeof id === "string"));
-  const roles = [...lib.roles, ...parseList<RoleDefinition>(rawRoles)];
-  const styles = [...lib.styles, ...parseList<StyleDefinition>(rawStyles)];
-  return saved
-    .map((t) => ({
-      key: `mine:${t.id}`,
-      id: t.id,
-      group: "mine" as const,
-      source: "template" as const,
-      title: t.name || t.id,
-      description: t.description ?? "",
-      category: String(t.category ?? ""),
-      text: templateText(c, t, roles, styles),
-    }));
+  const roles = [...lib.roles, ...ownRoles];
+  const styles = [...lib.styles, ...ownStyles];
+  return new Map(list.map((t) => [t.id, templateText(c, t, roles, styles)]));
+}
+
+/** The person's own prompts (Mine), as Library rows. */
+export async function loadMine(): Promise<LegacyItem[]> {
+  const { loadMyPrompts } = await import("./myPrompts");
+  const mine = await loadMyPrompts();
+  return mine.map((m) => ({
+    key: `mine:${m.id}`,
+    id: m.id,
+    group: "mine" as const,
+    source: m.kind === "persona" ? ("role" as const) : m.kind === "style" ? ("style" as const) : ("template" as const),
+    title: m.title || m.id,
+    description: m.description,
+    category: m.folder ?? "",
+    text: m.text,
+  }));
 }
 
 /** Items whose title, description, id or text holds every word of the query. */

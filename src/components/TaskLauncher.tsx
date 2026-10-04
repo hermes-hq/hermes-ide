@@ -1,5 +1,5 @@
 import "../styles/components/TaskLauncher.css";
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "../i18n/I18nProvider";
 import { Button, Checkbox, Chip, CloseButton, IconButton, Input, Segmented, Select, Textarea, type SelectOption } from "./ui";
@@ -57,7 +57,7 @@ import { takeLauncherSeed } from "../library/launcherSeed";
 import { personaDelivery, systemPromptFlag, type LibraryLaunchPersona, type LibraryLaunchPick } from "../library/delivery";
 import { useLibraryMessages } from "../library/messages";
 import { worksTarget } from "../library/targets";
-import { LibraryPicker } from "./library/LibraryPicker";
+import { lazyView } from "../utils/lazyView";
 import { useModalTabTrap } from "../hooks/useFocusTrap";
 import {
   TASK_LAUNCHES_KEY,
@@ -77,6 +77,9 @@ import {
   type BlockingRow,
   type TaskTrack,
 } from "../launcher/taskLauncher";
+
+/** Prompts (⌘J) in the launcher: loaded the first time it opens. */
+const PromptPicker = lazyView("PromptPicker", () => import("./library/PromptPicker").then((m) => m.PromptPicker));
 
 /** One agent session the launcher asks the app to start. */
 export interface PlannedAgent {
@@ -242,6 +245,19 @@ export function TaskLauncher({
   const [libPrompt, setLibPrompt] = useState<LibraryLaunchPick | null>(librarySeed?.prompt ?? null);
   const [libPersona, setLibPersona] = useState<LibraryLaunchPersona | null>(librarySeed?.persona ?? null);
   const [libPickerOpen, setLibPickerOpen] = useState(false);
+  // ⌘J can arrive twice for one press (the menu key and the field's own keydown): one toggle per press.
+  const lastPromptsToggle = useRef(0);
+  const togglePrompts = useCallback(() => {
+    const now = Date.now();
+    if (now - lastPromptsToggle.current < 300) return;
+    lastPromptsToggle.current = now;
+    setLibPickerOpen((o) => !o);
+  }, []);
+  useEffect(() => {
+    // ⌘J reaches the app as a menu key: with the launcher in front it opens (or closes) the launcher's Prompts.
+    window.addEventListener("hermes:launcher-prompts", togglePrompts);
+    return () => window.removeEventListener("hermes:launcher-prompts", togglePrompts);
+  }, [togglePrompts]);
   const libraryReady = useLibraryMessages();
   const [choice, setChoice] = useState<LaunchChoice | null>(null);
   const [repoPath, setRepoPath] = useState(defaultRepo ?? "");
@@ -1851,14 +1867,14 @@ export function TaskLauncher({
           // ⌘J / Ctrl+J: the Library, filtered to the agents of this launch.
           if (isActionMod(e) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "j" && libraryReady) {
             e.preventDefault();
-            setLibPickerOpen((o) => !o);
+            togglePrompts();
           }
         }}
       />
 
       {libraryReady && (
         <div className="task-launcher-library" data-testid="launcher-library">
-          <Button size="sm" variant="quiet" className="task-launcher-from-library" aria-expanded={libPickerOpen} onClick={() => setLibPickerOpen((o) => !o)}>
+          <Button size="sm" variant="quiet" className="task-launcher-from-library" aria-expanded={libPickerOpen} aria-haspopup="dialog" onClick={togglePrompts}>
             {t("library.launcher.fromLibrary", { shortcut: fmt("{mod}J") })}
           </Button>
           {libPrompt && (
@@ -1871,24 +1887,6 @@ export function TaskLauncher({
               {t("library.launcher.personaChip", { title: libPersona.title })}
             </Chip>
           )}
-        </div>
-      )}
-      {libraryReady && libPickerOpen && (
-        <div className="task-launcher-library-picker">
-          <LibraryPicker
-            works={[...new Set(plannedAgents.map((a) => worksTarget(a.id)))]}
-            kinds={["prompt", "workflow", "persona"]}
-            onPick={(pick) => {
-              if (pick.kind === "persona") {
-                setLibPersona({ id: pick.id, version: pick.version, title: pick.title, text: pick.text });
-              } else {
-                setTask(pick.text);
-                setLibPrompt({ id: pick.id, version: pick.version, title: pick.title });
-              }
-              setLibPickerOpen(false);
-              focusTask();
-            }}
-          />
         </div>
       )}
       {libraryReady && libPersona && (
@@ -2422,7 +2420,42 @@ export function TaskLauncher({
     </div>
   );
 
-  if (inline) return body;
+  // Prompts (⌘J) takes the sheet's place in the same overlay: one surface, and the launch keeps everything set.
+  const prompts =
+    libraryReady && libPickerOpen ? (
+      <Suspense fallback={null}>
+        <PromptPicker
+          context="launcher"
+          embedded={!inline}
+          works={[...new Set(plannedAgents.map((a) => worksTarget(a.id)))]}
+          prefill={task.trim() && !libPrompt ? task : ""}
+          projectPath={repoPath || null}
+          libraryContext={{ projectPath: repoPath || null }}
+          onClose={() => {
+            setLibPickerOpen(false);
+            focusTask();
+          }}
+          onUse={(pick) => {
+            if (pick.kind === "persona") {
+              setLibPersona({ id: pick.id, version: pick.version, title: pick.title, text: pick.text });
+            } else {
+              setTask(pick.text);
+              setLibPrompt({ id: pick.id, version: pick.version, title: pick.title });
+              if (pick.persona) setLibPersona(pick.persona);
+            }
+            setLibPickerOpen(false);
+            focusTask();
+          }}
+        />
+      </Suspense>
+    ) : null;
+
+  if (inline) return (
+    <>
+      {body}
+      {prompts}
+    </>
+  );
   return (
     <div
       ref={sheetWrapRef}
@@ -2431,10 +2464,16 @@ export function TaskLauncher({
       aria-modal="true"
       aria-label={t("launcher.title")}
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) close();
+        if (e.target === e.currentTarget) {
+          if (libPickerOpen) setLibPickerOpen(false);
+          else close();
+        }
       }}
     >
-      <div className="task-launcher-sheet">{body}</div>
+      <div className="task-launcher-sheet" hidden={!!prompts}>
+        {body}
+      </div>
+      {prompts}
     </div>
   );
 }

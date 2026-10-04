@@ -55,7 +55,7 @@ export const GENERATED_SHORTCUT_GROUPS: GeneratedShortcutGroup[] = [
     shortcuts: [
       { id: "view.toggle-sidebar", label: "Sidebar", labelKey: "shortcuts.item.view.toggleSidebar", keys: "{mod}B", pcKeys: "{ctrl}{shift}B" },
       { id: "view.command-palette", label: "Command Palette", labelKey: "shortcuts.item.view.commandPalette", keys: "{mod}K", pcKeys: "{ctrl}{shift}K" },
-      { id: "view.prompt-composer", label: "Prompt Composer", labelKey: "shortcuts.item.view.promptComposer", keys: "{mod}J", pcKeys: "{ctrl}{shift}M" },
+      { id: "view.prompt-composer", label: "Prompts", labelKey: "shortcuts.item.view.promptComposer", keys: "{mod}J", pcKeys: "{ctrl}{shift}M" },
       { id: "view.process-panel", label: "Process Panel", labelKey: "shortcuts.item.view.processPanel", keys: "{mod}P", pcKeys: "{ctrl}{shift}L" },
       { id: "view.git-panel", label: "Git Panel", labelKey: "shortcuts.item.view.gitPanel", keys: "{mod}G", pcKeys: "{ctrl}{shift}G" },
       { id: "view.context-panel", label: "Context Panel", labelKey: "shortcuts.item.view.contextPanel", keys: "{mod}E", pcKeys: "{ctrl}{shift}E" },

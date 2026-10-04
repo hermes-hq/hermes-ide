@@ -21,10 +21,13 @@ vi.mock("../state/SessionContext", async (importOriginal) => ({
 }));
 
 import { ProviderActionsBar } from "../components/ProviderActionsBar";
+import { I18nProvider } from "../i18n/I18nProvider";
 
 function renderBar(aiProvider: string) {
   return render(
-    <ProviderActionsBar sessionId="s1" agentName="" actions={[]} recentActions={[]} phase="idle" aiProvider={aiProvider} />,
+    <I18nProvider>
+      <ProviderActionsBar sessionId="s1" agentName="" actions={[]} recentActions={[]} phase="idle" aiProvider={aiProvider} />
+    </I18nProvider>,
   );
 }
 

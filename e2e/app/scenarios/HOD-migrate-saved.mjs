@@ -13,7 +13,7 @@
 //   run 2  the 2.1 build opens that database: it takes a backup, adds the
 //          library tables (schema 7), and
 //          - every saved prompt setting is byte-identical;
-//          - the Library lists the custom prompt under My templates, and its
+//          - the Library lists the custom prompt under Mine, and its
 //            text has the task, the custom role's instruction and the
 //            constraint;
 //          - every 2.0 built-in is a library entry now: the old ids resolve
@@ -21,10 +21,12 @@
 //            "find-root-cause", "backend-eng" -> "backend-engineer",
 //            "detailed" -> "thorough"), no Hermes classics are left, and the
 //            pin on "debug-root-cause" is a pin on "find-root-cause";
-//          - the prompt Builder's picker opens on the Library (no Built-in
-//            tab), still lists both saved templates under My templates, and
-//            the edited built-in brings the library persona and style its
-//            old role and style ids resolve to.
+//          - Prompts (⌘J, which replaced the Builder) is one list with a
+//            Mine filter, says the 2.0 items are under Mine, lists both saved
+//            templates, the custom role and the custom style there, and the
+//            edited built-in's text has the library persona its old role id
+//            resolves to;
+//          - the 2.0 settings are never written: Mine lives in my_prompts.
 //
 // Negative control: HERMES_E2E_HOD_NEGATIVE=drop deletes the saved template
 // from the database before run 2; the "kept" checks must then fail.
@@ -127,51 +129,48 @@ await runLauncherQa(
     await b.click('[data-testid="library-view"] .lib-head > .h-close-btn');
     await b.waitFor("the Library to close", `return !e2e.first('[data-testid="library-view"]');`);
 
-    // The prompt Builder opens on the Library and still has both saved templates.
+    // Prompts (⌘J, the one palette that replaced the Builder) lists everything under Mine.
     const term = await b.eval(`return await window.__HERMES_E2E__.newTerminal(${JSON.stringify({ label: "builder", cwd: fx.repo })});`, { timeoutMs: 30_000 });
-    assert(!!term, "a terminal for the Builder");
+    assert(!!term, "a terminal for Prompts");
     await sleep(800);
     await menuAction(b, "view.command-palette");
     await b.waitFor("the palette", `return !!e2e.first(".command-palette-input");`);
-    await typeValue(b, ".command-palette-input", "Prompt Composer");
+    await typeValue(b, ".command-palette-input", "Prompts");
     await sleep(300);
-    await b.clickWhenReady(`const i = e2e.all(".command-palette-item").find((e) => /Prompt Composer/.test(e.innerText)); return i ? e2e.click(i) : false;`);
-    await b.waitFor("the prompt Builder", `return !!e2e.first(".prompt-composer .template-picker-btn");`, { timeoutMs: 15_000 });
-    await b.click(".prompt-composer .template-picker-btn");
-    await b.waitFor("the template picker", `return !!e2e.first(".template-picker-tabs");`);
-    await b.waitFor("the Library in the picker", `return !!e2e.first(".template-picker-dropdown .lib-picker .lib-picker-list .lib-row");`, { timeoutMs: 20_000 }).catch(() => null);
+    await b.clickWhenReady(`const i = e2e.all(".command-palette-item").find((e) => /^Prompts/.test(e2e.norm(e.innerText))); return i ? e2e.click(i) : false;`);
+    await b.waitFor("Prompts", `return !!e2e.first('[data-testid="prompt-picker"] .pp-input');`, { timeoutMs: 15_000 });
     const opened = await b.eval(`return {
-      tabs: e2e.all(".template-picker-tab").map((e) => e2e.norm(e.innerText).replace(/\\s*\\d+$/, "")),
-      active: e2e.norm(e2e.first(".template-picker-tab-active")?.innerText ?? ""),
-      library: !!e2e.first(".template-picker-dropdown .lib-picker"),
+      notes: e2e.all(".pp-note").map((e) => e2e.norm(e.innerText)),
+      chips: e2e.all(".pp-chips [data-filter]").map((e) => e.getAttribute("data-filter")),
+      tabs: e2e.all(".template-picker-tab").length,
     };`);
-    log(`  Builder picker on open: ${JSON.stringify(opened)}`);
-    await b.screenshot(join(evidenceDir, "03-builder-library.png"));
-    check(opened.library && /Library/.test(opened.active) && /Library/.test(opened.tabs[0] ?? ""), "the picker opens on the Library, its first tab");
-    check(!opened.tabs.some((x) => /Built-in/i.test(x)), "and has no Built-in tab");
-    await b.clickWhenReady(`const t = e2e.all(".template-picker-tab").find((e) => /My/i.test(e.innerText)); return t ? e2e.click(t) : false;`);
-    await sleep(400);
-    const builder = await b.eval(`return { names: e2e.all(".template-picker-item-name").map((e) => e2e.norm(e.innerText)) };`);
-    log(`  Builder, My templates: ${JSON.stringify(builder)}`);
-    await b.screenshot(join(evidenceDir, "04-builder-mine.png"));
-    check(builder.names.includes("Ship checklist") && builder.names.includes("Root cause, my way"), "the prompt Builder still lists both saved templates under My templates");
-    // The edited built-in: its old role and style ids bring their library entries.
-    await b.clickWhenReady(`const i = e2e.all(".template-picker-item-name").find((e) => e2e.norm(e.innerText) === "Root cause, my way"); return i ? e2e.click(i) : false;`);
+    log(`  Prompts on open: ${JSON.stringify(opened)}`);
+    check(opened.tabs === 0 && opened.chips.includes("mine") && opened.chips[0] === "all", "Prompts opens as one list with a Mine filter (no Library / My Templates tabs)");
+    check(opened.notes.some((n) => /under Mine/.test(n)), "and says the 2.0 templates, roles and styles are under Mine");
+    await b.click('.pp-chips [data-filter="mine"]');
+    await b.waitFor("Mine", `return !!e2e.first('.pp-row[data-key="mine:user-root-cause-copy"]');`, { timeoutMs: 15_000 }).catch(() => null);
+    const mineRows = await b.eval(`return e2e.all(".pp-row").map((e) => e.getAttribute("data-key"));`);
+    log(`  Prompts, Mine: ${JSON.stringify(mineRows)}`);
+    await b.screenshot(join(evidenceDir, "03-prompts-mine.png"));
+    check(
+      ["mine:user-ship-checklist", "mine:user-root-cause-copy", "mine:custom-role-release", "mine:custom-style-terse"].every((k) => mineRows.includes(k)),
+      "Mine holds both saved templates, the custom role and the custom style",
+    );
+    // The edited built-in: its old role and style ids brought their library entries into its text.
+    await b.click('.pp-row[data-key="mine:user-root-cause-copy"]');
     await b.waitFor(
-      "the library persona and style in the Builder",
-      `return /Backend engineer/.test(e2e.first(".role-selector-pills")?.innerText ?? "") && /Thorough/.test(e2e.first(".style-selector-pills")?.innerText ?? "") && /backend engineer/i.test(e2e.first(".prompt-composer-preview-content")?.textContent ?? "");`,
+      "the edited built-in's text",
+      `return /Find why the nightly import fails/.test(e2e.first('[data-testid="prompt-receives"]')?.textContent ?? "");`,
       { timeoutMs: 20_000 },
     ).catch(() => null);
-    const applied = await b.eval(`return {
-      roles: e2e.all(".role-selector-pill-label").map((e) => e2e.norm(e.innerText)),
-      styles: e2e.all(".style-selector-pill-label").map((e) => e2e.norm(e.innerText)),
-      preview: e2e.first(".prompt-composer-preview-content")?.textContent ?? "",
-    };`);
-    log(`  applied: roles ${JSON.stringify(applied.roles)}, styles ${JSON.stringify(applied.styles)}, preview ${JSON.stringify(applied.preview.slice(0, 300))}`);
-    await b.screenshot(join(evidenceDir, "05-builder-applied.png"));
-    check(applied.roles.includes("Backend engineer") && !applied.roles.includes("Senior Backend Engineer"), "the old role id backend-eng brings the library persona Backend engineer");
-    check(applied.styles.includes("Thorough") && !applied.styles.includes("Detailed"), "the old style id detailed brings the library style Thorough");
-    check(applied.preview.includes("Find why the nightly import fails") && applied.preview.includes("Root cause first"), "with the saved task and constraint");
+    const preview = await b.eval(`return e2e.first('[data-testid="prompt-receives"]')?.textContent ?? "";`);
+    log(`  its text: ${JSON.stringify(preview.slice(0, 300))}`);
+    await b.screenshot(join(evidenceDir, "04-prompts-migrated-entry.png"));
+    check(/backend engineer/i.test(preview) && !/Senior Backend Engineer/.test(preview), "the old role id backend-eng brings the library persona Backend engineer");
+    check(preview.includes("Find why the nightly import fails") && preview.includes("Root cause first"), "with the saved task and constraint");
+    check(!/<\/?(task|context|role)>/.test(preview), "and reads as text, not template source");
+    const myPrompts = JSON.parse((await invoke(b, "get_settings")).my_prompts ?? "[]");
+    check(myPrompts.length === 4, "Mine is stored once, in my_prompts");
 
     await current().stop();
     const after = new DatabaseSync(dbPath, { readOnly: true });

@@ -36,7 +36,7 @@ their definitions so it can never drift from what the app actually does.
 |---|---|---|---|
 | Sidebar | ⌘B | Ctrl+Shift+B | Windows / Linux: also Ctrl+B when no terminal has focus |
 | Command Palette | ⌘K | Ctrl+Shift+K | Windows / Linux: also Ctrl+K when no terminal has focus |
-| Prompt Composer | ⌘J | Ctrl+Shift+M | Windows / Linux: also Ctrl+J when no terminal has focus |
+| Prompts | ⌘J | Ctrl+Shift+M | Windows / Linux: also Ctrl+J when no terminal has focus |
 | Process Panel | ⌘P | Ctrl+Shift+L | Windows / Linux: also Ctrl+P when no terminal has focus |
 | Git Panel | ⌘G | Ctrl+Shift+G | Windows / Linux: also Ctrl+G when no terminal has focus |
 | Context Panel | ⌘E | Ctrl+Shift+E | Windows / Linux: also Ctrl+E when no terminal has focus |

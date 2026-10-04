@@ -224,15 +224,16 @@ try {
     await pickInMenu(bridge, "agent", `[data-agent-id="${agent.id}"]`);
     if (agent.model) await pickInMenu(bridge, "model", `[data-model-id="${agent.model}"]`).catch(() => log(`  (no ${agent.model} on the model chip; the default model)`));
     await bridge.click(".task-launcher-from-library");
-    await bridge.waitFor("the picker", `return !!e2e.first(".lib-picker .lib-picker-search");`, { timeoutMs: 30_000 });
-    await typeInto(bridge, ".lib-picker-search", "code reviewer");
-    await bridge.waitFor("Code reviewer in the picker", `
-      if (e2e.first(".lib-picker-detail")?.getAttribute("data-entry") === "code-reviewer") return true;
-      const r = e2e.first('.lib-picker-list .lib-row[data-entry="code-reviewer"]');
+    await bridge.waitFor("Prompts", `return !!e2e.first('[data-testid="prompt-picker"] .pp-input');`, { timeoutMs: 30_000 });
+    await typeInto(bridge, ".pp-input", "code reviewer");
+    await bridge.waitFor("Code reviewer in Prompts", `
+      if (e2e.first(".pp-pane-inner")?.getAttribute("data-entry") === "code-reviewer") return true;
+      const r = e2e.first('.pp-row[data-entry="code-reviewer"]');
       if (r) r.click();
       return false;
     `, { timeoutMs: 20_000, intervalMs: 700 });
-    await bridge.click(".lib-picker-insert");
+    await bridge.click(".pp-primary");
+    await bridge.waitFor("Prompts to close", `return !e2e.first('[data-testid="prompt-picker"]');`);
     await typeInto(bridge, ".task-launcher-task", TASK);
     await bridge.waitFor("Launch to be enabled", `const b = e2e.first(".task-launcher-launch"); return !!b && !b.disabled;`, { timeoutMs: 60_000 });
     await bridge.screenshot(join(evidenceDir, `01-${agent.id}-launcher.png`));

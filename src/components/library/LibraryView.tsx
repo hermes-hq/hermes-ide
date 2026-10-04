@@ -33,6 +33,7 @@ import {
 import { filterLegacy, loadClassics, loadMine, visibleClassics, warnMissingAlias, type LegacyItem } from "../../library/legacy";
 import { placeInSession, sessionDeps } from "../../library/placeInSession";
 import { setLauncherSeed } from "../../library/launcherSeed";
+import { OPEN_LIBRARY_EVENT, takeLibraryFocus } from "../../library/libraryFocus";
 import { agentName, worksTarget } from "../../library/targets";
 import type { EntryDetail, ItemState, LibraryContext, LibraryHit, LibraryStatus, SearchPage, Shelf, Shelves } from "../../library/types";
 import { LibraryDetail, type SessionChoice } from "./LibraryDetail";
@@ -282,6 +283,18 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
   const openId = useCallback((id: string, reasons: LibraryHit["reasons"] = []) => {
     setSelection({ type: "hit", id, reasons });
   }, []);
+  // "Open in Library" from Prompts: show that entry (with "Add as a command" open when asked).
+  useEffect(() => {
+    const apply = () => {
+      const f = takeLibraryFocus();
+      if (!f?.id) return;
+      setSelection({ type: "hit", id: f.id, reasons: [] });
+      if (f.install) setInstalling(true);
+    };
+    apply();
+    window.addEventListener(OPEN_LIBRARY_EVENT, apply);
+    return () => window.removeEventListener(OPEN_LIBRARY_EVENT, apply);
+  }, []);
   useEffect(() => {
     if (selection?.type !== "hit") {
       setDetail(null);
@@ -371,30 +384,18 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     },
     duplicate: (text: string) => {
       if (!detail) return;
-      void getSetting("prompt_templates")
-        .catch(() => "")
-        .then((raw) => {
-          let list: unknown[] = [];
-          try {
-            const v = JSON.parse(raw || "[]");
-            if (Array.isArray(v)) list = v;
-          } catch {
-            /* a broken list is kept as it is: append only to a readable one */
-            throw new Error("unreadable prompt_templates");
-          }
-          const tpl = {
-            id: `user-${Date.now().toString(36)}`,
-            name: detail.row.title,
+      // The copy goes into Mine, the one place the person's own prompts live.
+      void import("../../library/myPrompts")
+        .then(({ saveMyPrompt }) =>
+          saveMyPrompt({
+            kind: detail.row.kind === "persona" ? "persona" : detail.row.kind === "style" ? "style" : "prompt",
+            title: detail.row.title,
             description: detail.row.desc,
-            category: "planning",
-            fields: { task: text },
-            recommendedRoles: [],
-            recommendedStyles: [],
-            builtIn: false,
-            source: { id: detail.id, version: detail.row.v },
-          };
-          return setSetting("prompt_templates", JSON.stringify([...list, tpl])).then(() => loadMine().then(setMine));
-        })
+            text,
+            from: { id: detail.id, version: detail.row.v },
+          }),
+        )
+        .then(() => loadMine().then(setMine))
         .then(() => toast(t("library.toast.duplicated", { title: detail.row.title })))
         .catch((e) => toast(t("library.toast.failed", { error: String(e) }), "error"));
     },

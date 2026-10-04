@@ -126,7 +126,8 @@ const ReviewDesk = lazyView("ReviewDesk", () => import("./components/ReviewDesk"
 // Dialogs that only exist once the user opens them.
 const SessionCreator = lazyView("SessionCreator", () => import("./components/SessionCreator").then((m) => m.SessionCreator));
 const TaskLauncher = lazyView("TaskLauncher", () => import("./components/TaskLauncher").then((m) => m.TaskLauncher));
-const PromptComposer = lazyView("PromptComposer", () => import("./components/PromptComposer").then((m) => m.PromptComposer));
+// Prompts (⌘J): the one palette for finding a prompt and putting it to work.
+const SessionPrompts = lazyView("SessionPrompts", () => import("./components/library/SessionPrompts").then((m) => m.SessionPrompts));
 const ShortcutsPanel = lazyView("ShortcutsPanel", () => import("./components/ShortcutsPanel").then((m) => m.ShortcutsPanel));
 const WorkspacePanel = lazyView("WorkspacePanel", () => import("./components/WorkspacePanel").then((m) => m.WorkspacePanel));
 const CostDashboard = lazyView("CostDashboard", () => import("./components/CostDashboard").then((m) => m.CostDashboard));
@@ -212,6 +213,12 @@ function AppContent() {
   const [launcherReopen] = useState(() => new LauncherReopen());
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  // "Open in Library" from Prompts (src/library/libraryFocus.ts says which entry).
+  useEffect(() => {
+    const show = () => setLibraryOpen(true);
+    window.addEventListener("hermes:open-library", show);
+    return () => window.removeEventListener("hermes:open-library", show);
+  }, []);
   const [cmdPaletteShortcut, setCmdPaletteShortcut] = useState("cmd_k");
   const pendingSplit = useRef<{ paneId: string; direction: SplitDirection } | null>(null);
   // An update must never kill a working agent (N10): count agent sessions
@@ -2032,13 +2039,9 @@ function AppContent() {
         </Suspense>
       )}
 
-      {ui.composerOpen && activeSession && (
+      {ui.composerOpen && (
         <Suspense fallback={null}>
-          <PromptComposer
-            sessionId={activeSession.id}
-            onClose={() => dispatch({ type: "CLOSE_COMPOSER" })}
-            addToast={toastStore.addToast}
-          />
+          <SessionPrompts sessionId={activeSession?.id ?? null} onClose={() => dispatch({ type: "CLOSE_COMPOSER" })} />
         </Suspense>
       )}
 

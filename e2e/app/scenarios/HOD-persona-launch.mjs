@@ -8,10 +8,10 @@
 //      the persona travels as its system prompt (--append-system-prompt
 //      <persona>, the flag proven with the real CLI) and the task is the
 //      first prompt, alone.
-//   B  In the launcher, Codex selected, "From library" (filtered to entries
-//      that work in Codex): the same persona is picked, then a
-//      prompt with an argument fills the task (its chip shows the entry and
-//      version). Launch: Codex has no proven system-prompt flag, so its
+//   B  In the launcher, Codex selected, "Prompts" (the one palette, in the
+//      launcher's place, filtered to entries that work in Codex): the same
+//      persona is picked, then a prompt with an argument fills the task (its
+//      chip names the prompt). Launch: Codex has no proven system-prompt flag, so its
 //      first prompt is the persona followed by the task, and there is no
 //      --append-system-prompt.
 //   C  A persona with no task (Codex): the first prompt is the persona and
@@ -43,21 +43,25 @@ async function dropPersonaIfNegative(bridge) {
 }
 
 async function pickFromLibrary(bridge, query, id, args = {}) {
-  await bridge.clickWhenReady(`return e2e.first(".lib-picker") ? true : e2e.click(e2e.must(e2e.first(".task-launcher-from-library"), "From library"));`);
-  await bridge.waitFor("the library picker", `return !!e2e.first(".lib-picker .lib-picker-search");`, { timeoutMs: 20_000 });
-  await typeInto(bridge, ".lib-picker-search", query);
-  await bridge.waitFor(`${id} among the picker's results`, `return !!e2e.first('.lib-picker-list .lib-row[data-entry="${id}"]') && e2e.first(".lib-picker-list")?.getAttribute("aria-busy") !== "true";`, { timeoutMs: 20_000 });
-  // The list may still re-render once for the typed query: click until the entry opens.
-  await bridge.waitFor(`${id} in the picker`, `
-    if (e2e.first(".lib-picker-detail")?.getAttribute("data-entry") === "${id}") return true;
-    const r = e2e.first('.lib-picker-list .lib-row[data-entry="${id}"]');
+  // Prompts (⌘J) takes the launcher sheet's place; the launcher keeps everything set.
+  await bridge.clickWhenReady(`return e2e.first('[data-testid="prompt-picker"]') ? true : e2e.click(e2e.must(e2e.first(".task-launcher-from-library"), "Prompts"));`);
+  await bridge.waitFor("Prompts", `return !!e2e.first('[data-testid="prompt-picker"][data-context="launcher"] .pp-input');`, { timeoutMs: 20_000 });
+  await typeInto(bridge, ".pp-input", query);
+  await bridge.waitFor(`${id} among the results`, `return !!e2e.first('.pp-row[data-entry="${id}"]') && e2e.first(".pp-list")?.getAttribute("aria-busy") !== "true";`, { timeoutMs: 20_000 });
+  // The list may still re-render once for the typed query: click until the entry is the chosen one.
+  await bridge.waitFor(`${id} chosen`, `
+    if (e2e.first(".pp-pane-inner")?.getAttribute("data-entry") === "${id}") return true;
+    const r = e2e.first('.pp-row[data-entry="${id}"]');
     if (r) r.click();
     return false;
   `, { timeoutMs: 20_000, intervalMs: 700 });
-  for (const [name, value] of Object.entries(args)) await typeInto(bridge, `.lib-picker-detail .lib-field[data-arg="${name}"] input`, value);
-  await bridge.waitFor("Insert enabled", `return e2e.first(".lib-picker-insert")?.disabled === false;`);
-  await bridge.click(".lib-picker-insert");
-  await bridge.waitFor("the picker to close", `return !e2e.first(".lib-picker");`);
+  for (const [name, value] of Object.entries(args)) {
+    await bridge.waitFor(`the ${name} field`, `return !!e2e.first('.pp-field[data-arg="${name}"] textarea, .pp-field[data-arg="${name}"] input');`, { timeoutMs: 10_000 });
+    await typeInto(bridge, `.pp-field[data-arg="${name}"] textarea, .pp-field[data-arg="${name}"] input`, value);
+  }
+  await bridge.waitFor("nothing left to fill in", `return !e2e.first(".pp-left");`);
+  await bridge.click(".pp-primary");
+  await bridge.waitFor("Prompts to close", `return !e2e.first('[data-testid="prompt-picker"]');`);
 }
 
 const how = (bridge) =>
@@ -106,7 +110,7 @@ await runLauncherQa(
     const chips = await bridge.eval(`return { prompt: e2e.norm(e2e.first(".task-launcher-library-prompt")?.innerText ?? ""), persona: e2e.norm(e2e.first(".task-launcher-library-persona")?.innerText ?? "") };`);
     const howB = await how(bridge);
     log(`  chips: ${JSON.stringify(chips)}; task starts ${JSON.stringify((st.task ?? "").slice(0, 60))}; how ${JSON.stringify(howB)}`);
-    check(/Review AI-generated code|review/i.test(chips.prompt) && /\d+\.\d+\.\d+/.test(chips.prompt), "the task came from the library prompt (chip with its version)");
+    check(/^Prompt: .*review/i.test(chips.prompt), "the task came from the library prompt (its chip names it)");
     check((st.task ?? "").includes("diff --git a/cart.py b/cart.py"), "rendered with the argument");
     check(howB.some((h) => h.agent === "codex" && h.delivery === "first-message"), "it says Codex gets the role in its first prompt");
     await dropPersonaIfNegative(bridge);

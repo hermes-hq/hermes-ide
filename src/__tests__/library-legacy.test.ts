@@ -17,9 +17,11 @@ vi.mock("../api/settings", () => ({
 
 const { filterLegacy, isUserId, loadClassics, loadMine, resolveIds, visibleClassics } = await import("../library/legacy");
 const { BUILT_IN_ROLES, BUILT_IN_STYLES, BUILT_IN_TEMPLATES } = await import("../lib/compilePrompt");
+const { resetMyPromptsCache } = await import("../library/myPrompts");
 
 beforeEach(() => {
   for (const k of Object.keys(settings)) delete settings[k];
+  resetMyPromptsCache();
 });
 
 describe("Hermes classics", () => {
@@ -57,8 +59,8 @@ describe("Hermes classics", () => {
   });
 });
 
-describe("My templates", () => {
-  it("shows a saved 2.0 prompt with its own role and style, compiled", async () => {
+describe("Mine (migrated from 2.0)", () => {
+  it("shows a saved 2.0 prompt with its own role and style, compiled, and the role itself", async () => {
     settings.prompt_templates = JSON.stringify([
       {
         id: "user-1",
@@ -73,13 +75,14 @@ describe("My templates", () => {
     ]);
     settings.custom_roles = JSON.stringify([{ id: "custom-role-1", label: "Release captain", systemInstruction: "You run releases.", builtIn: false }]);
     const mine = await loadMine();
-    expect(mine.map((m) => m.title)).toEqual(["Ship checklist", "1.x template"]);
+    expect(mine.map((m) => m.title)).toEqual(["Ship checklist", "1.x template", "Release captain"]);
+    expect(mine[2].source).toBe("role");
     expect(mine[0].text).toContain("Check the release");
     expect(mine[0].text).toContain("You run releases.");
     expect(mine[0].text).toContain("No new deps");
     expect(mine[1].text).toContain("Old role");
     expect(filterLegacy(mine, "ship")).toHaveLength(1);
-    expect(filterLegacy(mine, "cat:planning")).toHaveLength(2);
+    expect(filterLegacy(mine, "cat:planning")).toHaveLength(3);
   });
 
   it("survives a broken saved list without touching it", async () => {

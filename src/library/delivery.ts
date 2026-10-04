@@ -20,6 +20,12 @@ export function personaDelivery(agentId: string, mode: "terminal" | "agent"): Pe
   return "clipboard";
 }
 
+/** How long a paste the agent folds into a placeholder (catalog `paste_fold`), or null. */
+export function pasteFold(agentId: string | null | undefined): { chars: number; lines: number } | null {
+  if (!agentId) return null;
+  return getAgent(agentId)?.terminal.paste_fold ?? null;
+}
+
 /** The CLI flag a persona travels in ("--append-system-prompt"), when there is one. */
 export function systemPromptFlag(agentId: string): string | null {
   const args = getAgent(agentId)?.terminal.system_prompt;

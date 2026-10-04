@@ -58,4 +58,29 @@ describe("placeInSession", () => {
     expect(await placeInSession({ id: "s1", mode: "terminal" }, "  \n ", d)).toBe("empty");
     expect(writes).toEqual([]);
   });
+
+  it("types a short lead line before a long paste, outside the paste brackets, still without Enter", async () => {
+    const { d, writes } = deps(true);
+    const long = "Step one.\nStep two.\nStep three.\nStep four.";
+    expect(await placeInSession({ id: "s1", mode: "terminal" }, long, d, { lead: "Add a test:\nfollow the pasted prompt." })).toBe("pasted");
+    expect(writes).toEqual([`Add a test: follow the pasted prompt. \x1b[200~${long}\x1b[201~`]);
+  });
+
+  it("presses Enter only when asked to send, after the paste", async () => {
+    const { d, writes } = deps(true);
+    const waited: number[] = [];
+    d.wait = async (ms) => {
+      waited.push(ms);
+    };
+    expect(await placeInSession({ id: "s1", mode: "terminal" }, "Ship it.", d, { send: true })).toBe("sent");
+    expect(writes).toEqual(["\x1b[200~Ship it.\x1b[201~", "\r"]);
+    expect(waited.length).toBe(1);
+  });
+
+  it("never sends or types a lead line into an Agent-view draft", async () => {
+    const { d, drafts, writes } = deps(null);
+    expect(await placeInSession({ id: "a1", mode: "agent" }, "Do X", d, { lead: "Lead", send: true })).toBe("draft");
+    expect(drafts).toEqual([["a1", "Do X"]]);
+    expect(writes).toEqual([]);
+  });
 });

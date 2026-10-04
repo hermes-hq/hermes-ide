@@ -258,7 +258,7 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
     let command_palette = MenuItemBuilder::with_id("view.command-palette", "Command Palette")
         .accelerator(app_accel("view.command-palette")?)
         .build(app)?;
-    let prompt_composer = MenuItemBuilder::with_id("view.prompt-composer", "Prompt Composer")
+    let prompt_composer = MenuItemBuilder::with_id("view.prompt-composer", "Prompts")
         .accelerator(app_accel("view.prompt-composer")?)
         .build(app)?;
     let process_panel = CheckMenuItemBuilder::with_id("view.process-panel", "Process Panel")

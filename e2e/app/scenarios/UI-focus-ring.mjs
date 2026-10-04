@@ -156,9 +156,7 @@ const BUILT = [
   // The New Session prefix chips are the control set's chips now.
   { cls: "h-chip-button", html: '<span class="h-chip h-chip--md h-chip--interactive"><button type="button" class="h-chip-button session-creator-prefix-chip">nice</button></span>' },
   { cls: "workbench-notes-textarea", html: '<textarea class="workbench-notes-textarea" aria-label="Notes"></textarea>' },
-  { cls: "prompt-composer-field", html: '<div class="prompt-composer-field"><textarea aria-label="Prompt"></textarea></div>' },
-  { cls: "role-selector-create-field", html: '<div class="role-selector-create-field"><input aria-label="Role name"><textarea aria-label="Role prompt"></textarea></div>' },
-  { cls: "style-selector-create-field", html: '<div class="style-selector-create-field"><input aria-label="Style name"></div>' },
+  { cls: "pp-input", html: '<div class="pp-search"><input class="pp-input" aria-label="Search prompts"></div>' },
   { cls: "session-list-new-project-input", html: '<div class="session-list-new-project-input"><input aria-label="Project name"></div>' },
   { cls: "commands-popover-search", html: '<div class="commands-popover-search"><input aria-label="Search commands"></div>' },
 ];
