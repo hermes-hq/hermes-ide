@@ -1653,8 +1653,8 @@ function Receives({
         <div className="pp-recv-body" data-testid="prompt-receives">
           {leadTitle && folds && <p className="pp-lead" data-lead>{t("library.prompts.leadNote", { line: t("library.prompts.leadLine", { title: leadTitle }) })}</p>}
           {sections.map((s, i) => (
-            <div key={i} className="pp-rs">
-              <b>{s.tag ? tagLabel(s.tag) : ""}</b>
+            <div key={i} className="pp-rs" data-plain={s.tag ? undefined : true}>
+              {s.tag && <b>{tagLabel(s.tag)}</b>}
               <div>
                 {s.blocks.map((b, j) => (
                   <BlockView key={j} block={b} focusField={focusField} />

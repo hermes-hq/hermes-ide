@@ -550,6 +550,10 @@
   gap: var(--space-3);
 }
 
+.pp-rs[data-plain] {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .pp-rs > b {
   color: var(--text-2);
   font-size: var(--text-sm);
