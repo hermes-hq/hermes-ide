@@ -134,6 +134,7 @@ pub fn apply(app: &AppHandle, count: u32, notices: u32) -> Result<&'static str, 
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
+        let _ = mark;
         match urgency(previous, count, notices) {
             Urgency::Clear => window
                 .request_user_attention(None)
