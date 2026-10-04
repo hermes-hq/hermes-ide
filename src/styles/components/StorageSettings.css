@@ -1,0 +1,266 @@
+/* ─── Settings > Storage ─────────────────────────────────────────── */
+
+.storage-settings {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+.storage-settings .settings-section-title {
+  margin-top: var(--space-3);
+}
+
+.storage-card {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-0);
+  border: var(--control-border-width) solid var(--border);
+  border-radius: var(--radius);
+}
+
+.storage-disk-line {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.storage-free {
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-free--low {
+  color: var(--warning);
+}
+
+.storage-meta {
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+.storage-bar {
+  position: relative;
+  height: var(--space-2);
+  border-radius: var(--radius-full);
+  background: var(--bg-3);
+  overflow: hidden;
+}
+
+.storage-bar > span {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+}
+
+.storage-bar-other {
+  left: 0;
+  background: var(--text-3);
+}
+
+.storage-bar-worktrees {
+  background: var(--accent);
+}
+
+.storage-bar-warn {
+  width: var(--rail-width);
+  background: var(--warning);
+}
+
+.storage-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--text-2);
+}
+
+.storage-legend b {
+  color: var(--text-0);
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-dot {
+  display: inline-block;
+  width: var(--space-2);
+  height: var(--space-2);
+  border-radius: 50%;
+  margin-right: var(--space-1);
+  vertical-align: middle;
+}
+
+.storage-dot--worktrees { background: var(--accent); }
+.storage-dot--other { background: var(--text-3); }
+
+.storage-summary {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.storage-stat {
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-stat--needs {
+  color: var(--warning);
+}
+
+.storage-spacer {
+  flex: 1;
+}
+
+.storage-note {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius);
+  background: var(--success-dim);
+  color: var(--text-0);
+  font-size: var(--text-sm);
+  overflow-wrap: anywhere;
+}
+
+.storage-note--error {
+  background: var(--danger-dim);
+}
+
+.storage-repo {
+  border: var(--control-border-width) solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.storage-repo-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  background: var(--bg-2);
+  color: var(--text-1);
+}
+
+.storage-repo-name {
+  color: var(--text-0);
+  font-weight: var(--weight-medium);
+}
+
+.storage-repo-nums {
+  margin-left: auto;
+  font-size: var(--text-sm);
+  color: var(--text-2);
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: var(--control-border-width) solid var(--border);
+}
+
+.storage-row-main {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  min-width: 0;
+}
+
+.storage-row-line {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.storage-branch {
+  font-family: var(--font-code);
+  font-size: var(--text-sm);
+  color: var(--text-0);
+  overflow-wrap: anywhere;
+}
+
+.storage-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.storage-fact {
+  font-size: var(--text-sm);
+  color: var(--text-3);
+}
+
+.storage-fact--warn {
+  color: var(--warning);
+}
+
+.storage-row-side {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.storage-size {
+  min-width: var(--space-8);
+  text-align: right;
+  font-size: var(--text-sm);
+  color: var(--text-1);
+  font-variant-numeric: tabular-nums;
+}
+
+.storage-size small {
+  display: block;
+  font-size: var(--text-2xs);
+  color: var(--text-3);
+}
+
+.storage-confirm {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  border: var(--control-border-width) solid var(--border-light);
+  border-radius: var(--radius);
+  background: var(--bg-2);
+  font-size: var(--text-sm);
+}
+
+.storage-confirm-btns {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-1);
+  margin-top: var(--space-2);
+}
+
+.storage-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: var(--control-border-width) solid var(--border);
+  font-size: var(--text-base);
+  color: var(--text-1);
+}
+
+.storage-backup {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.storage-backup code {
+  font-family: var(--font-code);
+  font-size: var(--text-xs);
+  color: var(--text-1);
+  overflow-wrap: anywhere;
+}

@@ -87,13 +87,7 @@ pub fn capabilities(
         let r = with_db(app, |c| store::rejections(c, agent_id, &acc))?;
         let r = r
             .into_iter()
-            .map(|(model, at, message)| discover::Refusal {
-                resolved: (model == DEFAULT_MODEL)
-                    .then(|| refused_model_name(&message))
-                    .flatten(),
-                model,
-                at,
-            })
+            .map(|(model, at, message)| refusal_of(model, at, &message))
             .collect();
         refused.insert(acc, r);
     }
@@ -114,6 +108,18 @@ async fn blocking<T: Send + 'static>(
     tokio::task::spawn_blocking(f)
         .await
         .map_err(|e| e.to_string())?
+}
+
+/// A remembered refusal as discovery reads it: for the agent's default,
+/// also the model the CLI's words say "default" resolved to.
+fn refusal_of(model: String, at: i64, message: &str) -> discover::Refusal {
+    discover::Refusal {
+        resolved: (model == DEFAULT_MODEL)
+            .then(|| refused_model_name(message))
+            .flatten(),
+        model,
+        at,
+    }
 }
 
 /// The model a refusal names (Codex: "The model `X` does not exist…", "The
@@ -654,6 +660,14 @@ fn sign_out(agent: &crate::agent_catalog::Agent, env: &ProfileEnv) -> Result<(),
     }
 }
 
+/// Only accounts Hermes added can be removed, never the default profile.
+fn removable(account_id: &str) -> Result<(), String> {
+    if account_id == DEFAULT_ACCOUNT {
+        return Err("The default profile cannot be removed".to_string());
+    }
+    Ok(())
+}
+
 /// Remove an account Hermes added. Its profile folder stays where it is;
 /// `signOut` first runs the agent's own sign-out in it (the account is not
 /// removed when that fails, so nothing is left half done).
@@ -664,9 +678,7 @@ pub async fn remove_agent_account(
     account_id: String,
     sign_out: Option<bool>,
 ) -> Result<(), String> {
-    if account_id == DEFAULT_ACCOUNT {
-        return Err("The default profile cannot be removed".to_string());
-    }
+    removable(&account_id)?;
     blocking(move || {
         if sign_out == Some(true) {
             let agent = agent(&agent_id)?;
@@ -997,5 +1009,27 @@ mod tests {
         assert_eq!(repo_key("/src/app/"), "/src/app");
         assert_eq!(repo_key("C:\\src\\app\\"), "C:\\src\\app");
         assert_eq!(repo_key("/"), "/");
+    }
+
+    #[test]
+    fn a_refusal_of_the_default_names_what_it_resolved_to() {
+        let msg = "The model `gpt-5.5-codex` does not exist or you do not have access to it.";
+        let r = refusal_of(DEFAULT_MODEL.to_string(), 7, msg);
+        assert_eq!(
+            (r.model.as_str(), r.at, r.resolved.as_deref()),
+            ("default", 7, Some("gpt-5.5-codex"))
+        );
+        // A refusal of a model the launch named is that model: nothing to resolve.
+        let r = refusal_of("gpt-5.5-codex".to_string(), 8, msg);
+        assert_eq!((r.model.as_str(), r.resolved), ("gpt-5.5-codex", None));
+    }
+
+    #[test]
+    fn the_default_profile_cannot_be_removed() {
+        assert_eq!(
+            removable(DEFAULT_ACCOUNT),
+            Err("The default profile cannot be removed".to_string())
+        );
+        assert_eq!(removable("work"), Ok(()));
     }
 }

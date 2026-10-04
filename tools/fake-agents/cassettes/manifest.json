@@ -42,6 +42,16 @@
 			"scrubber": 1
 		},
 		{
+			"path": "claude-bridge/2.1.283/structured-turn.jsonl",
+			"agent": "claude-bridge",
+			"version": "2.1.283",
+			"scenario": "structured-turn",
+			"origin": "hand-written",
+			"date": "2026-10-03",
+			"sha256": "e35f8fdd24cc1345cc21102819efcef6402acb735ca675336067589730611ab9",
+			"scrubber": 1
+		},
+		{
 			"path": "claude-bridge/2.1.283/torn-output.jsonl",
 			"agent": "claude-bridge",
 			"version": "2.1.283",

@@ -161,6 +161,13 @@ features:
       N14-3:
         text: "Orphaned worktree folders are listed and removable in one action"
         scenarios: [N14-disk-guard.mjs]
+      N14-4:
+        # Settings > Storage and the background pass. Free space is the
+        # test-only override; the pass runs seconds after launch
+        # (HERMES_E2E_HYGIENE_START_SECS / _TICK_SECS, e2e builds only).
+        # Negative control: HERMES_E2E_N14S_NEGATIVE=1 must FAIL.
+        text: "Old worktrees never silently fill the disk: low space is announced, merged and orphaned worktrees with nothing to lose and build output are reclaimed (automatically when turned on), work is backed up before any removal, and an open session's worktree is never touched"
+        scenarios: [N14-storage-hygiene.mjs]
   N17:
     name: "Fast worktrees: shared dependencies and ports"
     # Behind the diskGuard flag, with N14. Copy-on-write needs the repo and
@@ -1873,3 +1880,45 @@ features:
       HOD-8:
         text: "Prompts (⌘J) works by keyboard from a session and from the launcher: filters, arrows, a readable preview with no template tags, Return to an empty required blank, ⌘Return inserts into Claude Code as a typed lead line plus one paste with no Enter; in the launcher it takes the sheet's place, the typed task fills the first blank and Return uses it as the task"
         scenarios: [HOD-prompts-keyboard.mjs]
+  README:
+    name: "Every feature the README lists is proven in the real app"
+    # docs/readme-claims.yml maps each README feature bullet to the scenario
+    # that proves it (scripts/check-readme-claims.mjs). The scenarios written
+    # for bullets no other feature's criteria already covered are listed here.
+    status: shipped
+    criteria:
+      README-1:
+        text: "The Review Desk lists a project's staged, unstaged and untracked files, stages and unstages a file, and shows the diff of the file you click with removed and added lines marked"
+        scenarios: [git-panel.mjs]
+      README-2:
+        text: "Agent view draws a replayed Claude turn as a thinking block, a command card with its output, and a file card with the edit's diff"
+        scenarios: [agent-chat.mjs]
+      README-3:
+        text: "An image pasted into the Agent-view composer reaches Claude as an image block with exactly the pasted bytes"
+        scenarios: [agent-images.mjs]
+      README-4:
+        text: "After the app quits and starts again, an Agent-view session comes back in Agent view, Claude is started with --resume and the same session id, and a new message is answered"
+        scenarios: [N13-resume-agents.mjs]
+      README-5:
+        text: "Split right puts two sessions side by side, split down stacks them, and closing a pane gives its space back"
+        scenarios: [split-panes.mjs]
+      README-6:
+        text: "The terminal on screen draws with WebGL where the webview has it (and falls back where it has not), shows the link pointer over a printed web address, and refits its columns and rows when the window is resized"
+        scenarios: [webgl-rendering.mjs]
+      README-7:
+        # Not on Windows: PowerShell predicts from its own history there
+        # (PSReadLine), and Hermes leaves the prompt to it, as it does for
+        # any shell with suggestions of its own.
+        text: "Typing the start of an earlier command shows the rest as ghost text, → accepts it, and a prefix that matches nothing shows none"
+        scenarios: ["ghost-text.mjs@darwin,linux"]
+      README-9:
+        text: "Scanning two projects finds each one's languages, frameworks, architecture and conventions; both attach to one session, and the agent is pointed at a context file holding both, kept within the project's token budget"
+        scenarios: [project-scanning.mjs]
+      README-10:
+        text: "A memory fact and a pinned file saved for a project reach the next session's agent context file on that project, also after the app restarts"
+        scenarios: [memory-pins.mjs]
+      README-11:
+        # Windows: the test app runs with the real home folder there, so it
+        # cannot be given its own git credential helper.
+        text: "A push to a remote that needs a password fails with how to sign in when there are no credentials, and succeeds with a git credential helper or with GITHUB_TOKEN"
+        scenarios: ["git-auth.mjs@darwin,linux"]

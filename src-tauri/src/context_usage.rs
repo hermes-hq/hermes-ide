@@ -814,6 +814,24 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// The running turn's `turn_interrupted` when the transcript lines just
+/// read closed `interrupted` (> 0) turns the person interrupted.
+fn interrupt_event(
+    turns: &StdMutex<TurnTracker>,
+    interrupted: usize,
+    at: i64,
+    source: &str,
+) -> Option<SessionEvent> {
+    if interrupted > 0 {
+        turns
+            .lock()
+            .ok()
+            .and_then(|mut t| t.interrupt_running(at, Some(source.to_string())))
+    } else {
+        None
+    }
+}
+
 /// Watch one launch's spool for the transcript it names, and tail that
 /// transcript until the agent is gone or the session is. `turns`: the
 /// launch's turns (the spool watcher's), ended here when the transcript
@@ -892,15 +910,9 @@ pub(crate) fn watch(
                 for event in events {
                     emit_session_event(&app, &session_id, event);
                 }
-                if interrupted > 0 {
-                    let event = turns
-                        .lock()
-                        .ok()
-                        .and_then(|mut t| t.interrupt_running(at, Some(source.clone())));
-                    if let Some(event) = event {
-                        log::info!("[CONTEXT] {session_id}: the person interrupted the turn");
-                        emit_session_event(&app, &session_id, event);
-                    }
+                if let Some(event) = interrupt_event(&turns, interrupted, at, source) {
+                    log::info!("[CONTEXT] {session_id}: the person interrupted the turn");
+                    emit_session_event(&app, &session_id, event);
                 }
                 *history = false;
             }
@@ -1733,5 +1745,94 @@ mod tests {
     #[test]
     fn an_interrupt_already_in_the_file_is_history() {
         assert_eq!(interrupts(&rejected_turn(), true), 0);
+    }
+
+    #[test]
+    fn a_turn_is_interrupted_only_when_the_transcript_says_so() {
+        use crate::contract::{AgentStatus, AgentStatusKind, Confidence};
+        let running = || {
+            let mut t = TurnTracker::default();
+            t.frame(vec![SessionEvent::Status {
+                at: 1,
+                source: None,
+                tags: None,
+                status: AgentStatus {
+                    kind: AgentStatusKind::Working,
+                    confidence: Confidence::Exact,
+                    detail: String::new(),
+                },
+            }]);
+            assert_eq!(t.current(), Some(1));
+            StdMutex::new(t)
+        };
+        let turns = running();
+        assert_eq!(interrupt_event(&turns, 0, 5, "transcript:claude"), None);
+        assert_eq!(turns.lock().unwrap().current(), Some(1), "still running");
+        let turns = running();
+        match interrupt_event(&turns, 1, 5, "transcript:claude") {
+            Some(SessionEvent::TurnInterrupted { at, source, n, .. }) => {
+                assert_eq!(
+                    (at, source.as_deref(), n.get()),
+                    (5, Some("transcript:claude"), 1)
+                );
+            }
+            other => panic!("expected turn_interrupted, got {other:?}"),
+        }
+        assert_eq!(turns.lock().unwrap().current(), None);
+        assert!(interrupt_event(&running(), 2, 5, "t").is_some());
+        // No turn running: nothing to interrupt.
+        assert_eq!(
+            interrupt_event(&StdMutex::new(TurnTracker::default()), 1, 5, "t"),
+            None
+        );
+    }
+
+    #[test]
+    fn only_the_interrupt_marker_or_a_rejected_tool_is_an_interrupt() {
+        assert!(!is_interrupt_line(
+            &json!({"type":"user","message":{"content":"hello"}})
+        ));
+        assert!(!is_interrupt_line(
+            &json!({"type":"user","toolUseResult":"ok","message":{"content":"x"}})
+        ));
+        assert!(is_interrupt_line(
+            &json!({"type":"user","toolUseResult":"User rejected tool use"})
+        ));
+        assert!(is_interrupt_line(
+            &json!({"type":"user","message":{"content":"[Request interrupted by user]"}})
+        ));
+        assert!(is_interrupt_line(
+            &json!({"type":"user","message":{"content":[{"type":"text","text":"[Request interrupted by user for tool use]"}]}})
+        ));
+        // A text part that is not the marker, and the marker in a part that
+        // is not text, are not.
+        assert!(!is_interrupt_line(
+            &json!({"type":"user","message":{"content":[{"type":"text","text":"keep going"}]}})
+        ));
+        assert!(!is_interrupt_line(
+            &json!({"type":"user","message":{"content":[{"type":"tool_result","text":"[Request interrupted by user]"}]}})
+        ));
+    }
+
+    #[test]
+    fn exactly_the_standard_window_is_still_the_standard_window() {
+        assert_eq!(
+            context_limit(Some("claude-sonnet-4-5-20250929"), 200_000, None).map(|l| l.get()),
+            Some(200_000)
+        );
+        assert_eq!(
+            context_limit(Some("claude-sonnet-4-5-20250929"), 200_001, None).map(|l| l.get()),
+            Some(1_000_000)
+        );
+    }
+
+    #[test]
+    fn a_status_line_window_of_zero_is_no_window() {
+        let line =
+            json!({"nonce":"n1","payload":{"model":"m","context_window_size":0}}).to_string();
+        assert_eq!(parse_spool_window(&line, "n1"), None);
+        let line =
+            json!({"nonce":"n1","payload":{"model":"m","context_window_size":1}}).to_string();
+        assert_eq!(parse_spool_window(&line, "n1"), Some((Some("m".into()), 1)));
     }
 }

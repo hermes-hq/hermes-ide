@@ -61,6 +61,8 @@ const PluginManager = lazyView("PluginManager", () => import("./PluginManager").
 // The hidden controls preview (Flags tab) loads only when opened.
 const UiKitScreen = lazyView("UiKitScreen", () => import("./ui/UiKitScreen").then((m) => m.UiKitScreen));
 const LibrarySettings = lazyView("LibrarySettings", () => import("./library/LibrarySettings").then((m) => m.LibrarySettings));
+// Settings > Storage (diskGuard flag) loads when its tab is first opened.
+const StorageSettings = lazyView("StorageSettings", () => import("./StorageSettings").then((m) => m.StorageSettings));
 
 // ╔══════════════════════════════════════════════════════════════════════════╗
 // ║  SETTINGS PAGE — EXPORT / IMPORT CONTRACT                              ║
@@ -270,6 +272,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     ...(isFeatureFlagEnabled("taskLauncher") || isFeatureFlagEnabled("agentCatalog") ? [{ id: "agents", label: t("settings.agents") }] : []),
     // The prompt library: updates, personalisation, installs into projects.
     { id: "library", label: t("app.library") },
+    // Old worktrees and the disk they take (disk guard).
+    ...(isFeatureFlagEnabled("diskGuard") ? [{ id: "storage", label: t("storage.title") }] : []),
     { id: "shortcuts", label: t("settings.shortcuts") },
     { id: "plugins", label: t("app.plugins") },
     { id: "privacy", label: t("settings.privacy") },
@@ -942,6 +946,10 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   }
                 />
               </div>
+            )}
+
+            {activeTab === "storage" && (
+              <Suspense fallback={null}><StorageSettings settings={settings} onChange={updateSetting} /></Suspense>
             )}
 
             {activeTab === "privacy" && (

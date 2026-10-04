@@ -8,9 +8,10 @@
 //      table instead of string literals, every row is kept, with the
 //      per-platform chords.
 //   2. A README feature bullet with no scenario fails the claims gate (the CI
-//      job), while the repository's own README passes it. A new claim cannot
-//      join the unproven backlog, and a backlog claim whose planned scenario
-//      has landed fails until it names that scenario.
+//      job), while the repository's own README passes it, strict mode
+//      included (no claim is unproven). A new claim cannot join the unproven
+//      backlog, a backlog claim whose planned scenario has landed fails until
+//      it names that scenario, and strict mode fails on any unproven claim.
 //
 // Runs the real gate scripts as child processes, against copies of the
 // repository's own menu, app-shortcuts.json, README.md and claims map in a
@@ -147,17 +148,29 @@ try {
   r = run(CLAIMS, ["--baseline", CLAIMS_YML], "check-readme-claims --baseline <committed map>");
   assert(r.status === 0 && r.out.includes("CLAIMS GATE: PASS"), "the committed README passes against its own baseline");
 
+  // The committed map has no backlog left, so cases 8 and 9 put a claim back
+  // on it in a copy: multi-session, unproven, planned on a scenario.
+  // (A Windows checkout may have CRLF line ends.)
+  const eol = claimsYml.includes("\r\n") ? "\r\n" : "\n";
+  const backlogged = (planned) =>
+    claimsYml.replace(/(\r?\n  multi-session:\r?\n    text: [^\r\n]*\r?\n)((?:    #[^\r\n]*\r?\n)*)    scenario: \S+\r?\n/, `$1$2    unproven: "Not proven yet"${eol}    planned: ${planned}${eol}`);
+
   log("case 8: a backlog claim whose planned scenario has landed");
-  const landed = claimsYml.replace(/(split-panes:[\s\S]*?planned: )\S+/, "$1N23-docs-gates.mjs");
-  assert(landed !== claimsYml, "the copy plans split-panes on a scenario the ledger tracks");
+  const landed = backlogged("N23-docs-gates.mjs");
+  assert(landed !== claimsYml, "the copy plans multi-session on a scenario the ledger tracks");
   writeFileSync(claimsCopy, landed);
   r = run(CLAIMS, ["--claims", claimsCopy], "check-readme-claims --claims <copy>");
-  assert(r.status === 1 && r.out.includes('claim "split-panes" is still unproven, but its planned scenario N23-docs-gates.mjs has landed'), "the CI check fails until the claim names the scenario");
+  assert(r.status === 1 && r.out.includes('claim "multi-session" is still unproven, but its planned scenario N23-docs-gates.mjs has landed'), "the CI check fails until the claim names the scenario");
 
-  log("case 9: strict mode lists the whole backlog as failures");
+  log("case 9: strict mode fails on every unproven claim, and passes the committed map");
   r = run(CLAIMS, ["--strict"], "check-readme-claims --strict");
+  assert(r.status === 0 && r.out.includes("0 listed as unproven") && r.out.includes("CLAIMS GATE: PASS"), "the committed map has no unproven claim, so strict mode passes");
+  writeFileSync(claimsCopy, backlogged("multi-session.mjs"));
+  r = run(CLAIMS, ["--claims", claimsCopy], "check-readme-claims --claims <copy with one unproven claim>");
+  assert(r.status === 0, "without --strict an existing claim waiting on its planned scenario passes");
+  r = run(CLAIMS, ["--strict", "--claims", claimsCopy], "check-readme-claims --strict --claims <copy with one unproven claim>");
   const unprovenCount = Number(/(\d+) listed as unproven/.exec(r.out)?.[1] ?? -1);
-  assert(r.status === 1 && unprovenCount > 0 && r.out.includes(`CLAIMS GATE: FAIL (${unprovenCount} problem`), `strict mode fails once per unproven claim (${unprovenCount})`);
+  assert(r.status === 1 && unprovenCount === 1 && r.out.includes("CLAIMS GATE: FAIL (1 problem"), `strict mode fails once per unproven claim (${unprovenCount})`);
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

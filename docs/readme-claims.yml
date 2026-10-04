@@ -33,20 +33,21 @@
 claims:
   agent-chat:
     text: "Structured conversation"
-    unproven: "No real-app scenario proves this yet"
-    planned: agent-chat.mjs
+    scenario: agent-chat.mjs
   agent-images:
     text: "Real images"
-    unproven: "No real-app scenario proves this yet"
-    planned: agent-images.mjs
+    scenario: agent-images.mjs
   agent-persistent-conversations:
     text: "Persistent conversations"
-    unproven: "No real-app scenario proves this yet"
-    planned: N13-resume-agents.mjs
+    # The earlier messages are not drawn again after the restart; the README
+    # says only that the session comes back and Claude continues it.
+    scenario: N13-resume-agents.mjs
   agent-own-auth:
     text: "Bring your own auth"
-    unproven: "No real-app scenario proves this yet"
-    planned: agent-own-auth.mjs
+    # CAP-agents-settings shows each agent's own sign-in state and plan and
+    # adds an account by running the CLI's own login; F07 signs a signed-out
+    # agent in by running the agent's own sign-in in a terminal.
+    scenarios: [CAP-agents-settings.mjs, F07-agent-view-respawn.mjs]
   multi-session:
     text: "Multi-session management"
     # terminal-echo creates a terminal session, finds it in the session list and
@@ -54,13 +55,12 @@ claims:
     scenario: terminal-echo.mjs
   split-panes:
     text: "Split panes"
-    unproven: "No real-app scenario proves this yet"
-    # N11-split-cwd-report.mjs is about a report split across two reads, not panes.
-    planned: split-panes.mjs
+    scenario: split-panes.mjs
   webgl-rendering:
-    text: "WebGL-accelerated rendering"
-    unproven: "No real-app scenario proves this yet"
-    planned: webgl-rendering.mjs
+    text: "Fast terminal rendering"
+    # Where the webview has no WebGL (a Linux CI runner under xvfb), the
+    # scenario checks the fallback instead, as the README's wording says.
+    scenario: webgl-rendering.mjs
   every-agent-terminal:
     text: "Every agent in its own terminal"
     # N09 opens Claude (a stand-in CLI) from the New Session wizard in its own
@@ -73,63 +73,54 @@ claims:
     text: "Opt in per session"
     scenario: N09-terminal-first.mjs
   git-panel:
-    text: "Built-in git panel"
-    unproven: "No real-app scenario proves this yet"
-    planned: git-panel.mjs
+    text: "Built-in git view"
+    scenario: git-panel.mjs
   git-actions:
-    text: "Stage / unstage / commit / push / pull"
-    unproven: "No real-app scenario proves this yet"
-    planned: git-panel.mjs
+    text: "Stage / unstage / commit / discard / push / pull"
+    # git-panel stages and unstages; F21-review-changes commits, discards,
+    # pushes to and pulls from a bare remote.
+    scenarios: [git-panel.mjs, F21-review-changes.mjs]
   git-diff:
     text: "Inline diff viewer"
-    unproven: "No real-app scenario proves this yet"
-    planned: git-panel.mjs
+    scenario: git-panel.mjs
   git-auth:
-    text: "Robust authentication"
-    unproven: "No real-app scenario proves this yet"
-    planned: git-auth.mjs
+    text: "Push with your own credentials"
+    # macOS and Linux: on Windows the test app uses the real home folder, so
+    # it cannot be given its own git config. SSH is not claimed.
+    scenario: git-auth.mjs
   ghost-text:
     text: "Ghost-text suggestions"
-    unproven: "No real-app scenario proves this yet"
-    planned: ghost-text.mjs
+    # macOS and Linux: Windows PowerShell has its own predictions, which
+    # Hermes leaves alone (hence "in shells without suggestions of their own").
+    scenario: ghost-text.mjs
   prompt-composer:
     text: "Prompts"
     scenario: HOD-prompts-keyboard.mjs
-  error-patterns:
-    text: "Error pattern matching"
-    unproven: "No real-app scenario proves this yet"
-    planned: error-patterns.mjs
   stuck-detection:
     text: "Stuck detection"
-    unproven: "No real-app scenario proves this yet"
-    planned: stuck-detection.mjs
+    scenario: QA-host-stop-hung-agent.mjs
   project-scanning:
     text: "Automatic scanning"
-    unproven: "No real-app scenario proves this yet"
-    planned: project-scanning.mjs
+    scenario: project-scanning.mjs
   context-injection:
     text: "Context injection"
-    unproven: "No real-app scenario proves this yet"
-    planned: project-scanning.mjs
+    scenario: project-scanning.mjs
   multi-project:
     text: "Multi-project support"
-    unproven: "No real-app scenario proves this yet"
-    planned: project-scanning.mjs
+    scenario: project-scanning.mjs
   command-palette:
     text: "Command Palette"
-    unproven: "No real-app scenario proves this yet"
-    planned: command-palette.mjs
-  cost-dashboard:
-    text: "Cost Dashboard"
-    unproven: "No real-app scenario proves this yet"
-    # The Cost Dashboard of estimated costs is what stable users have;
-    # F31 (fleetControls flag) greys it out and F31-honest-spend-cap.mjs
-    # proves that, not the dashboard itself.
-    planned: cost-dashboard.mjs
+    # Types "close", finds Close Session (with its shortcut) and runs it.
+    scenario: QA-launcher-close-session.mjs
+  session-spend:
+    text: "Spend per session"
+    # F31-estimated-cost: an estimate from the transcript, marked estimated,
+    # with token totals, in the row, header, status bar and Context panel.
+    # QA-status-spend-open-sessions: costs the agents report, added up.
+    scenarios: [F31-estimated-cost.mjs, QA-status-spend-open-sessions.mjs]
   memory-pins:
     text: "Memory & context pins"
-    unproven: "No real-app scenario proves this yet"
-    planned: memory-pins.mjs
+    scenario: memory-pins.mjs
   notifications:
     text: "System notifications"
     scenarios: [F12-attention-inbox.mjs, N16-away-notifications.mjs]

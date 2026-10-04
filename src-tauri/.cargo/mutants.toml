@@ -1,6 +1,10 @@
 # cargo-mutants configuration (read automatically from here).
 #
 # exclude_re: waivers for mutants no test can kill. Each one needs a reason.
+# Patterns start with the file and match the mutant's name as
+# `cargo mutants --list` prints it. A pattern that names a line only does so
+# because the same name occurs twice in that function; when the line moves,
+# the pattern stops matching and the mutant is tested (and scored) again.
 
 exclude_re = [
     # src/git/cli.rs: keep_user_locale_for_tests only reads its override in
@@ -8,4 +12,69 @@ exclude_re = [
     # so turning it into `false` changes nothing. The real-app scenario
     # F21-review-no-repo-locale covers the override (its negative control).
     "replace keep_user_locale_for_tests -> bool with false",
+
+    # ── Needs the running app ─────────────────────────────────────────────
+    # These need a live Tauri app handle, window, managed state, the OS
+    # (file manager, clipboard) or the session host's socket. The crate has
+    # no Tauri mock runtime, so a `cargo test --lib` cannot call them. Each
+    # is a thin wrapper: the decision it makes lives in a plain function
+    # that is unit-tested (named after the arrow), and the real-app
+    # scenarios run the wrapper itself.
+    '^src/lib\.rs:\d+:\d+: replace (save_workspace_state|fold_database_log|run) with \(\)$',
+    '^src/lib\.rs:\d+:\d+: delete match arm tauri::RunEvent::Exit in run$',
+    '^src/e2e_bridge\.rs:\d+:\d+: replace eval_js -> ',  # every scenario evaluates through it
+    '^src/platform\.rs:\d+:\d+: replace (reveal_in_file_manager|open_file|read_clipboard_text) -> ',
+    '^src/attention/mod\.rs:\d+:\d+: replace set_attention_badge -> ',
+    '^src/attention/badge\.rs:\d+:\d+: replace apply -> ',  # -> urgency, remember
+    '^src/agent/mod\.rs:\d+:\d+: replace force_stop_agent -> ',  # -> force_stop
+    '^src/context_usage\.rs:\d+:\d+: replace watch with \(\)$',  # -> interrupt_event
+    '^src/track/mod\.rs:\d+:\d+: replace start with \(\)$',
+    '^src/turn_ledger/mod\.rs:\d+:\d+: replace (spawn_in_order|on_session_started|on_turn_started|on_turn_ended|on_phase_change) with \(\)$',  # -> phase_edge
+    '^src/turn_ledger/mod\.rs:\d+:\d+: delete ! in (on_session_started|on_phase_change)$',
+    '^src/turn_ledger/mod\.rs:\d+:\d+: replace turn_ledger_between -> ',  # -> TurnLedger::between_turns
+    '^src/agent_caps/commands\.rs:\d+:\d+: replace (forget_refusals|launch_taken|on_rejected) with \(\)$',  # -> refusal_of
+    '^src/agent_caps/commands\.rs:\d+:\d+: replace == with != in on_rejected$',
+    '^src/agent_caps/commands\.rs:\d+:\d+: replace remove_agent_account -> ',  # -> removable
+    '^src/session_host\.rs:\d+:\d+: replace (session_host_set_queued|stop_all_hosted|stop_unowned|stop_hosted_unless_kept) with \(\)$',  # -> stops_hosted, unowned
+    '^src/session_host\.rs:\d+:\d+: replace (working_sessions|working_hosted_sessions|unowned_hosted_session_ids|on_exit_requested|session_host_stop_all) -> ',  # -> quit_candidates, pick_working, unowned, quit_asks
+    '^src/session_host\.rs:\d+:\d+: delete ! in on_exit_requested$',
+    '^src/pty/launch\.rs:\d+:\d+: replace watch_signals with \(\)$',  # -> RecordScope and friends
+    '^src/pty/commands\.rs:\d+:\d+: replace write_to_session -> ',  # -> writes_in_background
+    '^src/pty/os_activity\.rs:\d+:\d+: replace (watch|note_agent_status) with \(\)$',
+    '^src/pty/os_activity\.rs:\d+:\d+: replace note_person_input -> bool with (true|false)$',
+    '^src/pty/os_activity\.rs:\d+:\d+: replace take_answered_ask -> .* with None$',
+    '^src/git/mod\.rs:\d+:\d+: replace (git_commit_kept_worktree|git_save_kept_detached_head|git_keep_worktree|git_remove_leftover_worktree) -> ',  # -> commit_kept_worktree, save_kept_detached_head, keep_worktree, remove_leftover_worktree
+    # Only built with the `e2e` feature, which `cargo test --lib` leaves out.
+    '^src/attention/mod\.rs:\d+:\d+: replace attention_state_for_test -> ',
+    # The mutated copy is `#[cfg(not(test))]`; test builds use another one.
+    '^src/git/safety\.rs:\d+:\d+: replace give_hooks_the_login_path with \(\)$',
+
+    # ── Equivalent mutants: the program behaves the same ──────────────────
+    # The guard only picks which line is logged.
+    '^src/agent_caps/commands\.rs:\d+:\d+: replace (match guard n > 0 with (true|false)|> with (==|<|>=)) in forget_refusals$',
+    # The sign-out output is thrown away; only the exit code is read, so the
+    # size of the read cap does not matter.
+    '^src/agent_caps/commands\.rs:\d+:\d+: replace \* with / in sign_out$',
+    # With the same base on both sides commits_not_in(x, x) is 0: None anyway.
+    '^src/land/mod\.rs:\d+:\d+: replace match guard \*recorded != chosen\.name with true in preview$',
+    # include_ignored(false): git2 never returns an ignored or empty status.
+    '^src/land/ops\.rs:\d+:\d+: replace && with \|\| in dirty_files$',
+    # Only the read block size changes; the line count is the same.
+    '^src/track/mod\.rs:\d+:\d+: replace \* with \+ in count_lines$',
+    # A degraded turn has no git ref, so the next rev_parse is None anyway.
+    '^src/turn_ledger/mod\.rs:\d+:\d+: replace \|\| with && in TurnLedger::between_turns$',
+    # paths_between(x, x) is empty, so the preview is the same.
+    '^src/turn_ledger/mod\.rs:\d+:\d+: replace match guard last != current with true in TurnLedger::preview_restore$',
+    # The submodule and status flags are separate bits: `^` is `|` for them.
+    '^src/git/safety\.rs:\d+:\d+: replace \| with \^ in head_state$',
+    '^src/git/mod\.rs:\d+:\d+: replace \| with \^ in worktree_changes_at$',
+    # SnapshotScreen::commit: when drain == len, is_char_boundary(len) is
+    # true, so `<=` loops the same; stepping back instead of forward to the
+    # start of a split character finds the same next newline.
+    '^src/pty/analyzer\.rs:89:25: replace < with <= in SnapshotScreen::commit$',
+    '^src/pty/analyzer\.rs:90:23: replace \+= with -= in SnapshotScreen::commit$',
+    # Only the poll interval while not replaying changes; no test sees it.
+    '^src/pty/launch\.rs:2665:16: delete ! in watch_signals$',
+    # Only decides whether a warning is logged after archiving.
+    '^src/git/worktree\.rs:607:16: delete ! in commit_worktree_changes_on$',
 ]

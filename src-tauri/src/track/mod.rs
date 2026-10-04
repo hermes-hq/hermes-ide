@@ -1069,4 +1069,96 @@ mod tests {
         assert!((m - before).abs() < 60_000, "{m} vs {before}");
         assert_eq!(mtime_ms(&dir.path().join("missing")), 0);
     }
+
+    #[test]
+    fn fnv1a_is_the_standard_64_bit_hash() {
+        assert_eq!(fnv1a(b""), "cbf29ce484222325");
+        assert_eq!(fnv1a(b"a"), "af63dc4c8601ec8c");
+        assert_eq!(fnv1a(b"foobar"), "85944171f73967e8");
+    }
+
+    #[test]
+    fn a_file_of_exactly_the_cap_is_whole_and_one_byte_more_is_cut() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("f.md");
+        std::fs::write(&path, "abcd").unwrap();
+        assert_eq!(read_capped(&path, 4), Some(("abcd".to_string(), false)));
+        assert_eq!(read_capped(&path, 3), Some(("abc".to_string(), true)));
+        // A feature.md of 100 KB is read whole (the cap is 256 KB).
+        let big = "x".repeat(100 * 1024);
+        std::fs::write(&path, &big).unwrap();
+        assert_eq!(read_capped(&path, TEXT_CAP), Some((big, false)));
+    }
+
+    #[test]
+    fn the_plan_leaves_out_phase_prompts_the_repository_already_has() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let all = promote_plan(root, "demo", ht::Track::Full);
+        assert!(
+            all.contains(&".hermes/phases/questions.md".to_string()),
+            "{all:?}"
+        );
+        std::fs::create_dir_all(root.join(ht::PHASES_DIR)).unwrap();
+        std::fs::write(root.join(ht::PHASES_DIR).join("questions.md"), "mine\n").unwrap();
+        let plan = promote_plan(root, "demo", ht::Track::Full);
+        assert!(
+            !plan.contains(&".hermes/phases/questions.md".to_string()),
+            "{plan:?}"
+        );
+        assert_eq!(plan.len(), all.len() - 1);
+    }
+
+    #[test]
+    fn undo_never_removes_a_file_outside_the_two_folders() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("wt");
+        std::fs::create_dir_all(root.join(".hermes")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(dir.path().join("outside.txt"), "x").unwrap();
+        std::fs::write(root.join("src/main.rs"), "x").unwrap();
+        let written = vec![
+            // Starts with .hermes/ but climbs out of it.
+            WrittenFile {
+                path: ".hermes/../../outside.txt".into(),
+                hash: fnv1a(b"x"),
+            },
+            // A plain path in neither folder.
+            WrittenFile {
+                path: "src/main.rs".into(),
+                hash: fnv1a(b"x"),
+            },
+        ];
+        let out = undo_promote(&root, &written);
+        assert!(out.removed.is_empty(), "{out:?}");
+        assert_eq!(out.kept.len(), 2);
+        assert!(dir.path().join("outside.txt").is_file());
+        assert!(root.join("src/main.rs").is_file());
+    }
+
+    #[test]
+    fn a_review_while_the_gate_waits_says_not_to_hand_the_phase_over_again() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        ht::create(root, "demo", ht::Track::Light, "", "").unwrap();
+        let fd = ht::FeatureDir::new(root, "demo");
+        let phase = fd.load().unwrap().meta.phase;
+        let file = fd.phase_file(phase).expect("the first phase has a file");
+        std::fs::write(&file, "a\n").unwrap();
+        let name = file.file_name().unwrap().to_string_lossy().to_string();
+        let wt = root.to_string_lossy().to_string();
+        let writing = track_write_review(wt.clone(), "demo".into(), name.clone(), None).unwrap();
+        assert!(
+            writing.line.contains("keep working on the phase"),
+            "{}",
+            writing.line
+        );
+        ht::finish_phase(root, "demo").unwrap();
+        let waiting = track_write_review(wt, "demo".into(), name, None).unwrap();
+        assert!(
+            waiting.line.contains("the gate is still waiting"),
+            "{}",
+            waiting.line
+        );
+    }
 }

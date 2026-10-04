@@ -134,7 +134,7 @@ describe("N14 createWorktree and the disk guard flag", () => {
 
 describe("N14 low-disk refusal toast", () => {
   const refusal =
-    "Not enough free disk space: 4.2 GB free, 10.0 GB needed to create a worktree. Nothing was created. Free up space (Git panel > Worktrees can remove orphaned folders and build output), then try again.";
+    "Not enough free disk space: 4.2 GB free, 10.0 GB needed to create a worktree. Nothing was created. Free up space (Settings > Storage shows what can go without losing work), then try again.";
 
   it("shows the reason without the project id when the session was not created", () => {
     const msg = worktreeErrorToastMessage([`0f8a-project-id: ${refusal}`], true);

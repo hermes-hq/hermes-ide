@@ -2493,6 +2493,7 @@ mod tests {
         assert_eq!(wt.branch_name, "feature-xyz");
         assert!(!wt.is_main_worktree);
         assert!(Path::new(&wt.worktree_path).exists());
+        assert_eq!(wt.warning, None, "a clean add has nothing to warn about");
 
         // Verify the local branch was created and is checked out
         let branch = get_worktree_branch(&wt.worktree_path).unwrap();
@@ -2525,6 +2526,7 @@ mod tests {
 
         let wt = result.unwrap();
         assert_eq!(wt.branch_name, "feature-xyz");
+        assert_eq!(wt.warning, None, "a clean add has nothing to warn about");
     }
 
     #[test]
@@ -3488,5 +3490,91 @@ mod tests {
         let err = err.unwrap_err();
         assert!(err.starts_with("vendor/lib has 1 commit that exists only in this task's worktree. Kept the worktree at "), "{err}");
         assert!(Path::new(&wt.worktree_path).exists());
+    }
+
+    #[test]
+    fn a_libgit2_error_reads_as_a_sentence() {
+        let e =
+            git2::Error::from_str("the branch is gone; class=Reference (4); code=NotFound (-3)");
+        assert_eq!(plain_git2_error(&e), "The branch is gone");
+        let e = git2::Error::from_str("  x  ");
+        assert_eq!(plain_git2_error(&e), "X");
+    }
+
+    #[test]
+    fn why_a_branch_could_not_be_made_is_said_in_words() {
+        let err = |code| git2::Error::new(code, git2::ErrorClass::Reference, "low level");
+        assert_eq!(
+            branch_create_error("hermes/x", &err(git2::ErrorCode::Exists)),
+            "A branch named hermes/x already exists."
+        );
+        assert_eq!(
+            branch_create_error("hermes/x", &err(git2::ErrorCode::Locked)),
+            "The repository is busy (another git command holds its lock). Try again in a moment."
+        );
+        assert_eq!(
+            branch_create_error("hermes/x", &err(git2::ErrorCode::GenericError)),
+            "Could not create the branch hermes/x: Low level"
+        );
+    }
+
+    #[test]
+    fn only_a_linked_worktree_on_that_branch_is_a_checkout_of_it() {
+        let app_data = create_test_app_data_dir();
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let main_branch = git_out(repo_path, &["branch", "--show-current"]);
+        // The project folder is not a worktree git made for the branch.
+        assert!(!is_checkout_of(repo_dir.path(), &main_branch));
+        let wt = create_worktree(app_data.path(), repo_path, "s1", "hermes/a", true, None).unwrap();
+        let wt_path = Path::new(&wt.worktree_path);
+        assert!(is_checkout_of(wt_path, "hermes/a"));
+        assert!(!is_checkout_of(wt_path, "hermes/b"));
+        git_out(&wt.worktree_path, &["checkout", "-q", "--detach"]);
+        assert!(!is_checkout_of(wt_path, "hermes/a"));
+        assert!(!is_checkout_of(
+            &app_data.path().join("nothing"),
+            "hermes/a"
+        ));
+    }
+
+    #[test]
+    fn hook_output_keeps_only_what_the_hook_said() {
+        assert_eq!(
+            hook_output("Preparing worktree (new branch 'x')\n\n  HEAD is now at abc init\nlfs: not found\n  try again \n"),
+            "lfs: not found try again"
+        );
+        let exactly = "a".repeat(400);
+        assert_eq!(hook_output(&exactly), exactly);
+        let longer = "b".repeat(401);
+        assert_eq!(hook_output(&longer), format!("{}…", "b".repeat(400)));
+    }
+
+    #[test]
+    fn a_failed_add_never_deletes_a_folder_hermes_did_not_make() {
+        let repo_dir = create_test_repo();
+        let repo_path = repo_dir.path().to_str().unwrap();
+        let elsewhere = TempDir::new().unwrap();
+        let folder = elsewhere.path().join("someone-elses");
+        std::fs::create_dir_all(&folder).unwrap();
+        std::fs::write(folder.join("keep.txt"), "mine\n").unwrap();
+        assert!(settle_failed_add(repo_path, &folder, "hermes/x", false, "fatal: x").is_err());
+        assert!(folder.join("keep.txt").exists());
+    }
+
+    #[test]
+    fn an_invalid_branch_name_from_either_git_message_is_said_in_words() {
+        assert_eq!(
+            describe_add_failure("a..b", "fatal: 'a..b' is not a valid branch name"),
+            "a..b is not a name git accepts for a branch."
+        );
+        assert_eq!(
+            describe_add_failure("a..b", "fatal: invalid reference: a..b"),
+            "a..b is not a name git accepts for a branch."
+        );
+        assert_eq!(
+            describe_add_failure("x", "error: something else"),
+            "Could not make a worktree for x: something else"
+        );
     }
 }

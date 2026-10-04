@@ -1260,4 +1260,183 @@ mod tests {
             "vendor/lib has 1 commit that exists only in this task's worktree. Kept the worktree at /w/x."
         );
     }
+
+    #[test]
+    fn a_refused_merge_abort_says_what_git_said() {
+        let (_t, r) = repo();
+        let err = abort_merge(&r).unwrap_err();
+        assert!(
+            err.starts_with("The merge was not aborted: There is no merge to abort"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn unstaging_one_file_leaves_the_others_staged() {
+        let (_t, r) = repo();
+        fs::write(r.join("a.txt"), "a\n").unwrap();
+        fs::write(r.join("b.txt"), "b\n").unwrap();
+        sh(&r, &["add", "."]);
+        unstage_paths(&r, &["a.txt".into()]).unwrap();
+        assert_eq!(sh(&r, &["diff", "--cached", "--name-only"]), "b.txt");
+    }
+
+    #[test]
+    fn a_branch_the_default_branch_has_may_go_from_any_checkout() {
+        let (_t, r) = repo();
+        sh(&r, &["checkout", "-q", "-b", "hermes/done"]);
+        fs::write(r.join("DONE.md"), "done\n").unwrap();
+        sh(&r, &["add", "."]);
+        sh(&r, &["commit", "-q", "-m", "done"]);
+        sh(&r, &["checkout", "-q", "main"]);
+        sh(&r, &["merge", "-q", "--ff-only", "hermes/done"]);
+        // HEAD is on a branch that does not have it; main does.
+        sh(&r, &["checkout", "-q", "-b", "elsewhere", "HEAD~1"]);
+        let repo = Repository::open(&r).unwrap();
+        assert_eq!(unmerged_commits(&repo, "hermes/done").unwrap(), None);
+        // A branch nobody has is measured against the default branch.
+        sh(&r, &["checkout", "-q", "-b", "hermes/new"]);
+        fs::write(r.join("NEW.md"), "new\n").unwrap();
+        sh(&r, &["add", "."]);
+        sh(&r, &["commit", "-q", "-m", "new"]);
+        sh(&r, &["checkout", "-q", "elsewhere"]);
+        let u = unmerged_commits(&repo, "hermes/new").unwrap().unwrap();
+        assert_eq!(u.base, "main");
+    }
+
+    #[test]
+    fn the_default_branch_is_what_origin_head_points_at() {
+        let (t, origin) = repo();
+        sh(&origin, &["branch", "trunk-x"]);
+        sh(&origin, &["checkout", "-q", "trunk-x"]);
+        let c = t.path().join("c");
+        sh(
+            t.path(),
+            &["clone", "-q", origin.to_str().unwrap(), c.to_str().unwrap()],
+        );
+        let cloned = Repository::open(&c).unwrap();
+        let (name, oid) = default_branch(&cloned).unwrap();
+        assert_eq!(name, "trunk-x");
+        assert_eq!(
+            oid.to_string(),
+            sh(&c, &["rev-parse", "refs/remotes/origin/trunk-x"])
+        );
+        // No origin/HEAD: the first of main, master, trunk.
+        let (_t2, plain) = repo();
+        let plain = Repository::open(&plain).unwrap();
+        assert_eq!(default_branch(&plain).unwrap().0, "main");
+    }
+
+    #[test]
+    fn a_hook_name_inside_a_longer_name_is_not_that_hook() {
+        assert_eq!(
+            last_hook_in_trace("trace: run_command: /x/hooks/pre-commit-wrapper"),
+            None
+        );
+        assert_eq!(
+            last_hook_in_trace("trace: run_command: /x/hooks/pre-commitx"),
+            None
+        );
+        assert_eq!(
+            last_hook_in_trace("trace: run_command: /x/hooks/commit-msg .git/COMMIT_EDITMSG"),
+            Some("commit-msg".into())
+        );
+    }
+
+    #[test]
+    fn the_author_override_needs_a_name_and_an_email() {
+        let (_t, r) = repo();
+        let commit = |file: &str, author: Option<(&str, &str)>| {
+            fs::write(r.join(file), "x\n").unwrap();
+            sh(&r, &["add", file]);
+            commit_staged(&r, file, author)
+        };
+        commit("a.txt", Some(("Ann Example", "ann@example.com"))).unwrap();
+        assert_eq!(
+            sh(&r, &["log", "-1", "--format=%an <%ae>|%cn <%ce>"]),
+            "Ann Example <ann@example.com>|Ann Example <ann@example.com>"
+        );
+        // Half an override is no override: the repository's identity.
+        commit("b.txt", Some(("", "ann@example.com"))).unwrap();
+        assert_eq!(
+            sh(&r, &["log", "-1", "--format=%an <%ae>"]),
+            "Test <test@example.com>"
+        );
+        commit("c.txt", Some(("Ann Example", ""))).unwrap();
+        assert_eq!(
+            sh(&r, &["log", "-1", "--format=%an <%ae>"]),
+            "Test <test@example.com>"
+        );
+        commit("d.txt", None).unwrap();
+        assert_eq!(
+            sh(&r, &["log", "-1", "--format=%an <%ae>"]),
+            "Test <test@example.com>"
+        );
+    }
+
+    #[test]
+    fn a_repository_with_no_identity_commits_as_hermes() {
+        let (_t, r) = repo();
+        sh(&r, &["config", "user.name", ""]);
+        sh(&r, &["config", "user.email", ""]);
+        fs::write(r.join("a.txt"), "x\n").unwrap();
+        sh(&r, &["add", "a.txt"]);
+        commit_staged(&r, "a", None).unwrap();
+        let out = std::process::Command::new("git")
+            .arg("-C")
+            .arg(&r)
+            .args(["log", "-1", "--format=%an <%ae>|%cn <%ce>"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(&out.stdout).trim(),
+            "Hermes <hermes@localhost>|Hermes <hermes@localhost>"
+        );
+    }
+
+    #[test]
+    fn a_clean_checkout_has_no_operation_in_progress() {
+        let (_t, r) = repo();
+        let st = head_state(&r).unwrap();
+        assert_eq!(st.operation, None);
+        assert!(st.dirty_submodules.is_empty());
+        fs::write(r.join(".git/BISECT_LOG"), "").unwrap();
+        assert_eq!(head_state(&r).unwrap().operation.as_deref(), Some("bisect"));
+    }
+
+    #[test]
+    fn a_detached_commit_a_tag_or_remote_branch_has_is_not_lost() {
+        let (t, origin) = repo();
+        let c = clone_behind(&t, &origin, "NEWS.md", "news\n");
+        // On origin/main only (a remote branch).
+        sh(&c, &["checkout", "-q", "--detach", "origin/main"]);
+        assert_eq!(head_state(&c).unwrap().lost_commits, 0);
+        // On a tag only.
+        fs::write(c.join("FIX.md"), "fix\n").unwrap();
+        sh(&c, &["add", "."]);
+        sh(&c, &["commit", "-q", "-m", "fix"]);
+        assert_eq!(head_state(&c).unwrap().lost_commits, 1);
+        sh(&c, &["tag", "v1"]);
+        assert_eq!(head_state(&c).unwrap().lost_commits, 0);
+    }
+
+    #[test]
+    fn commits_missing_from_another_repository_are_counted() {
+        let (t, r) = repo();
+        let other = t.path().join("other");
+        sh(
+            t.path(),
+            &["clone", "-q", r.to_str().unwrap(), other.to_str().unwrap()],
+        );
+        for f in ["one.txt", "two.txt"] {
+            fs::write(r.join(f), "x\n").unwrap();
+            sh(&r, &["add", f]);
+            sh(&r, &["commit", "-q", "-m", f]);
+        }
+        let repo = Repository::open(&r).unwrap();
+        let tip = repo.head().unwrap().target().unwrap();
+        let other = Repository::open(&other).unwrap();
+        assert_eq!(commits_on_no_ref_except(&repo, tip, Some(&other)), 2);
+        assert_eq!(commits_on_no_ref_except(&repo, tip, None), 3);
+    }
 }

@@ -27,37 +27,36 @@ Hermes IDE is not affiliated with Nous Research or its Hermes Agent.
 - **Every agent in its own terminal** — Claude Code, Codex, Gemini, Aider, Copilot, Kiro and plain shells all open in a real terminal by default, running the agent's own interface exactly as it would anywhere else <!-- claim:every-agent-terminal -->
 - **Bring your own auth** — agents use their own CLI sign-in (for Claude: Pro, Max, or API key); Hermes never asks for tokens <!-- claim:agent-own-auth -->
 - **Multi-session management** — create, switch, and organize parallel sessions <!-- claim:multi-session -->
-- **Split panes** — horizontal and vertical splits with drag-and-drop reordering <!-- claim:split-panes -->
-- **WebGL-accelerated rendering** — fast terminal with web links and auto-fit <!-- claim:webgl-rendering -->
+- **Split panes** — split right or down to run sessions side by side; close a pane and the others fill the space <!-- claim:split-panes -->
+- **Fast terminal rendering** — GPU-accelerated (WebGL) where the system supports it, clickable web links, and auto-fit to the window <!-- claim:webgl-rendering -->
 - **Remembers your choice per agent** — the New Session wizard preselects the last agent and how you ran it <!-- claim:remember-agent-choice -->
 
 ### Agent view for Claude (optional)
 - **Opt in per session** — tick "Agent view for Claude" in the New Session wizard to have Hermes render the conversation instead of Claude's terminal interface <!-- claim:agent-view-opt-in -->
 - **Structured conversation** — thinking blocks, tool-call cards, and diff previews <!-- claim:agent-chat -->
-- **Real images** — paste or drop images straight into the composer; Claude sees the actual pixels <!-- claim:agent-images -->
-- **Persistent conversations** — Agent-view sessions resume across app restarts <!-- claim:agent-persistent-conversations -->
+- **Real images** — paste images straight into the composer; Claude sees the actual pixels <!-- claim:agent-images -->
+- **Persistent conversations** — Agent-view sessions come back after an app restart and Claude continues the same conversation <!-- claim:agent-persistent-conversations -->
 
 ### Git Integration
-- **Built-in git panel** — view staged, unstaged, and untracked files per project <!-- claim:git-panel -->
-- **Stage / unstage / commit / push / pull** — all from the sidebar <!-- claim:git-actions -->
-- **Inline diff viewer** — click any changed file to see a syntax-highlighted diff <!-- claim:git-diff -->
-- **Robust authentication** — SSH agent, SSH key files, Git Credential Manager, and token-based auth <!-- claim:git-auth -->
+- **Built-in git view** — the Review Desk lists staged, unstaged, and untracked files per project <!-- claim:git-panel -->
+- **Stage / unstage / commit / discard / push / pull** — all from the Review Desk <!-- claim:git-actions -->
+- **Inline diff viewer** — click any changed file to see its diff, with removed and added lines marked <!-- claim:git-diff -->
+- **Push with your own credentials** — pushes sign in with your git credential helper (such as Git Credential Manager) or a `GITHUB_TOKEN`, and say how to sign in when nothing works <!-- claim:git-auth -->
 
 ### AI Intelligence
-- **Ghost-text suggestions** — real-time command completions from history and context <!-- claim:ghost-text -->
+- **Ghost-text suggestions** — completions from your command history as you type; → accepts them (in shells without suggestions of their own) <!-- claim:ghost-text -->
 - **Prompts** (⌘J) — find a ready-made prompt or one of your own, fill in the blanks and put it in the session or a new task <!-- claim:prompt-composer -->
-- **Error pattern matching** — learns error fingerprints and auto-applies known resolutions <!-- claim:error-patterns -->
-- **Stuck detection** — monitors for hanging processes and offers interrupts <!-- claim:stuck-detection -->
+- **Stuck detection** — when an Agent-view session ignores Stop, Hermes tells you it isn't responding and offers Force stop, keeping the conversation <!-- claim:stuck-detection -->
 
 ### Project Awareness
-- **Automatic scanning** — detects languages, frameworks, architecture, and conventions <!-- claim:project-scanning -->
-- **Context injection** — attaches project knowledge to AI agents via a token budget <!-- claim:context-injection -->
-- **Multi-project support** — attach multiple project contexts to a single session <!-- claim:multi-project -->
+- **Automatic scanning** — detects each project's languages, frameworks, architecture, and conventions <!-- claim:project-scanning -->
+- **Context injection** — your agent is pointed at a context file with what the scan found, kept within a token budget you can set per project <!-- claim:context-injection -->
+- **Multi-project support** — attach several projects to one session; their context reaches the agent together <!-- claim:multi-project -->
 
 ### Productivity
-- **Command Palette** — fuzzy search for any action <!-- claim:command-palette -->
-- **Cost Dashboard** — track token usage and estimated costs per model and session <!-- claim:cost-dashboard -->
-- **Memory & context pins** — persist important facts, files, and patterns across sessions <!-- claim:memory-pins -->
+- **Command Palette** — type to find and run any action <!-- claim:command-palette -->
+- **Spend per session** — the cost an agent reports, or an estimate from its transcript clearly marked as estimated, with token totals <!-- claim:session-spend -->
+- **Memory & context pins** — facts and pinned files saved for a project reach every later session's agent, also after a restart <!-- claim:memory-pins -->
 - **System notifications** — get notified about long-running command completions <!-- claim:notifications -->
 
 ---

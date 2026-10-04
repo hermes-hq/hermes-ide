@@ -424,11 +424,26 @@ pub fn working_sessions(
         let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
         quit_candidates(&mgr, hosted_only)
     };
+    pick_working(
+        candidates,
+        || host_foreground(app),
+        crate::pty::commands::shell_at_prompt_by_process_table,
+    )
+}
+
+/// The candidates that are working, oldest first. The host is asked
+/// (`host_foreground`) only when a hosted terminal cannot say for itself;
+/// whether a shell sits at its prompt is the last resort.
+fn pick_working(
+    candidates: Vec<QuitCandidate>,
+    host_foreground: impl FnOnce() -> std::collections::HashMap<String, Option<bool>>,
+    shell_at_prompt: impl Fn(u32) -> bool,
+) -> Vec<SessionUpdate> {
     let needs_host = candidates
         .iter()
         .any(|c| !c.probe.known && c.hosted && c.probe.shell_owns.is_none());
     let host_busy = if needs_host {
-        host_foreground(app)
+        host_foreground()
     } else {
         Default::default()
     };
@@ -437,7 +452,7 @@ pub fn working_sessions(
         .filter(|c| {
             c.probe.working(
                 host_busy.get(&c.update.id).copied().flatten(),
-                crate::pty::commands::shell_at_prompt_by_process_table,
+                &shell_at_prompt,
             )
         })
         .map(|c| c.update)
@@ -507,10 +522,12 @@ pub fn stop_all_hosted(app: &AppHandle, state: &AppState) {
 
 /// Live host sessions that are not in `owned`.
 pub fn unowned_hosted_session_ids(app: &AppHandle, owned: &[String]) -> Vec<String> {
-    let mut ids: Vec<String> = live_hosted_session_ids(app)
-        .into_iter()
-        .filter(|id| !owned.contains(id))
-        .collect();
+    unowned(live_hosted_session_ids(app), owned)
+}
+
+/// The ids in `live` that are not in `owned`, sorted.
+fn unowned(live: Vec<String>, owned: &[String]) -> Vec<String> {
+    let mut ids: Vec<String> = live.into_iter().filter(|id| !owned.contains(id)).collect();
     ids.sort();
     ids
 }
@@ -596,12 +613,17 @@ pub fn stop_hosted_unless_kept(app: &AppHandle) {
         .try_state::<SessionHostState>()
         .and_then(|s| s.quit_decision.lock().ok().map(|d| *d))
         .unwrap_or(None);
-    let stop = match decision {
-        Some(keep) => !keep,
-        None => working_hosted_sessions(app, &state).is_empty(),
-    };
-    if stop {
+    if stops_hosted(decision, || working_hosted_sessions(app, &state).is_empty()) {
         stop_all_hosted(app, &state);
+    }
+}
+
+/// Whether hosted sessions end with the app: as the person answered, or,
+/// with no answer, only when none of them is working (`nothing_working`).
+fn stops_hosted(decision: Option<bool>, nothing_working: impl FnOnce() -> bool) -> bool {
+    match decision {
+        Some(keep) => !keep,
+        None => nothing_working(),
     }
 }
 
@@ -1088,6 +1110,213 @@ mod tests {
         );
         assert!(!quit_asks(Some(true), 1, 2), "answered: keep running");
         assert!(!quit_asks(Some(false), 0, 2), "answered: stop");
+    }
+
+    /// A terminal that only answers what the quit check asks.
+    struct FakePty {
+        hosted: bool,
+        pid: Option<u32>,
+        owns: Option<bool>,
+    }
+
+    impl crate::pty::transport::PtyTransport for FakePty {
+        fn take_reader(&mut self) -> std::io::Result<Box<dyn std::io::Read + Send>> {
+            Ok(Box::new(std::io::empty()))
+        }
+        fn take_writer(&mut self) -> std::io::Result<Box<dyn std::io::Write + Send>> {
+            Ok(Box::new(std::io::sink()))
+        }
+        fn resize(&self, _rows: u16, _cols: u16) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn wait(&mut self) {}
+        fn pid(&self) -> Option<u32> {
+            self.pid
+        }
+        fn shell_owns_terminal(&self, _shell_pid: u32) -> Option<bool> {
+            self.owns
+        }
+        fn hosted(&self) -> bool {
+            self.hosted
+        }
+    }
+
+    fn add_session(mgr: &mut PtyManager, id: &str, phase: SessionPhase, hosted: bool) {
+        let mut s = crate::pty::launch::tests::test_session();
+        s.id = id.to_string();
+        s.phase = phase;
+        mgr.sessions.insert(
+            id.to_string(),
+            crate::pty::PtySession {
+                transport: Box::new(FakePty {
+                    hosted,
+                    pid: Some(7),
+                    // A program holds the terminal (if anyone asks).
+                    owns: Some(false),
+                }),
+                writer: std::sync::Arc::new(Mutex::new(
+                    Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>
+                )),
+                session: std::sync::Arc::new(Mutex::new(s)),
+                analyzer: std::sync::Arc::new(Mutex::new(
+                    crate::pty::analyzer::OutputAnalyzer::new(),
+                )),
+                shell_integration: crate::pty::shell_integration::ShellIntegration::None,
+                hermes_suggestions: false,
+            },
+        );
+    }
+
+    fn ids(candidates: &[QuitCandidate]) -> Vec<String> {
+        let mut ids: Vec<String> = candidates.iter().map(|c| c.update.id.clone()).collect();
+        ids.sort();
+        ids
+    }
+
+    #[test]
+    fn quit_candidates_are_the_live_sessions_and_hosted_only_narrows_them() {
+        let mut mgr = PtyManager::new();
+        add_session(&mut mgr, "here", SessionPhase::Idle, false);
+        add_session(&mut mgr, "hosted", SessionPhase::Idle, true);
+        add_session(&mut mgr, "asking", SessionPhase::NeedsInput, true);
+        add_session(&mut mgr, "gone", SessionPhase::Destroyed, true);
+        add_session(&mut mgr, "lost", SessionPhase::Disconnected, false);
+        add_session(&mut mgr, "closing", SessionPhase::Closing, true);
+
+        let all = quit_candidates(&mgr, false);
+        assert_eq!(ids(&all), ["asking", "here", "hosted"]);
+        let hosted = quit_candidates(&mgr, true);
+        assert_eq!(ids(&hosted), ["asking", "hosted"]);
+
+        let by_id = |id: &str| all.iter().find(|c| c.update.id == id).unwrap();
+        assert!(!by_id("here").hosted);
+        assert!(by_id("hosted").hosted);
+        // Not known to work: the terminal is asked who holds it.
+        assert_eq!(
+            by_id("here").probe,
+            QuitProbe {
+                known: false,
+                shell_pid: Some(7),
+                shell_owns: Some(false)
+            }
+        );
+        // Waiting on the person is known; the terminal is not asked.
+        assert_eq!(
+            by_id("asking").probe,
+            QuitProbe {
+                known: true,
+                shell_pid: Some(7),
+                shell_owns: None
+            }
+        );
+    }
+
+    fn candidate(id: &str, created_at: &str, hosted: bool, probe: QuitProbe) -> QuitCandidate {
+        let mut s = crate::pty::launch::tests::test_session();
+        s.id = id.to_string();
+        s.created_at = created_at.to_string();
+        QuitCandidate {
+            update: SessionUpdate::from(&s),
+            hosted,
+            probe,
+        }
+    }
+
+    const fn probe(known: bool, shell_owns: Option<bool>) -> QuitProbe {
+        QuitProbe {
+            known,
+            shell_pid: Some(9),
+            shell_owns,
+        }
+    }
+
+    #[test]
+    fn working_sessions_are_picked_oldest_first_and_the_host_answers_for_its_terminals() {
+        let candidates = vec![
+            candidate("late-agent", "3", false, probe(true, None)),
+            candidate("hosted-busy", "2", true, probe(false, None)),
+            candidate("hosted-idle", "4", true, probe(false, None)),
+            candidate("shell-at-prompt", "1", false, probe(false, Some(true))),
+            candidate("sleep-100", "0", false, probe(false, Some(false))),
+        ];
+        let host = || {
+            [
+                ("hosted-busy".to_string(), Some(true)),
+                ("hosted-idle".to_string(), Some(false)),
+            ]
+            .into_iter()
+            .collect()
+        };
+        let working = pick_working(candidates, host, |_| panic!("the host answered"));
+        let ids: Vec<&str> = working.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, ["sleep-100", "hosted-busy", "late-agent"]);
+    }
+
+    #[test]
+    fn the_host_is_asked_only_for_a_hosted_terminal_that_cannot_say() {
+        let never = || -> std::collections::HashMap<String, Option<bool>> {
+            panic!("nothing needed the host")
+        };
+        // Known to work, hosted: nothing to ask.
+        let w = pick_working(
+            vec![candidate("a", "1", true, probe(true, None))],
+            never,
+            |_| true,
+        );
+        assert_eq!(w.len(), 1);
+        // Not hosted, the terminal cannot say: the process table decides.
+        let w = pick_working(
+            vec![candidate("b", "1", false, probe(false, None))],
+            never,
+            |_| false,
+        );
+        assert_eq!(w.len(), 1, "a shell with a child process works");
+        // Known to work, in this process: nothing to ask either.
+        let w = pick_working(
+            vec![candidate("c", "1", false, probe(true, None))],
+            never,
+            |_| true,
+        );
+        assert_eq!(w.len(), 1);
+        // Hosted, the terminal answered itself.
+        let w = pick_working(
+            vec![candidate("d", "1", true, probe(false, Some(true)))],
+            never,
+            |_| false,
+        );
+        assert!(w.is_empty());
+        // Hosted and nobody else can tell: the host is asked.
+        let mut asked = false;
+        let w = pick_working(
+            vec![candidate("e", "1", true, probe(false, None))],
+            || {
+                asked = true;
+                [("e".to_string(), Some(true))].into_iter().collect()
+            },
+            |_| true,
+        );
+        assert!(asked);
+        assert_eq!(w.len(), 1);
+    }
+
+    #[test]
+    fn unowned_host_sessions_are_the_ones_no_window_shows() {
+        let live = vec!["c".to_string(), "a".to_string(), "b".to_string()];
+        assert_eq!(unowned(live.clone(), &["b".to_string()]), ["a", "c"]);
+        assert!(unowned(live.clone(), &live).is_empty());
+        assert_eq!(unowned(live, &[]), ["a", "b", "c"]);
+    }
+
+    #[test]
+    fn hosted_sessions_end_with_the_app_as_answered_or_when_none_works() {
+        let unasked = || -> bool { panic!("an answer decides on its own") };
+        assert!(stops_hosted(Some(false), unasked), "answered: stop");
+        assert!(!stops_hosted(Some(true), unasked), "answered: keep running");
+        assert!(stops_hosted(None, || true), "no answer, nothing working");
+        assert!(!stops_hosted(None, || false), "no answer, an agent at work");
     }
 
     #[test]

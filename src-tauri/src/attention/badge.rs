@@ -79,16 +79,40 @@ pub fn mechanism() -> &'static str {
     }
 }
 
+/// Records what is applied now; returns what was applied before.
+fn remember(count: u32, notices: u32) -> Option<Applied> {
+    let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
+    last.replace(Applied { count, notices })
+}
+
+/// What the Linux urgency hint does for a new count.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
+enum Urgency {
+    /// Nothing is waiting: the hint is cleared.
+    Clear,
+    /// More is waiting than before (or this is the first count): raise it.
+    Raise,
+    /// The same or less is waiting: leave it as it is.
+    Keep,
+}
+
+#[cfg_attr(any(windows, target_os = "macos"), allow(dead_code))]
+fn urgency(previous: Option<Applied>, count: u32, notices: u32) -> Urgency {
+    if Mark::of(count, notices) == Mark::Clear {
+        Urgency::Clear
+    } else if previous.is_none_or(|p| count > p.count || notices > p.notices) {
+        Urgency::Raise
+    } else {
+        Urgency::Keep
+    }
+}
+
 pub fn apply(app: &AppHandle, count: u32, notices: u32) -> Result<&'static str, String> {
     let window = app
         .get_webview_window("main")
         .ok_or_else(|| "no main window".to_string())?;
-    let previous = {
-        let mut last = LAST.lock().unwrap_or_else(|e| e.into_inner());
-        let prev = *last;
-        *last = Some(Applied { count, notices });
-        prev
-    };
+    let previous = remember(count, notices);
     let mark = Mark::of(count, notices);
     #[cfg(target_os = "macos")]
     {
@@ -110,15 +134,15 @@ pub fn apply(app: &AppHandle, count: u32, notices: u32) -> Result<&'static str, 
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        let raised = previous.is_none_or(|p| count > p.count || notices > p.notices);
-        if mark == Mark::Clear {
-            window
+        let _ = mark;
+        match urgency(previous, count, notices) {
+            Urgency::Clear => window
                 .request_user_attention(None)
-                .map_err(|e| e.to_string())?;
-        } else if raised {
-            window
+                .map_err(|e| e.to_string())?,
+            Urgency::Raise => window
                 .request_user_attention(Some(tauri::UserAttentionType::Informational))
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?,
+            Urgency::Keep => {}
         }
         // Desktops with a launcher badge (Unity/KDE/Dash to Dock) show the
         // number too; elsewhere this does nothing.
@@ -235,6 +259,67 @@ mod tests {
         assert_eq!(overlay_rgba(10), overlay_rgba(42));
         assert_ne!(overlay_rgba(9), overlay_rgba(10));
         assert_ne!(overlay_notice_rgba(), overlay_rgba(1));
+    }
+
+    #[test]
+    fn the_notice_overlay_is_the_red_disc_with_a_white_exclamation_mark() {
+        let px = overlay_notice_rgba();
+        assert_eq!(px.len(), 16 * 16 * 4);
+        assert_eq!(pixel(&px, 0, 0)[3], 0, "corners are transparent");
+        assert_eq!(pixel(&px, 1, 8), [0xD9, 0x2D, 0x20, 0xFF]);
+        // The "!": middle column lit in glyph rows 0-2 and 4, not in row 3,
+        // and never in the outer columns.
+        assert_eq!(pixel(&px, 7, 3), [0xFF; 4]);
+        assert_eq!(pixel(&px, 7, 11), [0xFF; 4]);
+        assert_ne!(pixel(&px, 7, 9), [0xFF; 4]);
+        assert_ne!(pixel(&px, 5, 3), [0xFF; 4]);
+        assert_ne!(pixel(&px, 10, 3), [0xFF; 4]);
+    }
+
+    #[test]
+    fn the_urgency_hint_rises_only_when_more_is_waiting_and_clears_at_zero() {
+        let was = |count, notices| Some(Applied { count, notices });
+        // Nothing waiting clears it, whatever was there before.
+        assert_eq!(urgency(was(3, 1), 0, 0), Urgency::Clear);
+        assert_eq!(urgency(None, 0, 0), Urgency::Clear);
+        // The first count raises it.
+        assert_eq!(urgency(None, 1, 0), Urgency::Raise);
+        assert_eq!(urgency(None, 0, 1), Urgency::Raise);
+        // More agents, or more notices, raise it again.
+        assert_eq!(urgency(was(1, 0), 2, 0), Urgency::Raise);
+        assert_eq!(urgency(was(1, 1), 1, 2), Urgency::Raise);
+        // The same, or fewer, leave it alone.
+        assert_eq!(urgency(was(2, 1), 2, 1), Urgency::Keep);
+        assert_eq!(urgency(was(3, 0), 2, 0), Urgency::Keep);
+        assert_eq!(urgency(was(1, 2), 1, 1), Urgency::Keep);
+        assert_eq!(urgency(was(2, 1), 1, 1), Urgency::Keep);
+        assert_eq!(urgency(was(1, 2), 0, 1), Urgency::Keep);
+    }
+
+    #[test]
+    fn the_last_applied_count_and_label_are_read_back() {
+        // One test owns LAST (the count the icon shows is process-wide).
+        remember(0, 0);
+        assert_eq!(
+            remember(4, 0),
+            Some(Applied {
+                count: 0,
+                notices: 0
+            })
+        );
+        assert_eq!(last_count(), Some(4));
+        assert_eq!(last_label().as_deref(), Some("4"));
+        assert_eq!(
+            remember(0, 2),
+            Some(Applied {
+                count: 4,
+                notices: 0
+            })
+        );
+        assert_eq!(last_label().as_deref(), Some("!"));
+        remember(0, 0);
+        assert_eq!(last_label(), None);
+        assert_eq!(last_count(), Some(0));
     }
 
     #[test]
