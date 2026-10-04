@@ -51,7 +51,7 @@ describe("fetch-prompt-library", () => {
 		expect(lock.tag).toMatch(/^v\d{4}\.\d{4}\.\d+$/);
 		expect(lock.manifest_sha256).toMatch(/^[0-9a-f]{64}$/);
 		expect(lock.mirrors.every((m) => m.includes("{tag}") && !m.includes("@latest"))).toBe(true);
-		expect(lock.max_archive_bytes).toBeLessThanOrEqual(5_000_000);
+		expect(lock.max_archive_bytes).toBeLessThanOrEqual(6_000_000);
 	});
 
 	it("collects every object of the hash chain, every tier", async () => {

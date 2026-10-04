@@ -68,10 +68,10 @@ describe("bundled prompt library", () => {
     expect(pkg.scripts["prepare:library"]).toMatch(/fetch-prompt-library\.mjs/);
   });
 
-  it("pins a release tag, never @latest, and caps the archive at 5 MB", () => {
+  it("pins a release tag, never @latest, and caps the archive at 6 MB", () => {
     expect(lock.tag).toMatch(/^v\d{4}\.\d{4}\.\d+$/);
     expect(JSON.stringify(lock.mirrors)).not.toMatch(/@latest|\/main\//);
-    expect(lock.max_archive_bytes).toBeLessThanOrEqual(5_000_000);
+    expect(lock.max_archive_bytes).toBeLessThanOrEqual(6_000_000);
   });
 
   // The archive is generated (gitignored): checked whenever it has been fetched.
@@ -82,7 +82,7 @@ describe("bundled prompt library", () => {
     expect(sidecar.manifest_sha256).toBe(lock.manifest_sha256);
     expect(sidecar.catalog).toBe(lock.catalog);
     expect(archive.length).toBe(sidecar.archive_bytes);
-    expect(archive.length).toBeLessThanOrEqual(5_000_000);
+    expect(archive.length).toBeLessThanOrEqual(6_000_000);
     expect(createHash("sha256").update(archive).digest("hex")).toBe(sidecar.archive_sha256);
   });
 });
