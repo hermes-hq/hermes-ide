@@ -1,14 +1,14 @@
 import "../styles/components/TemplatePicker.css";
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
-import { TEMPLATE_CATEGORIES, type PromptTemplate, type TemplateCategory } from "../lib/templates";
+import { TEMPLATE_CATEGORIES, type PromptTemplate } from "../lib/templates";
 import { fmt } from "../utils/platform";
 import { useI18n } from "../i18n/I18nProvider";
-import { Button } from "./ui";
 import { LibraryPicker } from "./library/LibraryPicker";
 
 interface TemplatePickerProps {
-  builtInTemplates: PromptTemplate[];
   userTemplates: PromptTemplate[];
+  /** Pinned 2.0 built-ins the catalog has no library entry for (shown under Pinned only). */
+  fallbackTemplates?: PromptTemplate[];
   onSelect: (template: PromptTemplate) => void;
   onDeleteUser: (id: string) => void;
   open: boolean;
@@ -23,15 +23,15 @@ interface TemplatePickerProps {
   onRenameGroup: (oldName: string, newName: string) => void;
   onDeleteGroup: (name: string) => void;
   onMoveToGroup: (templateId: string, group: string | null) => void;
-  /** The prompt library's tab: a picked entry, rendered with its arguments, becomes the task. */
-  onSelectLibrary?: (text: string) => void;
+  /** The Library tab (Hermes's prompts): a picked entry, rendered with its arguments, becomes the task. */
+  onSelectLibrary: (text: string) => void;
 }
 
-type TabId = "built-in" | "my-templates" | "library";
+type TabId = "library" | "my-templates";
 
 export function TemplatePicker({
-  builtInTemplates,
   userTemplates,
+  fallbackTemplates = [],
   onSelect,
   onDeleteUser,
   open,
@@ -52,7 +52,7 @@ export function TemplatePicker({
   const [collapsedCategories, setCollapsedCategories] = useState<Set<string>>(new Set());
   const [search, setSearch] = useState("");
   const [hoveredId, setHoveredId] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<TabId>("built-in");
+  const [activeTab, setActiveTab] = useState<TabId>("library");
   const [newGroupName, setNewGroupName] = useState("");
   const [showNewGroupInput, setShowNewGroupInput] = useState(false);
   const [editingGroup, setEditingGroup] = useState<string | null>(null);
@@ -108,16 +108,15 @@ export function TemplatePicker({
   }, [editingGroup]);
 
   const allTemplates = useMemo(
-    () => [...builtInTemplates, ...userTemplates],
-    [builtInTemplates, userTemplates],
+    () => [...fallbackTemplates, ...userTemplates],
+    [fallbackTemplates, userTemplates],
   );
 
-  // Filter templates by search query within the active tab
+  // Filter the person's templates by search query (the Library tab has its own search)
   const filteredTemplates = useMemo(() => {
     if (!search.trim()) return null;
     const q = search.toLowerCase().trim();
-    const source = activeTab === "built-in" ? builtInTemplates : userTemplates;
-    return source.filter((t) => {
+    return userTemplates.filter((t) => {
       const catMeta = TEMPLATE_CATEGORIES[t.category];
       return (
         t.name.toLowerCase().includes(q) ||
@@ -126,18 +125,7 @@ export function TemplatePicker({
         (t.group && t.group.toLowerCase().includes(q))
       );
     });
-  }, [search, activeTab, builtInTemplates, userTemplates]);
-
-  // Group built-in templates by category
-  const categories = Object.keys(TEMPLATE_CATEGORIES) as TemplateCategory[];
-  const grouped = useMemo(() => {
-    const map = new Map<TemplateCategory, PromptTemplate[]>();
-    for (const cat of categories) {
-      const items = builtInTemplates.filter((t) => t.category === cat);
-      if (items.length > 0) map.set(cat, items);
-    }
-    return map;
-  }, [builtInTemplates]);
+  }, [search, userTemplates]);
 
   // Group user templates by their group field
   const userGrouped = useMemo(() => {
@@ -324,13 +312,14 @@ export function TemplatePicker({
             )}
           </div>
 
-          {/* Tabs */}
+          {/* Tabs: the Library (Hermes's prompts) first, then the person's own */}
           <div className="template-picker-tabs">
             <button
-              className={`template-picker-tab${activeTab === "built-in" ? " template-picker-tab-active" : ""}`}
-              onClick={() => setActiveTab("built-in")}
+              className={`template-picker-tab template-picker-library-tab${activeTab === "library" ? " template-picker-tab-active" : ""}`}
+              aria-pressed={activeTab === "library"}
+              onClick={() => setActiveTab("library")}
             >
-              {t("builder.builtIn")}
+              {t("app.library")}
             </button>
             <button
               className={`template-picker-tab${activeTab === "my-templates" ? " template-picker-tab-active" : ""}`}
@@ -341,20 +330,9 @@ export function TemplatePicker({
                 <span className="template-picker-tab-count">{userTemplates.length}</span>
               )}
             </button>
-            {onSelectLibrary && (
-              <Button
-                size="sm"
-                variant={activeTab === "library" ? "secondary" : "quiet"}
-                className="template-picker-library-tab"
-                aria-pressed={activeTab === "library"}
-                onClick={() => setActiveTab("library")}
-              >
-                {t("app.library")}
-              </Button>
-            )}
           </div>
 
-          {activeTab === "library" && onSelectLibrary && (
+          {activeTab === "library" && (
             <LibraryPicker
               embedded
               kinds={["prompt", "workflow", "persona", "style"]}
@@ -383,34 +361,6 @@ export function TemplatePicker({
               ) : (
                 <div className="template-picker-empty">{t("builder.noTemplatesMatch", { query: search })}</div>
               )
-            ) : activeTab === "built-in" ? (
-              /* Built-in tab: category-grouped view */
-              <>
-                {Array.from(grouped.entries()).map(([cat, items]) => {
-                  const meta = TEMPLATE_CATEGORIES[cat];
-                  const collapsed = collapsedCategories.has(cat);
-                  return (
-                    <div key={cat}>
-                      <div
-                        className="template-picker-category"
-                        onClick={() => toggleCategory(cat)}
-                      >
-                        <span className="template-picker-category-chevron">
-                          {collapsed ? "\u25b8" : "\u25be"}
-                        </span>
-                        <span className="template-picker-category-icon">{meta.icon}</span>
-                        <span className="template-picker-category-label">{meta.label}</span>
-                        <span className="template-picker-category-count">{items.length}</span>
-                      </div>
-                      {!collapsed && (
-                        <div className="template-picker-items">
-                          {items.map((tpl) => renderItem(tpl))}
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
-              </>
             ) : (
               /* My Templates tab: group-based view */
               <>

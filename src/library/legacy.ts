@@ -2,9 +2,10 @@
 //
 // Nothing the person saved moves or changes: their templates, groups, pins,
 // custom roles and styles stay in the same settings keys and the Builder
-// reads them as before. The Library shows them as "My templates", next to
-// the 2.0 built-ins as read-only "Hermes classics". An old id resolves in
-// this order:
+// reads them as before. The Library shows them as "My templates". The 2.0
+// built-ins are library entries now (by id or reviewed alias); one the
+// catalog has no entry for stays as a read-only "Hermes classic". An old id
+// resolves in this order:
 //
 //   1. the person's own item (user-…, custom-role-…, custom-style-…);
 //   2. a library entry that carries it as its id or a reviewed alias;
@@ -103,10 +104,16 @@ export async function loadMine(): Promise<LegacyItem[]> {
     getSetting("custom_roles").catch(() => ""),
     getSetting("custom_styles").catch(() => ""),
   ]);
-  const roles = [...c.BUILT_IN_ROLES, ...parseList<RoleDefinition>(rawRoles)];
-  const styles = [...c.BUILT_IN_STYLES, ...parseList<StyleDefinition>(rawStyles)];
-  return parseList<PromptTemplate>(rawTemplates)
-    .filter((t) => t && typeof t.id === "string")
+  const saved = parseList<PromptTemplate>(rawTemplates).filter((t) => t && typeof t.id === "string");
+  // Built-in role and style ids in a saved template resolve to their
+  // library entries (the 2.0 text only when the catalog has none).
+  const roleIds = saved.flatMap((t) => [...(t.fields?.roleIds ?? []), ...(t.recommendedRoles ?? [])]);
+  const styleIds = saved.flatMap((t) => [...(t.fields?.styleSelections ?? []), ...(t.recommendedStyles ?? [])].map((s) => s?.id));
+  const { definitionsFor } = await import("./parts");
+  const lib = await definitionsFor(roleIds.filter((id): id is string => typeof id === "string"), styleIds.filter((id): id is string => typeof id === "string"));
+  const roles = [...lib.roles, ...parseList<RoleDefinition>(rawRoles)];
+  const styles = [...lib.styles, ...parseList<StyleDefinition>(rawStyles)];
+  return saved
     .map((t) => ({
       key: `mine:${t.id}`,
       id: t.id,
@@ -130,6 +137,21 @@ export function filterLegacy(items: readonly LegacyItem[], query: string): Legac
     const hay = `${i.title} ${i.description} ${i.id} ${i.category}`.toLowerCase();
     return words.every((w) => hay.includes(w));
   });
+}
+
+const warned = new Set<string>();
+
+/** Logs, once per id, that a 2.0 built-in has no library entry and its old text is used. */
+export function warnMissingAlias(id: string, what: LegacyItem["source"]): void {
+  const key = `${what}:${id}`;
+  if (warned.has(key)) return;
+  warned.add(key);
+  console.warn(`[library] the 2.0 built-in ${what} "${id}" has no library entry; using its 2.0 text`);
+}
+
+/** Test hook: forget which ids were already logged. */
+export function resetMissingAliasLog(): void {
+  warned.clear();
 }
 
 export type Resolution =

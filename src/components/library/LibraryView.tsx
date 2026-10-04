@@ -30,7 +30,7 @@ import {
   libraryShelves,
   libraryStatus,
 } from "../../library/api";
-import { filterLegacy, loadClassics, loadMine, visibleClassics, type LegacyItem } from "../../library/legacy";
+import { filterLegacy, loadClassics, loadMine, visibleClassics, warnMissingAlias, type LegacyItem } from "../../library/legacy";
 import { placeInSession, sessionDeps } from "../../library/placeInSession";
 import { setLauncherSeed } from "../../library/launcherSeed";
 import { agentName, worksTarget } from "../../library/targets";
@@ -175,14 +175,21 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
       .then(async ([c, m]) => {
         const replaced = await libraryResolve(c.map((x) => x.id)).catch(() => ({}));
         if (!live) return;
-        setClassics(visibleClassics(c, replaced));
+        const shown = visibleClassics(c, replaced);
+        for (const x of shown) warnMissingAlias(x.id, x.source);
+        setClassics(shown);
         setMine(m);
       })
       .catch((e) => console.warn("[library] classics:", e));
+    // A 2.0 pin on a built-in template becomes a pin on its library entry.
+    import("../../library/parts")
+      .then((m) => m.carryLegacyPins())
+      .then(() => live && refreshStates())
+      .catch((e) => console.warn("[library] carrying 2.0 pins:", e));
     return () => {
       live = false;
     };
-  }, []);
+  }, [refreshStates]);
 
   const pinned = useMemo(() => new Set(itemStates.filter((s) => s.pinned).map((s) => s.itemId)), [itemStates]);
   const hidden = useMemo(() => new Set(itemStates.filter((s) => s.hidden).map((s) => s.itemId)), [itemStates]);
@@ -444,7 +451,8 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     { id: "pinned", label: t("library.nav.pinned"), count: pinned.size },
     ...(projectName ? [{ id: "installed" as Nav, label: t("library.nav.installed", { project: projectName }) }] : []),
     { id: "mine", label: t("library.nav.mine"), count: mine.length },
-    { id: "classics", label: t("library.nav.classics"), count: classics.length },
+    // Only the 2.0 built-ins the catalog has no entry for are left here.
+    ...(classics.length > 0 ? [{ id: "classics" as Nav, label: t("library.nav.classics"), count: classics.length }] : []),
     ...(hidden.size > 0 ? [{ id: "hidden" as Nav, label: t("library.nav.hidden"), count: hidden.size }] : []),
   ];
 

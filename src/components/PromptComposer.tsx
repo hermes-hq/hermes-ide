@@ -17,6 +17,8 @@ import {
   BUILT_IN_STYLES,
   compilePrompt,
 } from "../lib/compilePrompt";
+import { isUserId, warnMissingAlias } from "../library/legacy";
+import { asRole, asStyle, carryLegacyPins, listParts, loadPart, oldRole, oldStyle, resolvePartIds, type LoadedPart, type PartItem } from "../library/parts";
 import type { PromptTemplate } from "../lib/templates";
 import type { RoleDefinition } from "../lib/roles";
 import type { StyleDefinition, SelectedStyle } from "../lib/styles";
@@ -110,8 +112,63 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
     taskRef.current?.focus();
   }, []);
 
-  const allRoles = useMemo(() => [...BUILT_IN_ROLES, ...customRoles], [customRoles]);
-  const allStyles = useMemo(() => [...BUILT_IN_STYLES, ...customStyles], [customStyles]);
+  // Roles are library personas and styles are library styles (next to the
+  // person's own). Their text is read when one is picked. If the library
+  // cannot be read at all, the 2.0 built-ins stand in.
+  const [libPersonas, setLibPersonas] = useState<PartItem[] | null>(null);
+  const [libStyles, setLibStyles] = useState<PartItem[] | null>(null);
+  const [libFailed, setLibFailed] = useState(false);
+  const [parts, setParts] = useState<Record<string, LoadedPart>>({});
+  // Old built-in ids in an applied template that the catalog has no entry for.
+  const [fallbackRoles, setFallbackRoles] = useState<RoleDefinition[]>([]);
+  const [fallbackStyles, setFallbackStyles] = useState<StyleDefinition[]>([]);
+  // Pinned 2.0 built-in templates the catalog has no entry for.
+  const [fallbackTemplates, setFallbackTemplates] = useState<PromptTemplate[]>([]);
+
+  useEffect(() => {
+    let live = true;
+    Promise.all([listParts("persona"), listParts("style")])
+      .then(([p, st]) => {
+        if (!live) return;
+        setLibPersonas(p);
+        setLibStyles(st);
+      })
+      .catch((err) => {
+        console.warn("[PromptComposer] The library's personas and styles could not be read; using the 2.0 built-ins:", err);
+        if (live) setLibFailed(true);
+      });
+    carryLegacyPins()
+      .then((missing) => {
+        if (live && missing.length > 0) setFallbackTemplates(BUILT_IN_TEMPLATES.filter((t) => missing.includes(t.id)));
+      })
+      .catch((err) => console.warn("[PromptComposer] Carrying 2.0 pins failed:", err));
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  const allRoles = useMemo(() => {
+    if (libFailed) return [...BUILT_IN_ROLES, ...customRoles];
+    const lib = (libPersonas ?? []).map((p) => asRole({ title: p.title, description: p.description, text: parts[p.id]?.text ?? "" }, p.id));
+    return [...lib, ...fallbackRoles, ...customRoles];
+  }, [libFailed, libPersonas, parts, fallbackRoles, customRoles]);
+  const allStyles = useMemo(() => {
+    if (libFailed) return [...BUILT_IN_STYLES, ...customStyles];
+    const lib = (libStyles ?? []).map((p) => asStyle({ title: p.title, description: p.description, levels: parts[p.id]?.levels ?? null }, p.id));
+    return [...lib, ...fallbackStyles, ...customStyles];
+  }, [libFailed, libStyles, parts, fallbackStyles, customStyles]);
+
+  // Read the text of every picked library persona and style.
+  useEffect(() => {
+    if (libFailed) return;
+    const known = new Set([...(libPersonas ?? []), ...(libStyles ?? [])].map((p) => p.id));
+    const want = [...fields.roleIds, ...fields.styleSelections.map((x) => x.id)].filter((id) => known.has(id) && !parts[id]);
+    for (const id of new Set(want)) {
+      loadPart(id).then((part) => {
+        if (part) setParts((prev) => (prev[id] ? prev : { ...prev, [id]: part }));
+      });
+    }
+  }, [fields.roleIds, fields.styleSelections, libPersonas, libStyles, libFailed, parts]);
 
   // Load user templates on mount
   useEffect(() => {
@@ -255,6 +312,26 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
     if ((tpl.fields.constraints || "").trim() || (tpl.fields.style || "").trim()) {
       setAdvancedOpen(true);
     }
+    // A 2.0 built-in role or style id resolves to its library entry; one the
+    // catalog has no entry for keeps its 2.0 text (logged).
+    const roleIds = newFields.roleIds.filter((id) => !isUserId(id));
+    const styleIds = newFields.styleSelections.map((x) => x.id).filter((id) => !isUserId(id));
+    if (roleIds.length + styleIds.length === 0) return;
+    resolvePartIds([...roleIds, ...styleIds]).then((map) => {
+      const missRoles = roleIds.filter((id) => !map[id]).map((id) => oldRole(id)).filter((r): r is RoleDefinition => !!r);
+      const missStyles = styleIds.filter((id) => !map[id]).map((id) => oldStyle(id)).filter((x): x is StyleDefinition => !!x);
+      for (const r of missRoles) warnMissingAlias(r.id, "role");
+      for (const x of missStyles) warnMissingAlias(x.id, "style");
+      if (missRoles.length) setFallbackRoles((prev) => [...prev, ...missRoles.filter((r) => !prev.some((p) => p.id === r.id))]);
+      if (missStyles.length) setFallbackStyles((prev) => [...prev, ...missStyles.filter((x) => !prev.some((p) => p.id === x.id))]);
+      setFields((prev) => ({
+        ...prev,
+        roleIds: [...new Set(prev.roleIds.map((id) => map[id] ?? id))],
+        styleSelections: prev.styleSelections
+          .map((x) => ({ ...x, id: map[x.id] ?? x.id }))
+          .filter((x, i, all) => all.findIndex((y) => y.id === x.id) === i),
+      }));
+    });
   }, []);
 
   const sendPrompt = useCallback(async () => {
@@ -414,7 +491,9 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
 
       const { templates: newTemplates, roles: newRoles, styles: newStyles, result } = importBundle(
         validation.bundle, userTemplates, customRoles, customStyles, builtInRoleIds, builtInStyleIds,
-        BUILT_IN_TEMPLATES,
+        // The 2.0 built-ins are library entries now: a bundled copy of one
+        // (an edited built-in) is the person's template, so it is kept.
+        [],
         bundleName,
       );
 
@@ -538,8 +617,8 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
           <div className="prompt-composer-header-left">
             <span className="prompt-composer-title">{t("builder.title")}</span>
             <TemplatePicker
-              builtInTemplates={BUILT_IN_TEMPLATES}
               userTemplates={userTemplates}
+              fallbackTemplates={fallbackTemplates}
               onSelect={applyTemplate}
               onDeleteUser={deleteTemplate}
               open={templatePickerOpen}
@@ -576,7 +655,7 @@ export function PromptComposer({ sessionId, onClose, addToast }: PromptComposerP
                 <span className="prompt-composer-empty-cta-icon">&#9776;</span>
                 <span className="prompt-composer-empty-cta-text">
                   <strong>{t("builder.startFromTemplate")}</strong>
-                  <span>{t("builder.browseTemplates", { count: BUILT_IN_TEMPLATES.length })}</span>
+                  <span>{t("builder.browseLibrary")}</span>
                 </span>
                 <kbd className="prompt-composer-empty-cta-kbd">{fmt("{mod}T")}</kbd>
               </button>
