@@ -139,6 +139,10 @@ await runLauncherQa(
     await sleep(300);
     await b.clickWhenReady(`const i = e2e.all(".command-palette-item").find((e) => /^Prompts/.test(e2e.norm(e.innerText))); return i ? e2e.click(i) : false;`);
     await b.waitFor("Prompts", `return !!e2e.first('[data-testid="prompt-picker"] .pp-input');`, { timeoutMs: 15_000 });
+    // The palette's notes come after its first paint (Mine is read, then the note is set).
+    await b
+      .waitFor("the note about the 2.0 items", `return e2e.all(".pp-note").some((e) => /under Mine/.test(e2e.norm(e.innerText)));`, { timeoutMs: 10_000 })
+      .catch(() => null);
     const opened = await b.eval(`return {
       notes: e2e.all(".pp-note").map((e) => e2e.norm(e.innerText)),
       chips: e2e.all(".pp-chips [data-filter]").map((e) => e.getAttribute("data-filter")),

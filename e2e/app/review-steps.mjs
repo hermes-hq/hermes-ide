@@ -115,8 +115,10 @@ export async function launchTask(bridge, repo, task, { approval = "acceptEdits",
   if (track || checks.length || currentCheckout) await L.expandOptions(bridge);
   if (currentCheckout) await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.first('[data-where="current-checkout"]'), "current checkout"));`);
   for (const cmd of checks) {
+    const had = await bridge.eval(`return e2e.all(".task-launcher-check-input").length;`);
     await bridge.click(".task-launcher-check-add");
-    await sleep(200);
+    // The new check's field renders after the click: wait for it rather than for a fixed time.
+    await bridge.waitFor("the new check's field", `return e2e.all(".task-launcher-check-input").length > ${had};`, { timeoutMs: 10_000 });
     await bridge.eval(
       `const els = e2e.all(".task-launcher-check-input"); const el = els[els.length - 1]; el.focus(); Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, ${JSON.stringify(cmd)}); el.dispatchEvent(new Event("input", { bubbles: true })); return el.value;`,
     );
