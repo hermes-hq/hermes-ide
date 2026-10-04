@@ -45,7 +45,7 @@ Hermes IDE is not affiliated with Nous Research or its Hermes Agent.
 
 ### AI Intelligence
 - **Ghost-text suggestions** — real-time command completions from history and context <!-- claim:ghost-text -->
-- **Prompt Composer** — write natural-language instructions for autonomous task execution <!-- claim:prompt-composer -->
+- **Prompts** (⌘J) — find a ready-made prompt or one of your own, fill in the blanks and put it in the session or a new task <!-- claim:prompt-composer -->
 - **Error pattern matching** — learns error fingerprints and auto-applies known resolutions <!-- claim:error-patterns -->
 - **Stuck detection** — monitors for hanging processes and offers interrupts <!-- claim:stuck-detection -->
 

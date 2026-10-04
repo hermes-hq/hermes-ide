@@ -93,9 +93,8 @@ claims:
     unproven: "No real-app scenario proves this yet"
     planned: ghost-text.mjs
   prompt-composer:
-    text: "Prompt Composer"
-    unproven: "No real-app scenario proves this yet"
-    planned: prompt-composer.mjs
+    text: "Prompts"
+    scenario: HOD-prompts-keyboard.mjs
   error-patterns:
     text: "Error pattern matching"
     unproven: "No real-app scenario proves this yet"
