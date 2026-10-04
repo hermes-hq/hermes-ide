@@ -233,6 +233,7 @@ export const libraryHi: TranslationMessages = {
   "library.prompts.placeholderLauncher": "इस कार्य के लिए प्रॉम्प्ट खोजें",
   "library.prompts.filtersLabel": "दिखाएँ",
   "library.prompts.resultsLabel": "प्रॉम्प्ट",
+  "library.prompts.resultsCount": "सूची में प्रॉम्प्ट: {count}",
   "library.prompts.filter.all": "सभी",
   "library.prompts.filter.mine": "मेरे प्रॉम्प्ट",
   "library.prompts.filter.pinned": "पिन किए",

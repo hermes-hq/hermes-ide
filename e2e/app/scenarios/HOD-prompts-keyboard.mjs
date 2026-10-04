@@ -104,6 +104,7 @@ await runLauncherQa(
     log(`  groups ${JSON.stringify(s.groups)}, first rows ${JSON.stringify(s.rows.slice(0, 5))}`);
     check(s.focused, "the search has the keyboard");
     check(s.groups.some((g) => /For you/i.test(g)), "it opens on what fits (For you)");
+    check(s.kinds.every((k) => k === "prompt" || k === "workflow"), "and with nothing typed it opens on tasks (personas and styles have their own filters)");
     check(s.inputInside && !s.listSideways, "the search stays inside the palette and the list never scrolls sideways");
     check(s.narrowestTitle > 150, `row titles have room (${Math.round(s.narrowestTitle)} px at the narrowest)`);
     await shoot(bridge, evidenceDir, "01-session-open");
@@ -114,7 +115,7 @@ await runLauncherQa(
     await bridge.eval(`const c = e2e.first('.pp-chips [data-filter="task"]'); c.focus(); c.click(); return true;`);
     await bridge.eval(`e2e.first(".pp-input").focus(); return true;`);
     await typeInto(bridge, ".pp-input", "regression test");
-    await bridge.waitFor(`${ENTRY} among the results`, `return !!e2e.first('.pp-row[data-entry="${ENTRY}"]') && e2e.first(".pp-list")?.getAttribute("aria-busy") !== "true";`, { timeoutMs: 20_000 });
+    await bridge.waitFor(`${ENTRY} among the results`, `return !!e2e.first('.pp-row[data-entry="${ENTRY}"]') && e2e.first(".pp-list")?.getAttribute("data-busy") !== "true";`, { timeoutMs: 20_000 });
     check(await chooseEntry(bridge, ENTRY), `the arrows choose "${TITLE}"`);
     await bridge.waitFor("its preview", `return /follow|regression/i.test(e2e.first('[data-testid="prompt-receives"]')?.textContent ?? "");`, { timeoutMs: 20_000 });
     s = await picker(bridge);
@@ -164,10 +165,16 @@ await runLauncherQa(
     await typeInto(bridge, ".task-launcher-task", BUG);
     await menuAction(bridge, "view.prompt-composer");
     await bridge.waitFor("Prompts in the launcher", `return !!e2e.first('[data-testid="prompt-picker"][data-context="launcher"] .pp-input');`, { timeoutMs: 20_000 });
-    const oneSurface = await bridge.eval(`return { sheetHidden: e2e.first(".task-launcher-sheet")?.hidden === true, inOverlay: !!e2e.first('.task-launcher-overlay [data-testid="prompt-picker"]') };`);
-    check(oneSurface.sheetHidden && oneSurface.inOverlay, "Prompts takes the launcher sheet's place in the same overlay (no dialog on a dialog)");
+    const oneSurface = await bridge.eval(`
+      const sheet = e2e.first(".task-launcher-sheet");
+      const pp = e2e.first('.task-launcher-overlay [data-testid="prompt-picker"]');
+      return { sheetShown: !!sheet && getComputedStyle(sheet).display !== "none" && sheet.getClientRects().length > 0, inOverlay: !!pp, width: pp ? Math.round(pp.getBoundingClientRect().width) : 0 };
+    `);
+    log(`  launcher: sheet shown ${oneSurface.sheetShown}, Prompts ${oneSurface.width} px wide`);
+    check(!oneSurface.sheetShown && oneSurface.inOverlay, "Prompts takes the launcher sheet's place in the same overlay (no dialog on a dialog)");
+    check(oneSurface.width >= 700, "at full size");
     await typeInto(bridge, ".pp-input", "regression test");
-    await bridge.waitFor(`${ENTRY} among the results`, `return !!e2e.first('.pp-row[data-entry="${ENTRY}"]') && e2e.first(".pp-list")?.getAttribute("aria-busy") !== "true";`, { timeoutMs: 20_000 });
+    await bridge.waitFor(`${ENTRY} among the results`, `return !!e2e.first('.pp-row[data-entry="${ENTRY}"]') && e2e.first(".pp-list")?.getAttribute("data-busy") !== "true";`, { timeoutMs: 20_000 });
     check(await chooseEntry(bridge, ENTRY), "the arrows choose it");
     await bridge.waitFor("the launcher's text in the Bug blank", `return e2e.first('[data-arg="bug"] textarea')?.value === ${JSON.stringify(BUG)};`, { timeoutMs: 10_000 }).catch(() => null);
     s = await picker(bridge);
@@ -175,7 +182,7 @@ await runLauncherQa(
     await shoot(bridge, evidenceDir, "04-launcher-prompts");
     await bridge.eval(`e2e.first(".pp-input").focus(); return true;`);
     await press(bridge, "Enter");
-    await bridge.waitFor("the launcher again", `return !e2e.first('[data-testid="prompt-picker"]') && e2e.first(".task-launcher-sheet")?.hidden === false;`, { timeoutMs: 10_000 });
+    await bridge.waitFor("the launcher again", `const s = e2e.first(".task-launcher-sheet"); return !e2e.first('[data-testid="prompt-picker"]') && !!s && getComputedStyle(s).display !== "none";`, { timeoutMs: 10_000 });
     const back = await bridge.eval(`return { task: e2e.first(".task-launcher-task")?.value ?? "", chip: e2e.norm(e2e.first(".task-launcher-library-prompt")?.innerText ?? "") };`);
     log(`  launcher chip "${back.chip}", task ${JSON.stringify(back.task.slice(0, 120))}…`);
     check(back.task.includes(`Add a regression test for: ${BUG}`), "the task is the rendered prompt with the launcher's text in it");

@@ -157,13 +157,15 @@ const ranked = (view: ReturnType<typeof render>) => waitFor(() => expect(q(view,
 describe("Prompts palette", () => {
   it("opens on Pinned and For you, with the first row chosen and a reason on ranked rows", async () => {
     const { view } = session();
-    await waitFor(() => expect(view.container.querySelectorAll(".pp-row").length).toBeGreaterThan(2));
+    await waitFor(() => expect(view.container.querySelectorAll(".pp-group").length).toBe(2));
     const groups = [...view.container.querySelectorAll(".pp-group")].map((g) => g.textContent);
     expect(groups[0]).toContain("Pinned");
     expect(groups[1]).toContain("For you");
     expect(selected(view)).toBe("bugfix-track");
     expect(q(view, '.pp-row[data-entry="add-regression-test"] .pp-row-why')?.textContent).toContain("Fits Rust");
-    // Rules are never asked for here.
+    // With nothing typed, All opens on tasks; rules are never asked for here.
+    expect([...view.container.querySelectorAll(".pp-row")].map((r) => r.getAttribute("data-kind"))).toEqual(["workflow", "prompt"]);
+    expect(q(view, '[role="status"].pp-sr')?.textContent).toBe("2 prompts listed");
     const kinds = h.invoke.mock.calls.filter((c) => c[0] === "library_search").map((c) => c[1].request.filters.kind);
     expect(kinds.every((k: string[]) => !k.includes("rule"))).toBe(true);
     expect(document.activeElement).toBe(search(view));

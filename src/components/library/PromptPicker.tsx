@@ -286,7 +286,8 @@ function PickerDialog({
     const n = ++searchSeq.current;
     setLoading(true);
     const timer = setTimeout(() => {
-      const kind = kindsFor(filter, context);
+      // With nothing typed, All opens on tasks: personas and answer styles go with a task, under their own chips.
+      const kind = !query.trim() && filter === "all" ? kindsFor("task", context) : kindsFor(filter, context);
       librarySearch({ query, filters: { kind, ...(works && works.length ? { works } : {}) }, limit: PAGE, sort: query.trim() ? "best" : "you", personalise: true }, ctx)
         .then((page) => {
           if (n !== searchSeq.current) return;
@@ -304,7 +305,7 @@ function PickerDialog({
     if (!cursor || loading) return;
     const n = searchSeq.current;
     setLoading(true);
-    librarySearch({ query, filters: { kind: kindsFor(filter, context), ...(works && works.length ? { works } : {}) }, limit: PAGE, cursor, sort: query.trim() ? "best" : "you", personalise: true }, ctx)
+    librarySearch({ query, filters: { kind: !query.trim() && filter === "all" ? kindsFor("task", context) : kindsFor(filter, context), ...(works && works.length ? { works } : {}) }, limit: PAGE, cursor, sort: query.trim() ? "best" : "you", personalise: true }, ctx)
       .then((page) => {
         if (n !== searchSeq.current) return;
         setHits((prev) => [...prev, ...page.hits.filter((h) => !prev.some((p) => p.id === h.id))]);
@@ -338,6 +339,7 @@ function PickerDialog({
     [query, filter, context, mine, pinnedHits, recent, hits, personal],
   );
   const rows = useMemo(() => pickables(items), [items]);
+  const rowPosition = useMemo(() => new Map(rows.map((r, i) => [r.key, i + 1])), [rows]);
   const selected: Pickable | null = rows.find((r) => r.key === selKey) ?? rows[0] ?? null;
   const key = selected?.key ?? null;
 
@@ -642,6 +644,7 @@ function PickerDialog({
     if (selected?.type !== "mine") return;
     await deleteMyPrompt(selected.item.id);
     setConfirmDelete(false);
+    inputRef.current?.focus();
     toast?.(t("library.prompts.toastDeleted", { title }), "info");
   };
 
@@ -657,9 +660,19 @@ function PickerDialog({
     });
   };
 
+  const focusMore = () => requestAnimationFrame(() => dialogRef.current?.querySelector<HTMLElement>(".pp-more")?.focus());
+
   function escape() {
-    if (saving) return setSaving(null);
-    if (confirmDelete) return setConfirmDelete(false);
+    if (saving) {
+      setSaving(null);
+      focusMore();
+      return;
+    }
+    if (confirmDelete) {
+      setConfirmDelete(false);
+      focusMore();
+      return;
+    }
     const at = document.activeElement as HTMLElement | null;
     if (at && at !== inputRef.current && dialogRef.current?.contains(at) && at.matches("input, textarea, [role='combobox']")) {
       inputRef.current?.focus();
@@ -811,7 +824,7 @@ function PickerDialog({
           ref={inputRef}
           className="pp-input"
           role="combobox"
-          aria-expanded="true"
+          aria-expanded={rows.length > 0}
           aria-controls={listId}
           aria-autocomplete="list"
           aria-activedescendant={key ? optionId(key) : undefined}
@@ -830,7 +843,7 @@ function PickerDialog({
         />
         <kbd className="pp-esc">{t("library.prompts.kbdEsc")}</kbd>
       </div>
-      <div className="pp-chips" role="toolbar" aria-label={t("library.prompts.filtersLabel")}>
+      <div className="pp-chips" role="group" aria-label={t("library.prompts.filtersLabel")}>
         {filtersFor(context).map((f, i) =>
           f === null ? (
             <span key={`sep-${i}`} className="pp-chip-sep" aria-hidden="true" />
@@ -855,11 +868,8 @@ function PickerDialog({
       <div className="pp-body">
         <div
           ref={listRef}
-          id={listId}
           className="pp-list"
-          role="listbox"
-          aria-label={t("library.prompts.resultsLabel")}
-          aria-busy={loading}
+          data-busy={loading || undefined}
           onScroll={onListScroll}
           data-count={rows.length}
           data-rendered={range.end - range.start}
@@ -923,9 +933,9 @@ function PickerDialog({
               />
             )
           ) : (
-            <div className="pp-rows" style={{ height: layout.total }}>
-              {items.slice(range.start, range.end).map((it, n) => {
-                const i = range.start + n;
+            <div id={listId} className="pp-rows" role="listbox" aria-label={t("library.prompts.resultsLabel")} style={{ height: layout.total }}>
+              {windowIndexes(range, items, key).map((i) => {
+                const it = items[i];
                 return (
                   <ListItem
                     key={it.key}
@@ -934,6 +944,9 @@ function PickerDialog({
                     selected={it.key === key}
                     optionId={optionId(it.key)}
                     pinned={it.type !== "group" && isPinned(it, pinnedIds)}
+                    position={it.type === "group" ? 0 : rowPosition.get(it.key) ?? 0}
+                    total={rows.length}
+                    groupLabel={it.type !== "group" && i > 0 && items[i - 1].type === "group" ? t(`library.prompts.group.${(items[i - 1] as { group: string }).group}`) : null}
                     onChoose={choose}
                     onActivate={() => void primary(false)}
                   />
@@ -942,7 +955,10 @@ function PickerDialog({
             </div>
           )}
         </div>
-        <div ref={paneRef} className="pp-pane" aria-live="polite">
+        <div className="pp-sr" role="status">
+          {loading || libState === "loading" ? "" : rows.length ? t("library.prompts.resultsCount", { count: rows.length }) : query.trim() ? t("library.prompts.noneTitle", { query: query.trim() }) : ""}
+        </div>
+        <div ref={paneRef} className="pp-pane" role="region" aria-label={title || t("library.prompts.paneEmptyTitle")}>
           {selected && draft ? (
             <Pane
               selected={selected}
@@ -979,10 +995,16 @@ function PickerDialog({
               saving={saving}
               onSavingName={(name) => setSaving({ name })}
               onSaveConfirm={(c) => void doSave(c)}
-              onSaveCancel={() => setSaving(null)}
+              onSaveCancel={() => {
+                setSaving(null);
+                focusMore();
+              }}
               confirmDelete={confirmDelete}
               onDeleteConfirm={() => void doDelete()}
-              onDeleteCancel={() => setConfirmDelete(false)}
+              onDeleteCancel={() => {
+                setConfirmDelete(false);
+                focusMore();
+              }}
               paneRef={paneRef}
             />
           ) : (
@@ -1035,6 +1057,15 @@ function PickerDialog({
       {dialog}
     </div>
   );
+}
+
+/** The rows to put in the DOM: the visible window, plus the chosen row wherever it is (aria-activedescendant points at it). */
+function windowIndexes(range: { start: number; end: number }, items: readonly PickerItem[], key: string | null): number[] {
+  const out: number[] = [];
+  for (let i = range.start; i < range.end; i++) out.push(i);
+  const sel = key ? items.findIndex((it) => it.key === key) : -1;
+  if (sel >= 0 && (sel < range.start || sel >= range.end)) out.push(sel);
+  return out;
 }
 
 /** Changes inside a draft (mutated in place) re-run the memos keyed on it. */
@@ -1122,6 +1153,9 @@ function ListItem({
   selected,
   optionId,
   pinned,
+  position,
+  total,
+  groupLabel,
   onChoose,
   onActivate,
 }: {
@@ -1130,13 +1164,16 @@ function ListItem({
   selected: boolean;
   optionId: string;
   pinned: boolean;
+  position: number;
+  total: number;
+  groupLabel: string | null;
   onChoose: (key: string) => void;
   onActivate: () => void;
 }) {
   const { t } = useI18n();
   if (item.type === "group") {
     return (
-      <div className="pp-group" role="presentation" style={{ top }}>
+      <div className="pp-group" aria-hidden="true" style={{ top }}>
         <span>{t(`library.prompts.group.${item.group}`)}</span>
         {item.count !== undefined && <span>{item.count}</span>}
       </div>
@@ -1151,6 +1188,10 @@ function ListItem({
       id={optionId}
       role="option"
       aria-selected={selected}
+      aria-posinset={position}
+      aria-setsize={total}
+      aria-labelledby={`${optionId}-t ${optionId}-k`}
+      aria-describedby={`${optionId}-d`}
       className="pp-row"
       data-selected={selected || undefined}
       data-key={item.key}
@@ -1163,9 +1204,13 @@ function ListItem({
     >
       <KindIcon kind={k} />
       <span className="pp-row-text">
-        <span className="pp-row-title">{titleText}</span>
-        <span className="pp-row-desc">
-          <span className="pp-sr">{t(`library.prompts.kind.${kindGroup(k)}`)}. </span>
+        <span className="pp-row-title" id={`${optionId}-t`}>
+          {titleText}
+        </span>
+        <span className="pp-sr" id={`${optionId}-k`}>
+          {groupLabel ? `, ${t(`library.prompts.kind.${kindGroup(k)}`)}, ${groupLabel}` : `, ${t(`library.prompts.kind.${kindGroup(k)}`)}`}
+        </span>
+        <span className="pp-row-desc" id={`${optionId}-d`}>
           {why && <span className="pp-row-why">{why} · </span>}
           {desc}
         </span>
@@ -1252,6 +1297,7 @@ function Pane(p: {
     el.addEventListener("scroll", on);
     return () => el.removeEventListener("scroll", on);
   }, [p.paneRef]);
+  const fillId = useId();
   const isMine = selected.type === "mine";
   const hit = selected.type === "hit" ? selected.hit : null;
   const k = p.kind ?? "prompt";
@@ -1288,8 +1334,8 @@ function Pane(p: {
       <div className="pp-pane-body">
         {loadingBody && <p className="pp-muted">{t("library.prompts.loadingEntry")}</p>}
         {args.length > 0 && !draft.editing && (
-          <section className="pp-sec" aria-labelledby="pp-fill-h">
-            <h4 id="pp-fill-h">
+          <section className="pp-sec" aria-labelledby={fillId}>
+            <h4 id={fillId}>
               {t("library.prompts.fillIn")}
               <span className="pp-hint">
                 {args.some((a) => a.required && a.default === undefined)
@@ -1414,28 +1460,34 @@ function ArgField({ arg, draft, invalid, onChange }: { arg: EntryArg; draft: Dra
     draft.values = { ...draft.values, [arg.name]: v };
     onChange();
   };
+  const describedBy = [invalid && `${id}-need`, arg.description && `${id}-help`].filter(Boolean).join(" ") || undefined;
+  const labelId = `${id}-label`;
   let control: ReactNode;
   if (arg.type === "enum" && Array.isArray(arg.enum)) {
     const options: SelectOption[] = arg.enum.map((o) => ({ value: String(o), label: String(o) }));
-    control = <Select id={id} options={options} value={value || null} onChange={set} placeholder={t("library.prompts.choose")} invalid={invalid} aria-describedby={`${id}-help`} />;
+    control = <Select id={id} options={options} value={value || null} onChange={set} placeholder={t("library.prompts.choose")} invalid={invalid} aria-labelledby={labelId} aria-describedby={describedBy} />;
   } else if (arg.type === "boolean") {
     const options: SelectOption[] = [
       { value: "true", label: t("library.prompts.yes") },
       { value: "false", label: t("library.prompts.no") },
     ];
-    control = <Select id={id} options={options} value={value || null} onChange={set} placeholder={t("library.prompts.choose")} invalid={invalid} aria-describedby={`${id}-help`} />;
+    control = <Select id={id} options={options} value={value || null} onChange={set} placeholder={t("library.prompts.choose")} invalid={invalid} aria-labelledby={labelId} aria-describedby={describedBy} />;
   } else if (arg.type === "text") {
-    control = <Textarea id={id} rows={2} value={value} onChange={(e) => set(e.target.value)} invalid={invalid} aria-describedby={`${id}-help`} />;
+    control = <Textarea id={id} rows={2} value={value} onChange={(e) => set(e.target.value)} invalid={invalid} aria-describedby={describedBy} aria-required={req} />;
   } else {
-    control = <Input id={id} value={value} onChange={(e) => set(e.target.value)} invalid={invalid} aria-describedby={`${id}-help`} inputMode={arg.type === "number" ? "numeric" : undefined} />;
+    control = <Input id={id} value={value} onChange={(e) => set(e.target.value)} invalid={invalid} aria-describedby={describedBy} aria-required={req} inputMode={arg.type === "number" ? "numeric" : undefined} />;
   }
   return (
     <div className="pp-field" data-arg={arg.name} data-invalid={invalid || undefined}>
-      <label htmlFor={id}>
+      <label id={labelId} htmlFor={id}>
         {humanize(arg.name)} <small>{req ? t("library.prompts.required") : t("library.prompts.optional")}</small>
       </label>
       {control}
-      {invalid && <span className="pp-need">{t("library.prompts.needed")}</span>}
+      {invalid && (
+        <span className="pp-need" id={`${id}-need`}>
+          {t("library.prompts.needed")}
+        </span>
+      )}
       {arg.description && (
         <span className="pp-help" id={`${id}-help`}>
           {arg.description}
@@ -1495,9 +1547,12 @@ function Modifiers({
       </h4>
       <div className="pp-mods">
         <div className="pp-field">
-          <label htmlFor={pid}>{t("library.prompts.actAs")}</label>
+          <label id={`${pid}-label`} htmlFor={pid}>
+            {t("library.prompts.actAs")}
+          </label>
           <Select
             id={pid}
+            aria-labelledby={`${pid}-label`}
             options={personaOptions}
             value={draft.persona}
             onChange={(v) => {
@@ -1512,9 +1567,12 @@ function Modifiers({
         </div>
         {!launcher && (
           <div className="pp-field">
-            <label htmlFor={sid}>{t("library.prompts.answerStyle")}</label>
+            <label id={`${sid}-label`} htmlFor={sid}>
+              {t("library.prompts.answerStyle")}
+            </label>
             <Select
               id={sid}
+              aria-labelledby={`${sid}-label`}
               options={styleOptions}
               value={draft.style}
               onChange={(v) => {
@@ -1530,8 +1588,10 @@ function Modifiers({
         )}
         {!launcher && draft.style && (
           <div className="pp-field">
-            <label htmlFor={lid}>{t("library.prompts.strength")}</label>
-            <Select id={lid} options={levelOptions(t)} value={String(draft.level)} onChange={(v) => { draft.level = Number(v); onChange(); }} />
+            <label id={`${lid}-label`} htmlFor={lid}>
+              {t("library.prompts.strength")}
+            </label>
+            <Select id={lid} aria-labelledby={`${lid}-label`} options={levelOptions(t)} value={String(draft.level)} onChange={(v) => { draft.level = Number(v); onChange(); }} />
           </div>
         )}
       </div>
@@ -1549,8 +1609,10 @@ function LevelField({ draft, onChange }: { draft: Draft; onChange: () => void })
   return (
     <section className="pp-sec">
       <div className="pp-field pp-field--narrow">
-        <label htmlFor={id}>{t("library.prompts.strength")}</label>
-        <Select id={id} options={levelOptions(t)} value={String(draft.level)} onChange={(v) => { draft.level = Number(v); onChange(); }} />
+        <label id={`${id}-label`} htmlFor={id}>
+          {t("library.prompts.strength")}
+        </label>
+        <Select id={id} aria-labelledby={`${id}-label`} options={levelOptions(t)} value={String(draft.level)} onChange={(v) => { draft.level = Number(v); onChange(); }} />
       </div>
     </section>
   );
@@ -1578,11 +1640,12 @@ function Receives({
   blanks: number;
 }) {
   const { t } = useI18n();
+  const recvId = useId();
   const sections = useMemo(() => readableSections(text), [text]);
   const folds = plain.length > 800 || plain.split("\n").length > 3;
   return (
-    <section className="pp-sec" aria-labelledby="pp-recv-h">
-      <h4 id="pp-recv-h">
+    <section className="pp-sec" aria-labelledby={recvId}>
+      <h4 id={recvId}>
         {t("library.prompts.receives")}
         <span className="pp-hint">{blanks ? t("library.prompts.receivesBlanks") : t("library.prompts.receivesYours")}</span>
       </h4>

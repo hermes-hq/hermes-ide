@@ -233,6 +233,7 @@ export const libraryZhCN: TranslationMessages = {
   "library.prompts.placeholderLauncher": "搜索适合此任务的提示词",
   "library.prompts.filtersLabel": "显示",
   "library.prompts.resultsLabel": "提示词",
+  "library.prompts.resultsCount": "列出的提示词：{count}",
   "library.prompts.filter.all": "全部",
   "library.prompts.filter.mine": "我的提示词",
   "library.prompts.filter.pinned": "已固定",

@@ -20,6 +20,7 @@ import type { RoleDefinition } from "../lib/roles";
 import type { StyleDefinition } from "../lib/styles";
 import type { PromptBundle } from "../lib/promptBundle";
 import type { EntryArg } from "./types";
+import { savedArgs } from "./promptPicker";
 
 export const MY_PROMPTS_KEY = "my_prompts";
 
@@ -108,12 +109,16 @@ export function migrateLegacy(data: LegacyData, templateText: (tpl: PromptTempla
   const out: MyPrompt[] = [];
   for (const tpl of data.templates) {
     if (!tpl || typeof tpl.id !== "string") continue;
+    const text = templateText(tpl);
+    // A {{name}} in a 2.0 template becomes a blank asked for each time.
+    const args = savedArgs(text, []);
     out.push({
       id: tpl.id,
       kind: "prompt",
       title: tpl.name || tpl.id,
       description: tpl.description ?? "",
-      text: templateText(tpl),
+      text,
+      ...(args.length ? { args } : {}),
       ...(tpl.group ? { folder: tpl.group } : {}),
       ...(pinned.has(tpl.id) ? { pinned: true } : {}),
       ...(sourceOf(tpl) ? { from: sourceOf(tpl) } : {}),

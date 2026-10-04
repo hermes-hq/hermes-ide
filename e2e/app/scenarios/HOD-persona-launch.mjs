@@ -47,7 +47,7 @@ async function pickFromLibrary(bridge, query, id, args = {}) {
   await bridge.clickWhenReady(`return e2e.first('[data-testid="prompt-picker"]') ? true : e2e.click(e2e.must(e2e.first(".task-launcher-from-library"), "Prompts"));`);
   await bridge.waitFor("Prompts", `return !!e2e.first('[data-testid="prompt-picker"][data-context="launcher"] .pp-input');`, { timeoutMs: 20_000 });
   await typeInto(bridge, ".pp-input", query);
-  await bridge.waitFor(`${id} among the results`, `return !!e2e.first('.pp-row[data-entry="${id}"]') && e2e.first(".pp-list")?.getAttribute("aria-busy") !== "true";`, { timeoutMs: 20_000 });
+  await bridge.waitFor(`${id} among the results`, `return !!e2e.first('.pp-row[data-entry="${id}"]') && e2e.first(".pp-list")?.getAttribute("data-busy") !== "true";`, { timeoutMs: 20_000 });
   // The list may still re-render once for the typed query: click until the entry is the chosen one.
   await bridge.waitFor(`${id} chosen`, `
     if (e2e.first(".pp-pane-inner")?.getAttribute("data-entry") === "${id}") return true;

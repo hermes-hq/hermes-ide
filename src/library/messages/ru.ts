@@ -233,6 +233,7 @@ export const libraryRu: TranslationMessages = {
   "library.prompts.placeholderLauncher": "Поиск промптов для этой задачи",
   "library.prompts.filtersLabel": "Показать",
   "library.prompts.resultsLabel": "Промпты",
+  "library.prompts.resultsCount": "Промптов в списке: {count}",
   "library.prompts.filter.all": "Все",
   "library.prompts.filter.mine": "Мои промпты",
   "library.prompts.filter.pinned": "Закреплённые",

@@ -197,7 +197,7 @@
 }
 
 .pp-row:hover {
-  background: var(--quiet-hover-bg);
+  background: color-mix(in srgb, var(--text-0) 6%, transparent);
 }
 
 .pp-row[data-selected] {
@@ -400,7 +400,7 @@
 }
 
 .pp-kind-name[data-kind="persona"] {
-  color: var(--violet);
+  color: color-mix(in srgb, var(--violet) 70%, var(--text-0));
 }
 
 .pp-kind-name[data-kind="style"] {
@@ -600,7 +600,7 @@
 
 .pp-blank {
   padding: 0 var(--space-1);
-  border: var(--control-border-width) dashed var(--chip-selected-border);
+  border: var(--control-border-width) dashed var(--primary-bg);
   border-radius: var(--radius-xs);
   background: transparent;
   color: var(--chip-selected-fg);
@@ -707,12 +707,20 @@
 
 @media (max-width: 47.5em) {
   .pp {
-    height: 92vh;
+    height: auto;
+    max-height: 92vh;
+    overflow-y: auto;
   }
 
   .pp-body {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: calc(var(--space-1) * 60) minmax(0, 1fr);
+    grid-template-rows: minmax(calc(var(--space-1) * 30), 40vh) auto;
+  }
+
+  .pp-acts {
+    flex: 1 1 auto;
+    flex-wrap: wrap;
+    justify-content: flex-end;
   }
 
   .pp-list {

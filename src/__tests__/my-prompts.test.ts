@@ -36,7 +36,7 @@ const TEMPLATES = [
     name: "Ship checklist",
     category: "planning",
     group: "Release",
-    fields: { task: "Check the release", scope: "", constraints: "No new deps", roleIds: ["custom-role-1"], styleSelections: [{ id: "concise", level: 3 }], style: "" },
+    fields: { task: "Check the release {{version}}", scope: "", constraints: "No new deps", roleIds: ["custom-role-1"], styleSelections: [{ id: "concise", level: 3 }], style: "" },
     recommendedRoles: [],
     recommendedStyles: [],
     builtIn: false,
@@ -70,6 +70,8 @@ describe("migration from 2.0", () => {
     // The built-in "concise" style is not readable from the library here: its 2.0 text stands in.
     expect(ship.text).toMatch(/\*\*Style:\*\* \S/);
     expect(ship.folder).toBe("Release");
+    expect(ship.args).toEqual([{ name: "version", description: "", type: "text", required: true }]);
+    expect(list[1].args).toBeUndefined();
     expect(ship.pinned).toBe(true);
     expect(list[1].text).toContain("Old role");
     expect(list[3].levels).toEqual(["a", "b", "c", "d", "e"]);

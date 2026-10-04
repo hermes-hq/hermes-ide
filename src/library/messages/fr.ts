@@ -233,6 +233,7 @@ export const libraryFr: TranslationMessages = {
   "library.prompts.placeholderLauncher": "Rechercher des prompts pour cette tâche",
   "library.prompts.filtersLabel": "Afficher",
   "library.prompts.resultsLabel": "Prompts",
+  "library.prompts.resultsCount": "Prompts listés : {count}",
   "library.prompts.filter.all": "Tous",
   "library.prompts.filter.mine": "Mes prompts",
   "library.prompts.filter.pinned": "Épinglés",

@@ -233,6 +233,7 @@ export const libraryJa: TranslationMessages = {
   "library.prompts.placeholderLauncher": "このタスク用のプロンプトを検索",
   "library.prompts.filtersLabel": "表示",
   "library.prompts.resultsLabel": "プロンプト",
+  "library.prompts.resultsCount": "表示中のプロンプト: {count}",
   "library.prompts.filter.all": "すべて",
   "library.prompts.filter.mine": "マイプロンプト",
   "library.prompts.filter.pinned": "ピン留め",

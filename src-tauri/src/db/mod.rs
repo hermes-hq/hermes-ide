@@ -2021,7 +2021,10 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "onboarding_completed",
     "last_seen_version",
     "suppress_whats_new",
-    // Prompt composer
+    // Prompts: Mine (the person's own prompts) and which 2.0 ids it took in
+    "my_prompts",
+    "my_prompts_migrated",
+    // The 2.0 prompt composer (read by the migration into Mine, never written)
     "prompt_templates",
     "pinned_templates",
     "template_groups",

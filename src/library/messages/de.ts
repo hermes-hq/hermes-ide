@@ -233,6 +233,7 @@ export const libraryDe: TranslationMessages = {
   "library.prompts.placeholderLauncher": "Prompts für diese Aufgabe durchsuchen",
   "library.prompts.filtersLabel": "Anzeigen",
   "library.prompts.resultsLabel": "Prompts",
+  "library.prompts.resultsCount": "Aufgelistete Prompts: {count}",
   "library.prompts.filter.all": "Alle",
   "library.prompts.filter.mine": "Meine Prompts",
   "library.prompts.filter.pinned": "Angeheftet",
