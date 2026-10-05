@@ -178,7 +178,7 @@
 // the Hermes environment it saw, the settings file's contents, which hooks
 // ran, how it ended) when HERMES_FAKE_DIR is set.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
@@ -545,7 +545,14 @@ if (process.stdin.isTTY) {
 	// Breadcrumbs for a launch the shell reported "Stopped" (UI-chrome, macOS
 	// CI, once): a record that ends at "raw-mode" stopped in this call, which
 	// changes the terminal's settings (SIGTTOU when not in the foreground).
-	note("raw-mode");
+	// With this process and its parent's process groups and the terminal's
+	// foreground group (ps: pid ppid pgid tpgid stat command).
+	let ps = null;
+	if (RECORD_DIR && process.platform !== "win32") {
+		const r = spawnSync("ps", ["-o", "pid=,ppid=,pgid=,tpgid=,stat=,comm=", "-p", `${process.pid},${process.ppid}`], { encoding: "utf8", timeout: 2000 });
+		ps = (r.stdout ?? "").trim().split("\n").map((l) => l.trim().replace(/\s+/g, " "));
+	}
+	note("raw-mode", ps ? { ps } : {});
 	process.stdin.setRawMode(true);
 	note("raw-mode-set");
 }
