@@ -99,7 +99,12 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, apps, onCleanup }) => {
   log(`  shell ${shell}; projects: ${attached.length}`);
   await menu(bridge, "edit.find");
   await bridge.waitFor("the Search panel", `return !!e2e.first(".search-panel");`);
-  await sleep(500);
+  // The panel follows the new shell once it is the active session, and while
+  // its projects are read it says nothing and keeps the field on: wait for
+  // the verdict rather than a fixed time.
+  await bridge
+    .waitFor("the no-project note", `return !!e2e.first(".search-no-project");`, { timeoutMs: 10_000 })
+    .catch(() => null);
   s = await searchState(bridge);
   log(`  ${JSON.stringify(s)}`);
   check(s.hint === "This session has no project. Add one to search its files.", `a session without a project says so ("${s.hint}")`);
