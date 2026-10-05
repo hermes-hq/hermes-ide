@@ -18,9 +18,24 @@ const MAX_TRANSCRIPT_BYTES: u64 = 8 * 1024 * 1024;
 
 /// Claude Code's configuration folder: `CLAUDE_CONFIG_DIR`, else `~/.claude`.
 fn claude_config_dir() -> Option<PathBuf> {
-    match std::env::var_os("CLAUDE_CONFIG_DIR") {
+    config_dir_from(std::env::var_os("CLAUDE_CONFIG_DIR"), dirs::home_dir())
+}
+
+fn config_dir_from(
+    configured: Option<std::ffi::OsString>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    match configured {
         Some(dir) if !dir.is_empty() => Some(PathBuf::from(dir)),
-        _ => dirs::home_dir().map(|h| h.join(".claude")),
+        _ => home.map(|h| h.join(".claude")),
+    }
+}
+
+/// The earlier conversation of `session_id` from the transcripts under `projects`.
+fn history_in(projects: &Path, working_dir: &str, session_id: &str) -> Result<Vec<Value>, String> {
+    match find_transcript(projects, working_dir, session_id) {
+        Some(path) => read_history(&path, MAX_TRANSCRIPT_BYTES).map_err(|e| e.to_string()),
+        None => Ok(Vec::new()),
     }
 }
 
@@ -197,14 +212,9 @@ pub async fn agent_history(
     working_dir: String,
     claude_session_id: String,
 ) -> Result<Vec<Value>, String> {
-    tokio::task::spawn_blocking(move || {
-        let Some(projects) = claude_config_dir().map(|d| d.join("projects")) else {
-            return Ok(Vec::new());
-        };
-        match find_transcript(&projects, &working_dir, &claude_session_id) {
-            Some(path) => read_history(&path, MAX_TRANSCRIPT_BYTES).map_err(|e| e.to_string()),
-            None => Ok(Vec::new()),
-        }
+    tokio::task::spawn_blocking(move || match claude_config_dir() {
+        Some(config) => history_in(&config.join("projects"), &working_dir, &claude_session_id),
+        None => Ok(Vec::new()),
     })
     .await
     .map_err(|e| e.to_string())?
@@ -329,5 +339,46 @@ mod tests {
             find_transcript(&projects.path().join("missing"), "/work/greet", ID),
             None
         );
+    }
+
+    #[test]
+    fn claude_code_s_folder_is_its_setting_or_the_home_one() {
+        let home = Some(PathBuf::from("/home/me"));
+        assert_eq!(
+            config_dir_from(Some("/profiles/work".into()), home.clone()),
+            Some(PathBuf::from("/profiles/work"))
+        );
+        assert_eq!(
+            config_dir_from(Some("".into()), home.clone()),
+            Some(PathBuf::from("/home/me").join(".claude"))
+        );
+        assert_eq!(
+            config_dir_from(None, home),
+            Some(PathBuf::from("/home/me").join(".claude"))
+        );
+        assert_eq!(config_dir_from(None, None), None);
+    }
+
+    #[test]
+    fn a_session_s_history_or_nothing() {
+        let projects = tempfile::tempdir().unwrap();
+        let folder = projects
+            .path()
+            .join(crate::transcript::claude_project_dir_name("/work/greet"));
+        fs::create_dir_all(&folder).unwrap();
+        fs::write(folder.join(format!("{ID}.jsonl")), sample()).unwrap();
+        assert_eq!(
+            history_in(projects.path(), "/work/greet", ID)
+                .unwrap()
+                .len(),
+            5
+        );
+        assert!(history_in(
+            projects.path(),
+            "/work/greet",
+            "99999999-0000-0000-0000-000000000000"
+        )
+        .unwrap()
+        .is_empty());
     }
 }
