@@ -25,6 +25,7 @@
 // Evidence (log + screenshots) goes to HERMES_E2E_EVIDENCE, or
 // <out dir>/evidence/F06-custom-agent.
 
+import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
@@ -87,6 +88,30 @@ function launch(run, { first = false } = {}) {
   return onWindows
     ? launchApp({ runDir, log, home: "real", resetData: first })
     : launchApp({ runDir, log, home: "private", homeDir });
+}
+
+/**
+ * When the fake agent's banner never shows: the processes under the app and
+ * its session host (pid ppid pgid tpgid stat command), so a launch the shell
+ * stopped (STAT T, its group not the terminal's foreground group TPGID) or
+ * one still waiting shows where it is.
+ */
+function describeLaunch(appPid) {
+  if (onWindows) return;
+  try {
+    const rows = execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid=,tpgid=,stat=,command="], { encoding: "utf8" }).split("\n");
+    const cols = rows.map((r) => r.trim().split(/\s+/)).filter((c) => c.length > 5);
+    const parent = new Map(cols.map((c) => [c[0], c[1]]));
+    const roots = new Set([String(appPid), ...cols.filter((c) => c.slice(5).join(" ").includes(homeDir)).map((c) => c[0])]);
+    const underApp = (pid) => {
+      for (let p = pid, hops = 0; p && p !== "0" && p !== "1" && hops < 50; p = parent.get(p), hops++) if (roots.has(p)) return true;
+      return false;
+    };
+    log("  processes under the app (pid ppid pgid tpgid stat command):");
+    for (const c of cols) if (underApp(c[0])) log(`    ${c.join(" ").slice(0, 160)}`);
+  } catch (e) {
+    log(`  (ps failed: ${e.message})`);
+  }
 }
 
 async function dismissWhatsNew(bridge) {
@@ -264,7 +289,10 @@ try {
 
   log("step 5: the fake agent starts in the session's terminal");
   const banner = new RegExp(`^FAKE-AGENT READY ${MARKER}$`);
-  const { lines } = await bridge.waitForTerminal(sessionId, banner, { timeoutMs: 60_000 });
+  const { lines } = await bridge.waitForTerminal(sessionId, banner, { timeoutMs: 60_000 }).catch((e) => {
+    describeLaunch(app.child.pid);
+    throw e;
+  });
   assert(lines.some((l) => banner.test(l.trim())), `the terminal shows the fake agent's banner`);
   log("  terminal content:");
   for (const l of lines.slice(-8)) log(`    | ${l}`);

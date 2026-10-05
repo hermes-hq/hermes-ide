@@ -707,6 +707,75 @@ struct AgentLaunch {
     watch: Option<crate::pty::launch::SignalWatch>,
 }
 
+/// How long an agent's launch line waits for the terminal's real size.
+/// The pane in view measures its terminal within a few frames of the
+/// session's creation; a session nobody looks at has no pane and starts
+/// after this.
+const LAUNCH_WAITS_FOR_SIZE: std::time::Duration = std::time::Duration::from_secs(2);
+
+/// Type the agent's launch line, once the terminal has its real size.
+///
+/// The PTY opens at a size the frontend estimates; the pane then measures
+/// the real one, usually just as the shell shows its first prompt, which is
+/// when the launch line used to be typed. The resize's SIGWINCH then reached
+/// bash while its line editor was accepting the line, and it redrew the
+/// prompt and the line over the newline it had printed (the agent's first
+/// output started at the end of the command). Waiting for the size first
+/// puts the signal before the line, where the shell handles it before
+/// reading the line.
+fn type_agent_launch(
+    app: &AppHandle,
+    session: &Arc<StdMutex<Session>>,
+    analyzer: &Arc<StdMutex<OutputAnalyzer>>,
+    writer: &Arc<StdMutex<Box<dyn Write + Send>>>,
+    sized: &std::sync::atomic::AtomicBool,
+    watch_not_found: bool,
+) {
+    crate::pty::wait_until(sized, LAUNCH_WAITS_FOR_SIZE);
+    let gone = session.lock().map_or(true, |s| {
+        matches!(
+            s.phase,
+            SessionPhase::Destroyed | SessionPhase::Disconnected
+        )
+    });
+    if gone {
+        return;
+    }
+    let Some(launch) = resolve_agent_launch(app, session) else {
+        return;
+    };
+    if let Ok(mut a) = analyzer.lock() {
+        // "command not found" detection: scan the next 10 lines (only for
+        // a launch at the detected prompt, as before)
+        if watch_not_found {
+            a.ai_launching_provider = Some(launch.provider.clone());
+            a.ai_launch_check_remaining = 10;
+        }
+        // Mark context as injected if it was baked into the launch command
+        if launch.context_in_args {
+            a.context_injected = true;
+        }
+    }
+    // The phase before the line: this runs off the reader thread, which
+    // moves the phase on (Busy) as soon as the agent prints, and a later
+    // LaunchingAgent would undo that (the turn ledger then misses the turn).
+    if let Ok(mut s) = session.lock() {
+        if launch.context_in_args {
+            s.context_injected = true;
+        }
+        s.phase = SessionPhase::LaunchingAgent;
+        let update = SessionUpdate::from(&*s);
+        let _ = app.emit("session-updated", &update);
+    }
+    if let Ok(mut w) = writer.lock() {
+        let _ = w.write_all(format!("{}\r", launch.cmd).as_bytes());
+        let _ = w.flush();
+    }
+    if let Some(watch) = launch.watch {
+        crate::pty::launch::watch_signals(app.clone(), Arc::clone(session), watch);
+    }
+}
+
 /// Resolve the launch line once the shell is ready: through the bundled `hi`
 /// helper when the `launchHelper` flag is on (see `launch.rs`), else the
 /// vendor command typed as before. None when the session has no agent, or
@@ -1507,6 +1576,10 @@ pub fn create_session(
         .map_err(|e| format!("Failed to clone reader: {}", e))?;
     let event_session_id = session_id.clone();
     let app_clone = app.clone();
+    // Set once the frontend measured this terminal (see type_agent_launch).
+    let sized = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let sized_for_reader = Arc::clone(&sized);
+    let sized_for_silence = Arc::clone(&sized);
 
     thread::spawn(move || {
         // Wrap the reader loop in catch_unwind so that a panic inside the
@@ -1664,39 +1737,21 @@ pub fn create_session(
                                 }
                             }
 
-                            // Auto-launch AI agent when shell is ready
+                            // Auto-launch AI agent when shell is ready: typed
+                            // once the terminal has its real size (see
+                            // type_agent_launch), off this thread.
                             if a.pending_ai_launch {
                                 a.pending_ai_launch = false;
-                                if let Some(launch) =
-                                    resolve_agent_launch(&app_clone, &session_clone)
-                                {
-                                    // Set up "command not found" detection window
-                                    a.ai_launching_provider = Some(launch.provider.clone());
-                                    a.ai_launch_check_remaining = 10; // scan next 10 lines
-                                    if let Ok(mut w) = writer_for_reader.lock() {
-                                        let _ = w.write_all(format!("{}\r", launch.cmd).as_bytes());
-                                        let _ = w.flush();
-                                    }
-                                    // Mark context as injected if it was baked into the launch command
-                                    if launch.context_in_args {
-                                        a.context_injected = true;
-                                    }
-                                    if let Ok(mut s) = session_clone.lock() {
-                                        if launch.context_in_args {
-                                            s.context_injected = true;
-                                        }
-                                        s.phase = SessionPhase::LaunchingAgent;
-                                        let update = SessionUpdate::from(&*s);
-                                        let _ = app_clone.emit("session-updated", &update);
-                                    }
-                                    if let Some(watch) = launch.watch {
-                                        crate::pty::launch::watch_signals(
-                                            app_clone.clone(),
-                                            Arc::clone(&session_clone),
-                                            watch,
-                                        );
-                                    }
-                                }
+                                let app = app_clone.clone();
+                                let session = Arc::clone(&session_clone);
+                                let analyzer = Arc::clone(&analyzer_clone);
+                                let writer = Arc::clone(&writer_for_reader);
+                                let sized = Arc::clone(&sized_for_reader);
+                                thread::spawn(move || {
+                                    type_agent_launch(
+                                        &app, &session, &analyzer, &writer, &sized, true,
+                                    )
+                                });
                             }
 
                             // Emit event if AI CLI was not found
@@ -1888,33 +1943,14 @@ pub fn create_session(
 
                     // Fallback auto-launch
                     if launch_info.is_some() {
-                        if let Some(launch) = resolve_agent_launch(&app_silence, &session_silence) {
-                            if let Ok(mut w) = writer_for_silence.lock() {
-                                let _ = w.write_all(format!("{}\r", launch.cmd).as_bytes());
-                                let _ = w.flush();
-                            }
-                            // Update session state — need analyzer lock for context_injected
-                            if launch.context_in_args {
-                                if let Ok(mut a) = analyzer_silence.lock() {
-                                    a.context_injected = true;
-                                }
-                            }
-                            if let Ok(mut s) = session_silence.lock() {
-                                if launch.context_in_args {
-                                    s.context_injected = true;
-                                }
-                                s.phase = SessionPhase::LaunchingAgent;
-                                let update = SessionUpdate::from(&*s);
-                                let _ = app_silence.emit("session-updated", &update);
-                            }
-                            if let Some(watch) = launch.watch {
-                                crate::pty::launch::watch_signals(
-                                    app_silence.clone(),
-                                    Arc::clone(&session_silence),
-                                    watch,
-                                );
-                            }
-                        }
+                        type_agent_launch(
+                            &app_silence,
+                            &session_silence,
+                            &analyzer_silence,
+                            &writer_for_silence,
+                            &sized_for_silence,
+                            false,
+                        );
                     }
                 }
             }
@@ -1966,17 +2002,24 @@ pub fn create_session(
         update
     };
 
-    let pty_session = PtySession {
+    let mut pty_session = PtySession {
         transport,
         writer,
         session: session_arc,
         analyzer,
         shell_integration,
         hermes_suggestions: disable_native_suggestions,
+        size: (pty_rows, pty_cols),
+        sized,
     };
     // Typing and a resize that arrived while it was being opened.
     if let Some((rows, cols)) = opened.size {
-        pty_session.transport.resize(rows, cols).ok();
+        if pty_session.transport.resize(rows, cols).is_ok() {
+            pty_session.size = (rows, cols);
+        }
+        pty_session
+            .sized
+            .store(true, std::sync::atomic::Ordering::SeqCst);
     }
     if !opened.input.is_empty() {
         if let Ok(mut w) = pty_session.writer.lock() {
@@ -2493,36 +2536,13 @@ pub fn resize_session(
     {
         return Ok(());
     }
+    if !mgr.resize(&session_id, rows, cols)? {
+        return Ok(());
+    }
     let session = mgr
         .sessions
         .get(&session_id)
         .ok_or_else(|| format!("Session {} not found", session_id))?;
-
-    session
-        .transport
-        .resize(rows, cols)
-        .map_err(|e| format!("Resize failed: {}", e))?;
-
-    // Explicitly send SIGWINCH to the child process.
-    // On macOS with posix_spawn(POSIX_SPAWN_SETSID), ioctl(TIOCSWINSZ) on the
-    // master fd does NOT automatically deliver SIGWINCH because the parent
-    // process is in a different session than the child.  tcgetpgrp() returns -1
-    // from the parent's context.  Send SIGWINCH directly to the child's process
-    // group (negative PID = entire process group) so the shell and its children
-    // pick up the new terminal dimensions.
-    #[cfg(unix)]
-    {
-        if let Some(child_pid) = session.transport.pid() {
-            if child_pid > 0 && child_pid <= i32::MAX as u32 {
-                let pgid = child_pid as i32;
-                unsafe {
-                    // Send to the process group (negative PID), not just the shell.
-                    // This ensures child processes (e.g. Claude Code) also receive it.
-                    libc::kill(-(pgid), libc::SIGWINCH);
-                }
-            }
-        }
-    }
 
     // Sync remote tmux dimensions when resizing SSH+tmux sessions.
     // Fire-and-forget on a background thread so resize doesn't block.

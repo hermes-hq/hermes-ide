@@ -42,6 +42,42 @@ pub(crate) struct PtySession {
     /// spawned (the shell's own autosuggestion plugins were disabled then).
     /// Fixed for the session's lifetime — the setting applies to new sessions.
     pub(crate) hermes_suggestions: bool,
+    /// The terminal's size (rows, cols). Asking for the size it already has
+    /// changes nothing: no resize, no SIGWINCH.
+    pub(crate) size: (u16, u16),
+    /// The frontend measured the terminal (its first resize, applied or
+    /// not): the agent's launch line waits for this.
+    pub(crate) sized: Arc<std::sync::atomic::AtomicBool>,
+}
+
+/// Wait until `flag` is set, at most `cap`. True when it was set.
+pub(crate) fn wait_until(flag: &std::sync::atomic::AtomicBool, cap: std::time::Duration) -> bool {
+    let deadline = std::time::Instant::now() + cap;
+    loop {
+        if flag.load(std::sync::atomic::Ordering::SeqCst) {
+            return true;
+        }
+        if std::time::Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
+/// Tell the shell its terminal changed size (SIGWINCH to its process group).
+/// Only for a real change: a SIGWINCH that reaches bash's line editor while
+/// it accepts a line makes it redraw the prompt and the line over the newline
+/// it had printed, and the program's first output then starts at the end of
+/// the command; and each redraw is output the status guesses take for work.
+pub(crate) fn nudge_shell_size(shell_pid: Option<u32>) {
+    #[cfg(unix)]
+    if let Some(pid) = shell_pid.filter(|p| *p > 0 && *p <= i32::MAX as u32) {
+        unsafe {
+            libc::kill(-(pid as i32), libc::SIGWINCH);
+        }
+    }
+    #[cfg(not(unix))]
+    let _ = shell_pid;
 }
 
 pub struct PtyManager {
@@ -113,6 +149,43 @@ impl PtyManager {
             }
             _ => false,
         }
+    }
+
+    /// Resize a session's terminal and tell its shell (true), or do nothing
+    /// when it already has that size (false). The frontend asks for the same
+    /// size again on its own (a pane mounting, the window refitting); each
+    /// such SIGWINCH used to reach the shell, also while it was accepting the
+    /// agent's launch line.
+    pub(crate) fn resize(
+        &mut self,
+        session_id: &str,
+        rows: u16,
+        cols: u16,
+    ) -> Result<bool, String> {
+        let session = self
+            .sessions
+            .get_mut(session_id)
+            .ok_or_else(|| format!("Session {} not found", session_id))?;
+        if session.size == (rows, cols) {
+            session
+                .sized
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            return Ok(false);
+        }
+        session
+            .transport
+            .resize(rows, cols)
+            .map_err(|e| format!("Resize failed: {}", e))?;
+        session.size = (rows, cols);
+        // Explicitly send SIGWINCH to the shell's process group: on macOS with
+        // posix_spawn(POSIX_SPAWN_SETSID), ioctl(TIOCSWINSZ) on the master fd
+        // does not deliver it from this process (it is in another session).
+        nudge_shell_size(session.transport.pid());
+        // Only now: a launch line waiting for the size comes after the signal.
+        session
+            .sized
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(true)
     }
 
     /// A resize for a session that is still being opened: the last one wins.
@@ -419,6 +492,127 @@ mod tests {
     use super::analyzer::OutputAnalyzer;
     use super::models::SessionPhase;
     use super::{Opening, PtyManager};
+
+    // ── resizing ──
+
+    /// A terminal that counts the resizes it gets.
+    struct CountingPty(std::sync::Arc<std::sync::atomic::AtomicUsize>);
+
+    impl super::transport::PtyTransport for CountingPty {
+        fn take_reader(&mut self) -> std::io::Result<Box<dyn std::io::Read + Send>> {
+            Ok(Box::new(std::io::empty()))
+        }
+        fn take_writer(&mut self) -> std::io::Result<Box<dyn std::io::Write + Send>> {
+            Ok(Box::new(std::io::sink()))
+        }
+        fn resize(&self, _rows: u16, _cols: u16) -> std::io::Result<()> {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Ok(())
+        }
+        fn kill(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+        fn wait(&mut self) {}
+        fn pid(&self) -> Option<u32> {
+            // No real process: nothing to signal.
+            None
+        }
+        fn shell_owns_terminal(&self, _shell_pid: u32) -> Option<bool> {
+            None
+        }
+        fn hosted(&self) -> bool {
+            false
+        }
+    }
+
+    #[test]
+    fn asking_for_the_size_a_terminal_already_has_resizes_and_signals_nothing() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        let resizes = Arc::new(AtomicUsize::new(0));
+        let mut mgr = PtyManager::new();
+        mgr.sessions.insert(
+            "s1".to_string(),
+            super::PtySession {
+                transport: Box::new(CountingPty(Arc::clone(&resizes))),
+                writer: Arc::new(Mutex::new(
+                    Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>
+                )),
+                session: Arc::new(Mutex::new(crate::pty::launch::tests::test_session())),
+                analyzer: Arc::new(Mutex::new(OutputAnalyzer::new())),
+                shell_integration: super::shell_integration::ShellIntegration::None,
+                hermes_suggestions: false,
+                size: (33, 107),
+                sized: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            },
+        );
+        // The pane mounting and the shell becoming ready ask again for the
+        // size the terminal was opened with (CI: twice within 200 ms of the
+        // launch line): the shell must not get a SIGWINCH for it.
+        assert_eq!(mgr.resize("s1", 33, 107), Ok(false));
+        assert_eq!(mgr.resize("s1", 33, 107), Ok(false));
+        assert_eq!(resizes.load(Ordering::SeqCst), 0);
+        // A real change is applied once, then remembered.
+        assert_eq!(mgr.resize("s1", 40, 120), Ok(true));
+        assert_eq!(mgr.resize("s1", 40, 120), Ok(false));
+        assert_eq!(resizes.load(Ordering::SeqCst), 1);
+        // And going back is a change again.
+        assert_eq!(mgr.resize("s1", 33, 107), Ok(true));
+        assert_eq!(resizes.load(Ordering::SeqCst), 2);
+        assert!(mgr.resize("nope", 33, 107).is_err());
+    }
+
+    #[test]
+    fn a_resize_marks_the_terminal_measured_only_after_its_signal() {
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::sync::{Arc, Mutex};
+        let sized = Arc::new(AtomicBool::new(false));
+        let mut mgr = PtyManager::new();
+        mgr.sessions.insert(
+            "s1".to_string(),
+            super::PtySession {
+                transport: Box::new(CountingPty(Arc::new(AtomicUsize::new(0)))),
+                writer: Arc::new(Mutex::new(
+                    Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>
+                )),
+                session: Arc::new(Mutex::new(crate::pty::launch::tests::test_session())),
+                analyzer: Arc::new(Mutex::new(OutputAnalyzer::new())),
+                shell_integration: super::shell_integration::ShellIntegration::None,
+                hermes_suggestions: false,
+                size: (24, 80),
+                sized: Arc::clone(&sized),
+            },
+        );
+        // Nobody measured it yet: a launch line waits the whole cap.
+        let t = std::time::Instant::now();
+        assert!(!super::wait_until(
+            &sized,
+            std::time::Duration::from_millis(60)
+        ));
+        assert!(t.elapsed() >= std::time::Duration::from_millis(60));
+        // The pane measures it (a real change): the wait ends at once.
+        assert_eq!(mgr.resize("s1", 33, 107), Ok(true));
+        assert!(sized.load(Ordering::SeqCst));
+        let t = std::time::Instant::now();
+        assert!(super::wait_until(&sized, std::time::Duration::from_secs(5)));
+        assert!(t.elapsed() < std::time::Duration::from_secs(1));
+    }
+
+    #[test]
+    fn a_launch_waiting_for_the_size_goes_as_soon_as_it_is_measured() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        let sized = Arc::new(AtomicBool::new(false));
+        let setter = Arc::clone(&sized);
+        let t = std::time::Instant::now();
+        let h = std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
+            setter.store(true, Ordering::SeqCst);
+        });
+        assert!(super::wait_until(&sized, std::time::Duration::from_secs(5)));
+        assert!(t.elapsed() < std::time::Duration::from_secs(2));
+        h.join().unwrap();
+    }
 
     // ── terminals being opened ──
 

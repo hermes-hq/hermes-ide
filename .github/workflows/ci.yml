@@ -616,7 +616,7 @@ jobs:
           WEBKIT_DISABLE_COMPOSITING_MODE: "1"
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
         run: |
-          dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set keys --shard "$SHARD"
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set keys --shard "$SHARD" ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
 
       - name: Terminal keys with real key presses (Windows)
         if: ${{ !cancelled() && runner.os == 'Windows' }}
@@ -625,7 +625,7 @@ jobs:
           CI: "true"
           HERMES_E2E_OS_KEYS: "1"
         run: |
-          node e2e/app/run.mjs --ci-set keys --shard "$SHARD"
+          node e2e/app/run.mjs --ci-set keys --shard "$SHARD" ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
 
       - name: Terminal keys (macOS)
         if: ${{ !cancelled() && runner.os == 'macOS' }}
@@ -633,7 +633,7 @@ jobs:
         env:
           CI: "true"
         run: |
-          node e2e/app/run.mjs --ci-set keys --shard "$SHARD"
+          node e2e/app/run.mjs --ci-set keys --shard "$SHARD" ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
 
       # N17: fast worktrees. Copy-on-write clones need one volume that can
       # share blocks for both the repo and the app's data: the temp folder on

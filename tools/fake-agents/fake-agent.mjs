@@ -125,6 +125,14 @@ process.on("SIGINT", () => {
 	finish(130);
 });
 
+// Breadcrumb for a launch the shell reported "Stopped" (macOS CI): this
+// process and its shell with their process groups and the terminal's
+// foreground group, right before the first change to the terminal's
+// settings (a process outside the foreground group is stopped there).
+if (process.stdin.isTTY && logFd !== null && process.platform !== "win32") {
+	const ps = spawnSync("ps", ["-o", "pid=,ppid=,pgid=,tpgid=,stat=,comm=", "-p", `${process.pid},${process.ppid}`], { encoding: "utf8", timeout: 2000 });
+	log({ ev: "tty-owner", ps: (ps.stdout ?? "").trim().split("\n").map((l) => l.trim().replace(/\s+/g, " ")) });
+}
 if (process.stdin.isTTY) process.stdin.setRawMode(true);
 process.stdin.on("data", (b) => {
 	const s = b.toString("latin1");

@@ -1166,6 +1166,8 @@ mod tests {
                 )),
                 shell_integration: crate::pty::shell_integration::ShellIntegration::None,
                 hermes_suggestions: false,
+                size: (24, 80),
+                sized: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             },
         );
     }
