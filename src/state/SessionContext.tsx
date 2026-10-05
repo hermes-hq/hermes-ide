@@ -57,7 +57,7 @@ import { runWorktreeRecipes, type CreatedWorktree } from "./worktreeRecipes";
 const BranchConflictDialog = lazyView("BranchConflictDialog", () => import("../components/BranchConflictDialog").then((m) => m.BranchConflictDialog));
 import type { SessionWorktree, WorktreeChanges } from "../types/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
-import { createTerminal, destroy as destroyTerminal, writeScrollback, estimateInitialDimensions } from "../terminal/TerminalPool";
+import { createTerminal, destroy as destroyTerminal, writeScrollback, releaseOutput, estimateInitialDimensions } from "../terminal/TerminalPool";
 import { applyTheme, applyAgentTimelineStyle } from "../utils/themeManager";
 import { restoreWindowState } from "../utils/windowState";
 import { initNotifications, notifyLongRunningDone } from "../utils/notifications";
@@ -1792,8 +1792,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 console.warn("[SessionContext] Failed to read scrollback for", saved.label);
               }
               // Pre-generate ID and set up listener before PTY starts
-              // (same race-prevention as createSession above)
-              await createTerminal(restoreId, saved.color);
+              // (same race-prevention as createSession above). What the new
+              // shell prints is held until the restored scrollback is in.
+              await createTerminal(restoreId, saved.color, { holdOutput: true });
 
               const restoreDims = estimateInitialDimensions();
               // Default missing `mode` to "terminal" so existing 0.6.16 saved
@@ -1835,6 +1836,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 sessionHost: isFeatureFlagEnabled("sessionHost"),
                 parentSessionId: saved.parent_session_id ? (oldToNew.get(saved.parent_session_id) ?? saved.parent_session_id) : null,
               });
+              // The restored scrollback first, then what the new shell has
+              // printed so far — unless the session host replayed the real
+              // output (N20): the terminal then shows everything, live.
+              releaseOutput(restoreId, savedSnapshot && !newSession.reattached ? savedSnapshot : null);
               // Restored at startup: an agent of it already waiting opens the morning view.
               markStartupSession(newSession.id);
 
@@ -1890,13 +1895,6 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 );
               }
               await Promise.all(metaPromises);
-
-              // Restore scrollback from the snapshot read above — unless the
-              // session host replayed the real output (N20): the terminal
-              // already shows everything, live.
-              if (savedSnapshot && !newSession.reattached) {
-                writeScrollback(newSession.id, savedSnapshot);
-              }
 
               dispatch({ type: "SESSION_UPDATED", session: newSession });
               if (newSession.reattached) {

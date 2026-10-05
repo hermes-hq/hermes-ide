@@ -38,6 +38,7 @@ import {
   has,
   clearTerminal,
   writeScrollback,
+  releaseOutput,
   subscribeSuggestions,
   notifySubscribers,
   setSessionPhase,
@@ -124,9 +125,9 @@ export function setupNativeSigintListener(): void {
 
 // ─── Terminal Creation (wires input handler) ─────────────────────────
 
-export async function createTerminal(sessionId: string, color: string): Promise<void> {
+export async function createTerminal(sessionId: string, color: string, opts?: { holdOutput?: boolean }): Promise<void> {
   setupNativeSigintListener(); // idempotent — sets up once
-  return createTerminalCore(sessionId, color, handleTerminalInput);
+  return createTerminalCore(sessionId, color, handleTerminalInput, opts);
 }
 
 // ─── Input Handling & Intelligence ───────────────────────────────────
@@ -783,6 +784,7 @@ export {
   has,
   clearTerminal,
   writeScrollback,
+  releaseOutput,
   subscribeSuggestions,
   setSessionPhase,
   setSessionCwd,

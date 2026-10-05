@@ -69,6 +69,7 @@ vi.mock("../terminal/TerminalPool", () => ({
   createTerminal: vi.fn(async () => {}),
   destroy: vi.fn(),
   writeScrollback: vi.fn(),
+  releaseOutput: vi.fn(),
   estimateInitialDimensions: vi.fn(() => ({ rows: 24, cols: 80 })),
   updateSettings: vi.fn(),
   focusTerminal: vi.fn(),

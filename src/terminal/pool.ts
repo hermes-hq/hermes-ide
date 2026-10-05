@@ -66,6 +66,9 @@ export const pool = new Map<string, PoolEntry>();
 export const suggestionSubscribers = new Map<string, Set<SuggestionCallback>>();
 /** Guard set: sessionIds currently being created (between pool.has check and pool.set) */
 export const creating = new Set<string>();
+/** Output that arrived while a terminal was held (`holdOutput`), in order,
+ *  until releaseOutput writes it. */
+const heldOutput = new Map<string, Uint8Array[]>();
 
 // Track which session is focused (set by attach, cleared by detach/destroy).
 // Used by the native SIGINT handler to send \x03 to the right PTY.
@@ -112,12 +115,16 @@ export async function createTerminal(
   sessionId: string,
   color: string,
   handleTerminalInput: (sessionId: string, data: string) => void,
+  opts: { holdOutput?: boolean } = {},
 ): Promise<void> {
   if (pool.has(sessionId) || creating.has(sessionId)) {
     console.warn(`[TerminalPool] duplicate create for session=${sessionId}`);
     return;
   }
   creating.add(sessionId);
+  // A restored session: what its new shell prints waits until the restored
+  // scrollback is in (releaseOutput), so the history comes first.
+  if (opts.holdOutput) heldOutput.set(sessionId, []);
 
   const themeName = currentSettings.theme || "frosted-dark";
   const theme = THEMES[themeName] || THEMES["frosted-dark"];
@@ -365,7 +372,9 @@ export async function createTerminal(
         const binary = atob(event.payload);
         const bytes = new Uint8Array(binary.length);
         for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-        terminal.write(bytes);
+        const held = heldOutput.get(sessionId);
+        if (held) held.push(bytes);
+        else terminal.write(bytes);
         noteSessionOutput(sessionId, bytes);
       } catch {
         // Corrupted base64 — silently drop to avoid garbled output
@@ -382,6 +391,7 @@ export async function createTerminal(
   } catch (err) {
     // Clean up partial resources on failure
     creating.delete(sessionId);
+    heldOutput.delete(sessionId);
     unlistenOutput?.();
     unlistenExit?.();
     terminal.dispose();
@@ -619,6 +629,7 @@ export function detach(sessionId: string): void {
 
 export function destroy(sessionId: string): void {
   creating.delete(sessionId); // Clean up in case destroy races with create
+  heldOutput.delete(sessionId);
   if (_focusedSessionId === sessionId) _focusedSessionId = null;
   const entry = pool.get(sessionId);
   if (!entry) return;
@@ -678,6 +689,20 @@ export function writeScrollback(sessionId: string, text: string): void {
   if (!entry) return;
   // Write restored scrollback as grey text so it's visually distinct
   entry.terminal.write("\x1b[90m" + text.replace(/\n/g, "\r\n") + "\x1b[0m\r\n\x1b[90m--- session restored ---\x1b[0m\r\n");
+}
+
+/**
+ * End a hold (createTerminal's `holdOutput`): write the restored scrollback
+ * if there is one, then everything the new shell printed meanwhile, in
+ * order. From then on output goes straight to the terminal.
+ */
+export function releaseOutput(sessionId: string, scrollback: string | null): void {
+  const held = heldOutput.get(sessionId) ?? [];
+  heldOutput.delete(sessionId);
+  const entry = pool.get(sessionId);
+  if (!entry) return;
+  if (scrollback) writeScrollback(sessionId, scrollback);
+  for (const bytes of held) entry.terminal.write(bytes);
 }
 
 // ─── Subscription System ─────────────────────────────────────────────
