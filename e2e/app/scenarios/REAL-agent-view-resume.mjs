@@ -57,11 +57,11 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   git("commit", "-q", "-m", "init");
 
   const viewOf = (sid) => `document.querySelector('.agent-session-view[data-session-id="' + CSS.escape(${JSON.stringify(sid)}) + '"]')`;
-  /** The view's messages as [role, text] (role from the author label). */
+  /** The view's text, off-screen messages included (they have no innerText). */
   const messages = (bridge, sid) =>
     bridge.eval(`
       const v = ${viewOf(sid)};
-      return v ? v.innerText : "";`);
+      return v ? v.textContent : "";`);
   const turnOver = (bridge, sid) =>
     bridge.waitFor("the turn to end", `return !!${viewOf(sid)} && !${viewOf(sid)}.querySelector(".agent-session-stop");`, { timeoutMs: 120_000 });
 

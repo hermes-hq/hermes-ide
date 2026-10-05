@@ -144,7 +144,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   await app.bridge.waitFor("the answer after the restart", `return (document.querySelector('.agent-session-view[data-session-id="' + CSS.escape(${JSON.stringify(sid2)}) + '"]')?.innerText || "").includes(${JSON.stringify(`fake reply: ${SECOND}`)});`, { timeoutMs: 30_000 });
   const answeredBy = fakeEvents().filter((e) => e.event === "input" && e.type === "user" && e.pid === restart.pid);
   assert(answeredBy.length === 1, "the message went to the resumed process");
-  const order = await viewText(app.bridge, sid2);
+  // textContent: messages scrolled out of view are not laid out
+  // (content-visibility: auto), and WebKit gives them no innerText.
+  const order = await app.bridge.eval(`return document.querySelector('.agent-session-view[data-session-id="' + CSS.escape(${JSON.stringify(sid2)}) + '"]')?.textContent || "";`);
   const at = (s) => order.indexOf(s);
   assert(at(FIRST) >= 0 && at(`fake reply: ${FIRST}`) > at(FIRST) && at(SECOND) > at(`fake reply: ${FIRST}`) && at(`fake reply: ${SECOND}`) > at(SECOND),
     "the conversation reads in order: the earlier turn, then the new one");
