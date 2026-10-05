@@ -752,9 +752,9 @@ export function setSessionPhase(sessionId: string, phase: string): void {
   // have installed its SIGWINCH handler yet — the signal is lost and the
   // shell keeps the startup COLUMNS value.  Re-sending the resize once the
   // shell is confirmed ready guarantees it picks up the correct terminal
-  // dimensions.  The backend already signals the shell at its first prompt
-  // (before an agent's launch line), and a size the terminal already has
-  // changes nothing, so this only matters when the size changed meanwhile.
+  // dimensions.  A size the terminal already has changes nothing (the
+  // backend sends no SIGWINCH for it), so this only matters when the size
+  // changed meanwhile.
   if (
     phase === "shell_ready" &&
     prevPhase !== "shell_ready" &&

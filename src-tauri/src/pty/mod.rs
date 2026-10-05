@@ -64,12 +64,11 @@ pub(crate) fn wait_until(flag: &std::sync::atomic::AtomicBool, cap: std::time::D
     }
 }
 
-/// Ask the shell to read its terminal size again (SIGWINCH to its process
-/// group). Hermes does this when the shell first shows its prompt, before it
-/// types an agent's launch line, so the signal is handled before the line is
-/// read. A SIGWINCH that reaches bash's line editor while it accepts the line
-/// makes it redraw the prompt and the line over the newline it had printed,
-/// and the agent's first output then starts at the end of the command.
+/// Tell the shell its terminal changed size (SIGWINCH to its process group).
+/// Only for a real change: a SIGWINCH that reaches bash's line editor while
+/// it accepts a line makes it redraw the prompt and the line over the newline
+/// it had printed, and the program's first output then starts at the end of
+/// the command; and each redraw is output the status guesses take for work.
 pub(crate) fn nudge_shell_size(shell_pid: Option<u32>) {
     #[cfg(unix)]
     if let Some(pid) = shell_pid.filter(|p| *p > 0 && *p <= i32::MAX as u32) {

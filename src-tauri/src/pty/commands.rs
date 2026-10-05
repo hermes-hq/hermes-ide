@@ -1576,7 +1576,6 @@ pub fn create_session(
         .map_err(|e| format!("Failed to clone reader: {}", e))?;
     let event_session_id = session_id.clone();
     let app_clone = app.clone();
-    let shell_pid = transport.pid();
     // Set once the frontend measured this terminal (see type_agent_launch).
     let sized = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let sized_for_reader = Arc::clone(&sized);
@@ -1686,10 +1685,6 @@ pub fn create_session(
                             if let Some(new_phase) = a.take_pending_phase() {
                                 if let Ok(mut s) = session_clone.lock() {
                                     if s.phase.can_transition_to(&new_phase) {
-                                        if new_phase == SessionPhase::ShellReady {
-                                            // Before the launch line below.
-                                            crate::pty::nudge_shell_size(shell_pid);
-                                        }
                                         let old_phase = s.phase.clone();
                                         s.phase = new_phase.clone();
                                         s.last_activity_at = now();
@@ -1925,10 +1920,6 @@ pub fn create_session(
                     if let Some(new_phase) = new_phase {
                         if let (Some(metrics), Ok(mut s)) = (metrics, session_silence.lock()) {
                             if s.phase.can_transition_to(&new_phase) {
-                                if new_phase == SessionPhase::ShellReady {
-                                    // Before the fallback launch line below.
-                                    crate::pty::nudge_shell_size(shell_pid);
-                                }
                                 let old_phase = s.phase.clone();
                                 s.phase = new_phase.clone();
                                 s.detected_agent = detected_agent;
