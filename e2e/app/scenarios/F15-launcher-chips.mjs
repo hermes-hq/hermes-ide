@@ -278,7 +278,7 @@ try {
   await bridge.waitFor("the repository's branch in the where chip and the preview", `
     const where = e2e.norm(e2e.first('[data-chip="where"]')?.innerText ?? "");
     const preview = e2e.norm(e2e.first(".task-launcher-command")?.textContent ?? "");
-    return /current checkout · main/.test(where) && /in launcher-repo \(main\)/.test(preview);
+    return /current checkout · main/.test(where) && /in launcher-repo \\(main\\)/.test(preview);
   `, { timeoutMs: 20_000 });
   st = await launcherState(bridge);
   assert(/current checkout · main/.test(st.where) && /in launcher-repo \(main\)/.test(st.preview), `the where chip and the preview say so (${st.where}; ${st.preview})`);
