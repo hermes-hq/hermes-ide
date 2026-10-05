@@ -293,10 +293,13 @@ async function waitForSavedVendorId(bridge, sessionId, vendorId) {
   `, { timeoutMs: 25_000 });
 }
 /** Ctrl-C the way a keyboard sends it: a key-down with the Control modifier. */
-function pressCtrlC(bridge, sessionId) {
+async function pressCtrlC(bridge, sessionId) {
+  // A restored session's terminal exists (terminalIds) before its pane has
+  // mounted it in the page: wait for the terminal's own input element.
+  const input = `document.querySelector('div[data-session-id="' + CSS.escape(${JSON.stringify(sessionId)}) + '"] textarea.xterm-helper-textarea')`;
+  await bridge.waitFor(`the terminal of ${sessionId} in the page`, `return !!${input};`, { timeoutMs: 15_000 });
   return bridge.eval(`
-    const host = document.querySelector('div[data-session-id="' + CSS.escape(${JSON.stringify(sessionId)}) + '"]');
-    const ta = host.querySelector("textarea.xterm-helper-textarea");
+    const ta = ${input};
     const mk = (type) => {
       const ev = new KeyboardEvent(type, { key: "c", code: "KeyC", ctrlKey: true, bubbles: true, cancelable: true, composed: true, view: window });
       Object.defineProperty(ev, "keyCode", { get: () => 67 });
