@@ -729,6 +729,7 @@ fn type_agent_launch(
     analyzer: &Arc<StdMutex<OutputAnalyzer>>,
     writer: &Arc<StdMutex<Box<dyn Write + Send>>>,
     sized: &std::sync::atomic::AtomicBool,
+    watch_not_found: bool,
 ) {
     crate::pty::wait_until(sized, LAUNCH_WAITS_FOR_SIZE);
     let gone = session.lock().map_or(true, |s| {
@@ -744,9 +745,12 @@ fn type_agent_launch(
         return;
     };
     if let Ok(mut a) = analyzer.lock() {
-        // "command not found" detection: scan the next 10 lines
-        a.ai_launching_provider = Some(launch.provider.clone());
-        a.ai_launch_check_remaining = 10;
+        // "command not found" detection: scan the next 10 lines (only for
+        // a launch at the detected prompt, as before)
+        if watch_not_found {
+            a.ai_launching_provider = Some(launch.provider.clone());
+            a.ai_launch_check_remaining = 10;
+        }
         // Mark context as injected if it was baked into the launch command
         if launch.context_in_args {
             a.context_injected = true;
@@ -1746,7 +1750,9 @@ pub fn create_session(
                                 let writer = Arc::clone(&writer_for_reader);
                                 let sized = Arc::clone(&sized_for_reader);
                                 thread::spawn(move || {
-                                    type_agent_launch(&app, &session, &analyzer, &writer, &sized)
+                                    type_agent_launch(
+                                        &app, &session, &analyzer, &writer, &sized, true,
+                                    )
                                 });
                             }
 
@@ -1949,6 +1955,7 @@ pub fn create_session(
                             &analyzer_silence,
                             &writer_for_silence,
                             &sized_for_silence,
+                            false,
                         );
                     }
                 }
