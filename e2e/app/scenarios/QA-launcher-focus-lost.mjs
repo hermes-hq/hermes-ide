@@ -32,8 +32,12 @@ await runLauncherQa("QA-launcher-focus-lost", async ({ bridge, fx, log, check, e
   log("e. ⌘N on the open launcher");
   await bridge.eval(`document.activeElement?.blur(); return true;`);
   await menuAction(bridge, "file.new-session");
-  await settle();
-  check((await focusState(bridge)).task, "⌘N on the open launcher gives the keyboard back to its task field");
+  // The menu event reaches the page and the sheet takes the keyboard on its
+  // next render; on a busy runner that is later than a fixed pause.
+  const taskFocused = await bridge
+    .waitFor("the task field to have the keyboard", `return document.activeElement === e2e.first(".task-launcher-task");`, { timeoutMs: 5_000 })
+    .then(() => true, () => false);
+  check(taskFocused && (await focusState(bridge)).task, "⌘N on the open launcher gives the keyboard back to its task field");
 
   log("   a key on the page itself while the sheet is open");
   await bridge.eval(`document.activeElement?.blur(); document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "x", bubbles: true, cancelable: true })); return true;`);

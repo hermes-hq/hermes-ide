@@ -180,9 +180,17 @@ describe("fake-agent: other scenarios", () => {
 
 	posixIt("resize reports the new size after SIGWINCH", async () => {
 		const p = start(AGENT, ["--scenario", "resize", "--speed", "0"]);
-		await sleep(150);
-		p.kill("SIGWINCH");
-		const r = await p.done;
+		// A resize before the agent waits for one is not remembered (as with
+		// a real terminal), and a busy machine can start the agent late: wait
+		// until it has printed its size, then resize until it answers.
+		await printed(p, "size ");
+		let finished = false;
+		const done = p.done.finally(() => { finished = true; });
+		while (!finished) {
+			p.kill("SIGWINCH");
+			await Promise.race([done, sleep(100)]);
+		}
+		const r = await done;
 		expect(r.code).toBe(0);
 		expect(r.stdout.toString()).toMatch(/^size .+\r\nresized to .+\r\n/);
 	});
