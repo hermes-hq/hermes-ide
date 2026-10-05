@@ -371,11 +371,26 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
   await bridge.waitFor("the current branch to be pre-selected", `
     return !!e2e.first(".session-creator-branch-selected-label");
   `, { timeoutMs: 20_000 });
-  // The wizard opens the row, then closes it once a branch is picked for it.
-  // Open it only while it is closed (a click on an open row shuts it), then
-  // take the New branch tab, until the new-branch form is there.
-  await bridge.waitFor("the new-branch form", `
-    if (e2e.first(".branch-selector-field-input")) return true;
+  // The wizard opens the row and closes it again once it has picked a
+  // branch, an effect that can land after the form was already drawn (Linux
+  // CI found the form, then lost it before typing). So every look takes the
+  // next step from what is on screen, until the wizard holds the new branch:
+  // open the row only while it is closed (a click on an open row shuts it),
+  // take the New branch tab, type the name, press Create & use.
+  await bridge.waitFor(`the wizard to record the new branch "${branch}"`, `
+    const want = ${JSON.stringify(branch)};
+    if (e2e.all(".session-creator-branch-selected-label").some((el) => el.innerText.includes(want))) return true;
+    const input = e2e.first(".branch-selector-field-input");
+    if (input) {
+      if (input.value !== want) {
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(input, want);
+        input.dispatchEvent(new Event("input", { bubbles: true }));
+        return false;
+      }
+      const create = e2e.first(".branch-selector-body .session-creator-actions .branch-selector-create");
+      if (create && !create.disabled) e2e.click(create);
+      return false;
+    }
     const tabs = e2e.all(".branch-selector-tab");
     if (tabs.length === 2) {
       e2e.click(tabs[1]);
@@ -384,16 +399,7 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
     const row = e2e.first(".session-creator-branch-project");
     if (row && !row.classList.contains("expanded")) e2e.click(e2e.must(row.querySelector(".session-creator-branch-project-header"), "the branch row"));
     return false;
-  `, { timeoutMs: 20_000, intervalMs: 250 });
-  await setInput(bridge, ".branch-selector-field-input", branch);
-  await bridge.waitFor("Create & use to become enabled", `
-    const b = e2e.first(".branch-selector-body .session-creator-actions .branch-selector-create");
-    return !!b && !b.disabled;
-  `);
-  await bridge.click(".branch-selector-body .session-creator-actions .branch-selector-create");
-  await bridge.waitFor(`the wizard to record the new branch "${branch}"`, `
-    return e2e.all(".session-creator-branch-selected-label").some((el) => el.innerText.includes(${JSON.stringify(branch)}));
-  `);
+  `, { timeoutMs: 30_000, intervalMs: 250 });
   await bridge.screenshot(join(evidenceDir, `${shotPrefix}-wizard-new-branch.png`));
   const pressed = Date.now();
   await bridge.click(".session-creator-footer-actions .session-creator-btn-primary");
