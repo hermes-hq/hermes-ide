@@ -31,8 +31,6 @@ const ENTRY = "review-ai-generated-code";
 const launchAgent = (bridge, agentId, cwd) =>
   bridge.eval(`return await window.__HERMES_E2E__.launchWithChoice(${JSON.stringify({ agentId, cwd, label: `${agentId} session` })});`, { timeoutMs: 60_000 });
 
-const terminalText = async (bridge, id) => ((await bridge.readTerminal(id)) ?? []).join("\n");
-
 await runLauncherQa(
   NAME,
   async ({ bridge, fx, log, check, assert, evidenceDir }) => {
@@ -85,7 +83,12 @@ await runLauncherQa(
       const sent = rec?.prompts?.[promptsBefore] ?? "";
       log(`  after Enter, ${agent} received ${sent.length} chars: ${JSON.stringify(sent.slice(0, 120))}…`);
       check(sent.trim() === rendered.trim(), `Enter sends it: ${agent}'s prompt is exactly the rendered text`);
-      check((await terminalText(bridge, sessionId)).includes("prompt received"), `${agent} took it as a prompt`);
+      // The fake records the prompt before it prints its answer: wait for the line.
+      const took = await bridge.waitForTerminal(sessionId, /prompt received/, { timeoutMs: 10_000 }).then(
+        () => true,
+        () => false,
+      );
+      check(took, `${agent} took it as a prompt`);
     }
 
     // Each use counted on the device: the entry is on the Continue shelf.

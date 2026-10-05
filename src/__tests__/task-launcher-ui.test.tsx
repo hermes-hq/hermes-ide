@@ -34,6 +34,8 @@ import type { FakeCapabilityCommands } from "./fakes/capabilityCommands";
 const h = vi.hoisted(() => ({
   doctor: [] as DoctorRow[],
   probe: new Map<string, RepoProbe>(),
+  /** While set, the repository probe answers only once it resolves. */
+  probeGate: null as Promise<void> | null,
   disk: { free_bytes: 100 * 1024 ** 3, required_bytes: 10 * 1024 ** 3, below_threshold: false },
   settings: new Map<string, string>(),
   projects: [] as { id: string; name: string; path: string; path_exists: boolean; session_count: number }[],
@@ -44,6 +46,7 @@ vi.mock("@tauri-apps/api/core", () => ({
   invoke: vi.fn(async (cmd: string, args: Record<string, unknown>) => {
     if (cmd === "agent_doctor") return h.doctor;
     if (cmd === "task_repo_probe") {
+      if (h.probeGate) await h.probeGate;
       return h.probe.get(String(args.path)) ?? { git_root: null, branch_exists: false, local_branches: [], worktree_toml: null, current_branch: null };
     }
     if (cmd === "git_disk_status") return h.disk;
@@ -88,6 +91,7 @@ beforeEach(() => {
     [REPO, { git_root: REPO, branch_exists: false, local_branches: ["main", "develop", "feature/inbox"], worktree_toml: 'done_when = ["npm test"]\n', current_branch: "main" }],
     [OTHER, { git_root: OTHER, branch_exists: false, local_branches: ["main"], worktree_toml: null, current_branch: "main" }],
   ]);
+  h.probeGate = null;
   h.disk = { free_bytes: 100 * 1024 ** 3, required_bytes: 10 * 1024 ** 3, below_threshold: false };
   h.settings = new Map();
   h.projects = [
@@ -511,6 +515,38 @@ describe("TaskLauncher: + options", () => {
     await pick("agent", '[data-agent-id="codex"]');
     await expand();
     expect(document.querySelector(".task-launcher-view")).toBeNull();
+  });
+
+  it("keeps a check added the moment the repository's probe lands", async () => {
+    const THIRD = "/fixture-home/third";
+    h.probe.set(THIRD, { git_root: THIRD, branch_exists: false, local_branches: ["main"], worktree_toml: "[[[ not toml", current_branch: "main" });
+    await open();
+    await expand();
+    let release = () => {};
+    h.probeGate = new Promise<void>((r) => {
+      release = r;
+    });
+    fireEvent.click(chip("project"));
+    fireEvent.change(document.querySelector(".task-launcher-repo") as HTMLInputElement, { target: { value: THIRD } });
+    await settle();
+    expect(document.querySelectorAll(".task-launcher-check-input")).toHaveLength(0);
+    // Real scheduling: the probe's render commits, and "+ add check" is
+    // clicked before that render's effects run (as a click can on a busy machine).
+    const actEnv = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+    actEnv.IS_REACT_ACT_ENVIRONMENT = false;
+    try {
+      const mo = new MutationObserver(() => {
+        mo.disconnect();
+        (document.querySelector(".task-launcher-check-add") as HTMLButtonElement).click();
+      });
+      mo.observe(document.querySelector(".task-launcher-checks") as HTMLElement, { childList: true, subtree: true, characterData: true });
+      release();
+      await waitFor(() => expect(document.querySelector(".task-launcher-checks")).toHaveTextContent(/line 1/));
+      await new Promise((r) => setTimeout(r, 100));
+    } finally {
+      actEnv.IS_REACT_ACT_ENVIRONMENT = true;
+    }
+    expect(document.querySelectorAll(".task-launcher-check-input")).toHaveLength(1);
   });
 });
 

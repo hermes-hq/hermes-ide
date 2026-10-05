@@ -543,7 +543,10 @@ try {
   const slowest = Math.max(...allResults.map((r) => r.ms ?? 0));
   assert(slowest < 2000, `the slowest hook took ${slowest} ms`);
 
-  // The strip off: gone from the DOM, the terminal untouched.
+  // The strip off: gone from the DOM, the terminal untouched. The marker's
+  // status can reach the strip before its line is on screen: the content
+  // compared starts once that line is there.
+  await app.bridge.waitForTerminal(s1, /printing the Hermes marker/, { timeoutMs: 10_000 });
   const rowsBefore = await normalizedRows(app.bridge, s1, vendorId1);
   await setStatusStrip(app.bridge, false);
   await app.bridge.waitFor("the strip to disappear", `return !e2e.first('.session-status-strip[data-strip-session="${s1}"]');`);

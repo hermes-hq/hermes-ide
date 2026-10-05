@@ -3,8 +3,8 @@
 // GitHub runs it (`bash -e -o pipefail`), once per shard the workflow's
 // matrix lists and with the SHARD value its env block builds. `node` is a
 // stub that runs the real run.mjs against stand-in scenarios (which pass or
-// fail on demand) and `xvfb-run` a stub that just runs its command, so what
-// is checked is what the steps do on a runner:
+// fail on demand) and `xvfb-run` and `dbus-run-session` stubs that just run
+// their command, so what is checked is what the steps do on a runner:
 //
 //   - together the shards run every scenario exactly once, terminal-echo
 //     as many times as REPEAT says and the fleet scenario (F24) as many
@@ -120,6 +120,14 @@ while [ $# -gt 0 ]; do
     *) break ;;
   esac
 done
+exec "$@"
+`,
+  );
+  // dbus-run-session -- <command...>
+  stub(
+    "dbus-run-session",
+    `#!/bin/sh
+[ "$1" = "--" ] && shift
 exec "$@"
 `,
   );
