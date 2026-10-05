@@ -131,8 +131,13 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
           }
           break;
         case "view.prompt-composer":
-          dispatch({ type: "CLOSE_PALETTE" });
-          dispatch({ type: "OPEN_COMPOSER" });
+          // ⌘J: Prompts. In the launcher it opens the launcher's own; pressed again it closes.
+          if (topOverlay() === "launcher") window.dispatchEvent(new CustomEvent("hermes:launcher-prompts"));
+          else if (topOverlay() === "prompts") closeTopOverlay();
+          else {
+            dispatch({ type: "CLOSE_PALETTE" });
+            dispatch({ type: "OPEN_COMPOSER" });
+          }
           break;
         case "view.process-panel":
           dispatch({ type: "TOGGLE_PROCESS_PANEL" });

@@ -4,6 +4,8 @@ import { ActionTemplate, ActionEvent } from "../state/SessionContext";
 import { sendShortcutCommand } from "../terminal/TerminalPool";
 import { useSession } from "../state/SessionContext";
 import { CommandsPopover } from "./CommandsPopover";
+import { useI18n } from "../i18n/I18nProvider";
+import { shortcutLabel } from "../utils/keymap";
 
 // Default actions per AI provider — shown immediately before agent detection
 const DEFAULT_ACTIONS: Record<string, ActionTemplate[]> = {
@@ -118,6 +120,7 @@ interface ProviderActionsBarProps {
 
 export function ProviderActionsBar({ sessionId, actions, recentActions, aiProvider }: ProviderActionsBarProps) {
   const { dispatch } = useSession();
+  const { t } = useI18n();
   const [popoverOpen, setPopoverOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -182,14 +185,13 @@ export function ProviderActionsBar({ sessionId, actions, recentActions, aiProvid
       {/* Compose button */}
       <button
         className="pab-compose-btn"
-        title="Open Prompt Composer"
+        title={t("composer.openPromptBuilderTitle", { shortcut: shortcutLabel("view.prompt-composer") })}
         onClick={handleOpenComposer}
       >
         <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M12 20h9" />
-          <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z" />
+          <path d="M4 6h16M4 12h16M4 18h9" />
         </svg>
-        Compose
+        {t("palette.promptComposer")}
       </button>
 
       <div className="pab-divider" />

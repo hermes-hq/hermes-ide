@@ -99,6 +99,21 @@ struct SessionState {
     exact_seen: bool,
     /// When the turn in progress started (exact or guessed).
     turn_started_at: Option<i64>,
+    /// The last time a turn start moved the baseline, so a start that
+    /// reaches the ledger later but is stamped earlier can undo it.
+    moved: Option<BaselineMove>,
+}
+
+/// A baseline a turn start took over an older one.
+#[derive(Debug, Clone)]
+struct BaselineMove {
+    /// When the worktree was read for it (ms since the epoch).
+    read_at: i64,
+    from_tree: String,
+    from_commit: Option<String>,
+    /// What `refs/hermes/<session>/base` held before (when it was moved).
+    from_base: Option<String>,
+    to_tree: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -393,6 +408,7 @@ impl TurnLedger {
             last_commit,
             exact_seen: known.exact_seen,
             turn_started_at: known.turn_started_at,
+            moved: None,
         };
         self.with_session(session_id, |s| *s = fresh.clone());
         fresh
@@ -403,6 +419,7 @@ impl TurnLedger {
             s.last_tree = Some(tree.to_string());
             s.last_commit = Some(commit.to_string());
             s.turn_started_at = None;
+            s.moved = None;
         });
     }
 
@@ -480,10 +497,14 @@ impl TurnLedger {
         };
         let lane = self.lane(&repo.lane_key());
         let _flight = lane.lock().unwrap_or_else(|p| p.into_inner());
-        let state = self.session_state(db, session_id, &repo);
+        let mut state = self.session_state(db, session_id, &repo);
         if self.is_degraded(&repo) {
             return Ok(SnapshotOutcome::NoChange);
         }
+        if let Some(at) = turn_started_at {
+            state = self.undo_late_move(&repo, session_id, state, at)?;
+        }
+        let read_at = now_ms();
         let tree = match repo.write_tree(BASELINE_BUDGET)? {
             WriteTree::Tree(t) => t,
             WriteTree::TooSlow { elapsed } => {
@@ -496,18 +517,47 @@ impl TurnLedger {
             }
         };
         if state.last_tree.as_deref() == Some(tree.as_str()) {
+            log::debug!(
+                "[turn-ledger] {session_id}: baseline (start {turn_started_at:?}) unchanged at {}",
+                short(&tree)
+            );
             return Ok(SnapshotOutcome::NoChange);
         }
         if let (Some(at), Some(last)) = (turn_started_at, state.last_tree.as_deref()) {
             if written_since(&repo, last, &tree, at) {
+                log::debug!(
+                    "[turn-ledger] {session_id}: baseline kept at {} (the turn started at {at} already wrote; tree now {})",
+                    short(last),
+                    short(&tree)
+                );
                 return Ok(SnapshotOutcome::NoChange);
             }
         }
+        log::debug!(
+            "[turn-ledger] {session_id}: baseline (start {turn_started_at:?}, now {}) {} -> {}",
+            now_ms(),
+            state.last_tree.as_deref().map(short).unwrap_or("none"),
+            short(&tree)
+        );
+        let moved = |from_base: Option<String>| {
+            let from_tree = state.last_tree.clone()?;
+            turn_started_at?;
+            Some(BaselineMove {
+                read_at,
+                from_tree,
+                from_commit: state.last_commit.clone(),
+                from_base,
+                to_tree: tree.clone(),
+            })
+        };
         let Some(parent) = state.last_commit.clone() else {
             // No turn recorded yet: the repository stays untouched.
+            let moved = moved(None);
             self.remember_baseline(session_id, &tree, None);
+            self.with_session(session_id, |s| s.moved = moved);
             return Ok(SnapshotOutcome::NoChange);
         };
+        let moved = moved(repo.rev_parse(&base_ref(session_id)));
         let commit = repo.commit_tree(
             &tree,
             Some(&parent),
@@ -515,7 +565,50 @@ impl TurnLedger {
         )?;
         repo.update_ref(&base_ref(session_id), &commit)?;
         self.remember_baseline(session_id, &tree, Some(&commit));
+        self.with_session(session_id, |s| s.moved = moved);
         Ok(SnapshotOutcome::NoChange)
+    }
+
+    /// A turn start can reach the ledger after a later one: the agent's own
+    /// start (stamped when its hook ran, delivered late) after the terminal's
+    /// guess. When the baseline was last moved by a worktree read after
+    /// `turn_started_at` and that move took in a file written since then,
+    /// the move took the turn's own edits: the baseline goes back to what
+    /// it was before it, and the start is judged against that.
+    fn undo_late_move(
+        &self,
+        repo: &Repo,
+        session_id: &str,
+        state: SessionState,
+        turn_started_at: i64,
+    ) -> Result<SessionState, String> {
+        let Some(m) = state.moved.clone() else {
+            return Ok(state);
+        };
+        if turn_started_at >= m.read_at
+            || state.last_tree.as_deref() != Some(m.to_tree.as_str())
+            || !written_since(repo, &m.from_tree, &m.to_tree, turn_started_at)
+        {
+            return Ok(state);
+        }
+        log::debug!(
+            "[turn-ledger] {session_id}: the turn started at {turn_started_at}, before the baseline read at {}; back from {} to {}",
+            m.read_at,
+            short(&m.to_tree),
+            short(&m.from_tree)
+        );
+        if state.last_commit != m.from_commit {
+            match &m.from_base {
+                Some(base) => repo.update_ref(&base_ref(session_id), base)?,
+                None => repo.delete_ref(&base_ref(session_id))?,
+            }
+        }
+        Ok(self.with_session(session_id, |s| {
+            s.last_tree = Some(m.from_tree.clone());
+            s.last_commit = m.from_commit.clone();
+            s.moved = None;
+            s.clone()
+        }))
     }
 
     /// Snapshot the worktree at the end of a turn.
@@ -577,6 +670,12 @@ impl TurnLedger {
             },
         };
         if tree == before_tree {
+            log::debug!(
+                "[turn-ledger] {session_id}: turn end (at {ended_at}, now {}) finds {} as before ({})",
+                now_ms(),
+                short(&tree),
+                if state.last_tree.is_some() { "baseline" } else { "HEAD" }
+            );
             self.with_session(session_id, |s| s.turn_started_at = None);
             return Ok(SnapshotOutcome::NoChange);
         }
@@ -1040,6 +1139,11 @@ fn spawn_in_order(
     }
 }
 
+/// A tree id, shortened for the debug log.
+fn short(id: &str) -> &str {
+    id.get(..8).unwrap_or(id)
+}
+
 /// How long before a turn's reported start a write still counts as the
 /// turn's (file times are coarse on some file systems).
 const TURN_START_SLACK_MS: i64 = 1_000;
@@ -1089,7 +1193,13 @@ pub fn on_turn_started(app: &AppHandle, session_id: &str, at: i64, exact: bool) 
     let Some(ledger) = app.try_state::<TurnLedger>() else {
         return;
     };
-    if !ledger.is_enabled() || !ledger.note_turn_started(session_id, at, exact) {
+    let accepted = ledger.is_enabled() && ledger.note_turn_started(session_id, at, exact);
+    log::debug!(
+        "[turn-ledger] {session_id}: turn start at {at} (exact {exact}, now {}): {}",
+        now_ms(),
+        if accepted { "taken" } else { "ignored" }
+    );
+    if !accepted {
         return;
     }
     let Some(cwd) = session_cwd(app, session_id) else {
@@ -1114,7 +1224,13 @@ pub fn on_turn_ended(app: &AppHandle, session_id: &str, at: i64, exact: bool) {
     let Some(ledger) = app.try_state::<TurnLedger>() else {
         return;
     };
-    if !ledger.is_enabled() || !ledger.accepts_turn_end(session_id, exact) {
+    let accepted = ledger.is_enabled() && ledger.accepts_turn_end(session_id, exact);
+    log::debug!(
+        "[turn-ledger] {session_id}: turn end at {at} (exact {exact}, now {}): {}",
+        now_ms(),
+        if accepted { "taken" } else { "ignored" }
+    );
+    if !accepted {
         return;
     }
     let Some(cwd) = session_cwd(app, session_id) else {
@@ -1122,6 +1238,7 @@ pub fn on_turn_ended(app: &AppHandle, session_id: &str, at: i64, exact: bool) {
         return;
     };
     if !ledger.queue_turn_end(session_id) {
+        log::debug!("[turn-ledger] {session_id}: a turn-end snapshot is already queued");
         return;
     }
     let sid = session_id.to_string();
@@ -1183,6 +1300,7 @@ pub fn on_phase_change(
         return;
     }
     let at = now_ms();
+    log::debug!("[turn-ledger] {session_id}: terminal {from:?} -> {to:?} at {at}");
     match phase_edge(from, to) {
         Some(PhaseEdge::TurnEnd) => {
             if !ledger.accepts_turn_end(session_id, false) || !ledger.queue_turn_end(session_id) {
@@ -1198,6 +1316,7 @@ pub fn on_phase_change(
                 move |app, state, ledger| match ledger.record_turn(&state.db, &sid, &cwd, None, at)
                 {
                     Ok(SnapshotOutcome::Recorded(turn)) | Ok(SnapshotOutcome::Degraded(turn)) => {
+                        log::debug!("[turn-ledger] {sid}: guessed turn {} recorded", turn.n);
                         emit(
                             app,
                             TurnLedgerEvent {
@@ -1656,6 +1775,101 @@ mod tests {
         let diff = l.turn_diff(&db, "s1", 2, Some(t.root())).unwrap().unwrap();
         assert!(!diff.patch.contains("notes.txt"), "{}", diff.patch);
         assert_eq!(two.diffstat.files, 1, "{:?}", two.diffstat);
+    }
+
+    /// Set a file's modification time (ms since the epoch).
+    fn touch_at(root: &Path, rel: &str, ms: i64) {
+        let f = std::fs::File::options()
+            .write(true)
+            .open(root.join(rel))
+            .unwrap();
+        f.set_modified(std::time::UNIX_EPOCH + Duration::from_millis(ms as u64))
+            .unwrap();
+    }
+
+    #[test]
+    fn an_exact_start_that_arrives_after_a_guessed_one_keeps_the_turns_edits() {
+        let t = TestRepo::new();
+        let (_d, db) = open_db();
+        let db = Mutex::new(db);
+        let l = ledger();
+        l.ensure_baseline(&db, "s1", t.root()).unwrap();
+        // The agent's turn starts at T (its hook says so) and it writes at
+        // T + 0.3 s. The terminal goes Idle -> Busy at T + 2.5 s: that guess
+        // reaches the ledger first. The hook's start, stamped T, is
+        // delivered at T + 2.6 s (held until the launch is known taken).
+        let start = now_ms() - 10_000;
+        write(t.root(), "src/app.txt", "by the agent\n");
+        touch_at(t.root(), "src/app.txt", start + 300);
+        assert!(l.note_turn_started("s1", start + 2_500, false));
+        l.ensure_baseline_at(&db, "s1", t.root(), Some(start + 2_500))
+            .unwrap();
+        assert!(l.note_turn_started("s1", start, true));
+        l.ensure_baseline_at(&db, "s1", t.root(), Some(start))
+            .unwrap();
+        let turn = recorded(
+            l.record_turn(&db, "s1", t.root(), None, start + 2_700)
+                .unwrap(),
+        );
+        assert_eq!((turn.n, turn.diffstat.files), (1, 1), "{:?}", turn.diffstat);
+        assert_eq!(turn.started_at, start);
+
+        // Another session: the person's edit from before the start stays
+        // theirs when the agent wrote nothing after it, however late the
+        // start arrives.
+        l.ensure_baseline(&db, "s2", t.root()).unwrap();
+        let start = now_ms() - 10_000;
+        write(t.root(), "notes.txt", "mine\n");
+        touch_at(t.root(), "notes.txt", start - 5_000);
+        assert!(l.note_turn_started("s2", start + 2_500, false));
+        l.ensure_baseline_at(&db, "s2", t.root(), Some(start + 2_500))
+            .unwrap();
+        assert!(l.note_turn_started("s2", start, true));
+        l.ensure_baseline_at(&db, "s2", t.root(), Some(start))
+            .unwrap();
+        write(t.root(), "src/app.txt", "by the agent, again\n");
+        let two = recorded(
+            l.record_turn(&db, "s2", t.root(), None, start + 2_700)
+                .unwrap(),
+        );
+        let diff = l.turn_diff(&db, "s2", 1, Some(t.root())).unwrap().unwrap();
+        assert!(!diff.patch.contains("notes.txt"), "{}", diff.patch);
+        assert_eq!(two.diffstat.files, 1, "{:?}", two.diffstat);
+    }
+
+    #[test]
+    fn a_late_exact_start_puts_back_the_baseline_commit_a_guess_made() {
+        let t = TestRepo::new();
+        let (_d, db) = open_db();
+        let db = Mutex::new(db);
+        let l = ledger();
+        l.ensure_baseline(&db, "s1", t.root()).unwrap();
+        // Turn 1 was only guessed (no hook yet): the chain has commits.
+        write(t.root(), "one.txt", "x\n");
+        let one = recorded(l.record_turn(&db, "s1", t.root(), None, 1).unwrap());
+        let base_before = t.repo.rev_parse(&base_ref("s1"));
+        let start = now_ms() - 10_000;
+        write(t.root(), "two.txt", "by the agent\n");
+        touch_at(t.root(), "two.txt", start + 300);
+        assert!(l.note_turn_started("s1", start + 2_500, false));
+        l.ensure_baseline_at(&db, "s1", t.root(), Some(start + 2_500))
+            .unwrap();
+        assert_ne!(t.repo.rev_parse(&base_ref("s1")), base_before);
+        assert!(l.note_turn_started("s1", start, true));
+        l.ensure_baseline_at(&db, "s1", t.root(), Some(start))
+            .unwrap();
+        assert_eq!(t.repo.rev_parse(&base_ref("s1")), base_before);
+        let two = recorded(
+            l.record_turn(&db, "s1", t.root(), None, start + 2_700)
+                .unwrap(),
+        );
+        assert_eq!((two.n, two.diffstat.files), (2, 1), "{:?}", two.diffstat);
+        let commit = t.repo.rev_parse(&two.git_ref).unwrap();
+        assert_eq!(
+            t.repo.parent_of(&commit),
+            t.repo.rev_parse(&one.git_ref),
+            "turn 2 follows turn 1"
+        );
     }
 
     #[test]

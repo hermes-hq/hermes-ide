@@ -94,8 +94,8 @@ claims:
     # Hermes leaves alone (hence "in shells without suggestions of their own").
     scenario: ghost-text.mjs
   prompt-composer:
-    text: "Prompt Composer"
-    scenario: prompt-composer.mjs
+    text: "Prompts"
+    scenario: HOD-prompts-keyboard.mjs
   stuck-detection:
     text: "Stuck detection"
     scenario: QA-host-stop-hung-agent.mjs

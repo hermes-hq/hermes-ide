@@ -2150,11 +2150,12 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         mode,
         // A launcher task travels as an argument, which only the helper can
         // pass without any shell quoting.
-        launchHelper: isFeatureFlagEnabled("launchHelper") || (mode === "terminal" && (!!opts?.initialPrompt?.trim() || !!opts?.agentLaunch)),
+        launchHelper: isFeatureFlagEnabled("launchHelper") || (mode === "terminal" && (!!opts?.initialPrompt?.trim() || !!opts?.systemPrompt?.trim() || !!opts?.agentLaunch)),
         launchHelperRequired: isFeatureFlagEnabled("launchHelper"),
         featureTracks: isFeatureFlagEnabled("featureTracks"),
         sessionHost: isFeatureFlagEnabled("sessionHost"),
         initialPrompt: mode === "terminal" ? opts?.initialPrompt?.trim() || null : null,
+        systemPrompt: mode === "terminal" ? opts?.systemPrompt?.trim() || null : null,
         seedPrompt: opts?.seedPrompt || null,
         parentSessionId: opts?.parentSessionId || null,
         // 2.0: the model, effort and account (and "login" for Add account)

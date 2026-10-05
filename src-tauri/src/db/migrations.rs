@@ -58,6 +58,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "worktree base branch",
         apply: worktree_base_branch_column,
     },
+    Migration {
+        version: 7,
+        name: "prompt library: item state, usage, installs",
+        apply: create_library_tables,
+    },
 ];
 
 /// The schema version this build writes.
@@ -798,6 +803,42 @@ fn worktree_base_branch_column(conn: &Connection) -> rusqlite::Result<()> {
 /// repository with a count (the usual combination), saved presets, the
 /// choice remembered per agent and account, and models an account refused.
 /// New tables only; nothing existing changes.
+/// The prompt library's user state (src-tauri/src/library/user_state.rs).
+/// The catalog itself lives in its own rebuildable `library.db`.
+pub(crate) fn create_library_tables(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "
+        CREATE TABLE IF NOT EXISTS library_item_state (
+            item_id TEXT PRIMARY KEY,
+            pinned INTEGER NOT NULL DEFAULT 0,
+            favorite INTEGER NOT NULL DEFAULT 0,
+            hidden INTEGER NOT NULL DEFAULT 0,
+            use_count INTEGER NOT NULL DEFAULT 0,
+            last_used_at INTEGER,
+            forked_template_id TEXT,
+            forked_from_version TEXT
+        );
+        CREATE TABLE IF NOT EXISTS library_affinity (
+            facet TEXT NOT NULL,
+            value TEXT NOT NULL,
+            score REAL NOT NULL,
+            updated_at INTEGER NOT NULL,
+            PRIMARY KEY (facet, value)
+        );
+        CREATE TABLE IF NOT EXISTS library_installs (
+            project_path TEXT NOT NULL,
+            item_id TEXT NOT NULL,
+            agent_id TEXT NOT NULL,
+            version TEXT NOT NULL,
+            path TEXT NOT NULL,
+            hash TEXT NOT NULL,
+            installed_at INTEGER NOT NULL,
+            PRIMARY KEY (project_path, item_id, agent_id, path)
+        );
+        ",
+    )
+}
+
 fn create_launch_choice_tables(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
         "
@@ -883,6 +924,7 @@ mod tests {
         "launch_preset_prompts_dismissed",
         "launch_presets",
     ];
+    const STEP_7_TABLES: &[&str] = &["library_affinity", "library_installs", "library_item_state"];
 
     fn load_fixture(dir: &Path, dump: &str) -> PathBuf {
         let path = dir.join(DB_FILE);
@@ -1054,14 +1096,15 @@ mod tests {
             // Step 3 adds agent_turns and step 5 the launch-choice tables
             // (empty); nothing else comes or goes.
             assert_eq!(after.get("agent_turns"), Some(&0), "{release}: agent_turns");
-            for t in STEP_5_TABLES {
+            for t in STEP_5_TABLES.iter().chain(STEP_7_TABLES) {
                 assert_eq!(after.get(*t), Some(&0), "{release}: {t}");
             }
             assert_eq!(
                 after.len(),
                 before.len() - usize::from(before.contains_key("execution_nodes"))
                     + 1
-                    + STEP_5_TABLES.len(),
+                    + STEP_5_TABLES.len()
+                    + STEP_7_TABLES.len(),
                 "{release}: no other table added or removed: {after:?}"
             );
             assert_eq!(
@@ -1408,6 +1451,9 @@ mod tests {
         for t in STEP_5_TABLES {
             expected.insert(t.to_string(), 0); // added, empty, by step 5
         }
+        for t in STEP_7_TABLES {
+            expected.insert(t.to_string(), 0); // added, empty, by step 7
+        }
         assert_eq!(after, expected, "every other table and row is kept");
         let conn = Connection::open(&path).unwrap();
         let leftovers: i64 = conn
@@ -1633,5 +1679,74 @@ mod tests {
         assert_eq!(row_counts(&path), rows_before, "every existing row is kept");
         // Running it again changes nothing.
         worktree_base_branch_column(&conn).unwrap();
+    }
+
+    #[test]
+    fn step_7_adds_the_library_tables_and_keeps_every_saved_prompt() {
+        let dir = TempDir::new().unwrap();
+        let path = load_fixture(dir.path(), FIXTURES[4].1);
+        let conn = Connection::open(&path).unwrap();
+        migrate(&conn, None, &MIGRATIONS[..6]).unwrap();
+        // A 2.0 profile with saved prompts, pins, groups, roles and styles.
+        for (k, v) in [
+            (
+                "prompt_templates",
+                r#"[{"id":"user-1","name":"My review","task":"Review it"}]"#,
+            ),
+            ("pinned_templates", r#"["debug-root-cause","user-1"]"#),
+            (
+                "template_groups",
+                r#"[{"id":"g","name":"Mine","templateIds":["user-1"]}]"#,
+            ),
+            (
+                "custom_roles",
+                r#"[{"id":"custom-role-1","label":"Me","systemInstruction":"x"}]"#,
+            ),
+            (
+                "custom_styles",
+                r#"[{"id":"custom-style-1","label":"Mine"}]"#,
+            ),
+        ] {
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES (?1, ?2)",
+                rusqlite::params![k, v],
+            )
+            .unwrap();
+        }
+        let rows_before = row_counts(&path);
+        let settings_before: Vec<(String, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT key, value FROM settings ORDER BY key")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        let report = migrate(&conn, Some(&path), &MIGRATIONS[..7]).unwrap();
+        assert_eq!((report.from, report.to), (6, 7));
+        let tables = tables(&conn);
+        for t in ["library_item_state", "library_affinity", "library_installs"] {
+            assert!(tables.contains(&t.to_string()), "{t}");
+        }
+        let mut rows_after = row_counts(&path);
+        for t in ["library_item_state", "library_affinity", "library_installs"] {
+            assert_eq!(rows_after.remove(t), Some(0));
+        }
+        assert_eq!(rows_after, rows_before, "every existing row is kept");
+        let settings_after: Vec<(String, String)> = {
+            let mut stmt = conn
+                .prepare("SELECT key, value FROM settings ORDER BY key")
+                .unwrap();
+            stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+                .unwrap()
+                .map(Result::unwrap)
+                .collect()
+        };
+        assert_eq!(
+            settings_after, settings_before,
+            "saved prompts are byte-identical"
+        );
+        create_library_tables(&conn).unwrap();
     }
 }

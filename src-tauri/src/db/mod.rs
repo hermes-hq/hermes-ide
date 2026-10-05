@@ -2074,7 +2074,10 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "onboarding_completed",
     "last_seen_version",
     "suppress_whats_new",
-    // Prompt composer
+    // Prompts: Mine (the person's own prompts) and which 2.0 ids it took in
+    "my_prompts",
+    "my_prompts_migrated",
+    // The 2.0 prompt composer (read by the migration into Mine, never written)
     "prompt_templates",
     "pinned_templates",
     "template_groups",
@@ -2133,6 +2136,20 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "fleet_spend_cap_feature_usd",
     "fleet_max_running_agents",
     "fleet_max_agent_memory_mb",
+    // Prompt library (src-tauri/src/library): updates "auto" | "notify" | "off",
+    // when it last checked and succeeded, versions the person skipped, the
+    // packs they turned on or off, "stable" | "all" on the shelves, their
+    // profile (roles and interests, JSON) and whether the interests step was offered.
+    "library_updates",
+    "library_last_check",
+    "library_last_success",
+    "library_last_error",
+    "library_ignored_versions",
+    "library_enabled_packs",
+    "library_disabled_packs",
+    "library_channel",
+    "library_profile",
+    "library_onboarded",
 ];
 
 #[tauri::command]
@@ -3148,6 +3165,10 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "task_launches",
     // Tasks waiting in the queue (N22) — task text and paths, per install
     "task_queue",
+    // Prompt library update times and the last error — per install
+    "library_last_check",
+    "library_last_success",
+    "library_last_error",
 ];
 
 /// Validate a settings file path for export or import.

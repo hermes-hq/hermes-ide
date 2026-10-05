@@ -24,6 +24,7 @@
  * backend's rules (src/__tests__/fakes/capabilityCommands.ts).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Suspense } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 import type { DoctorRow } from "../api/doctor";
@@ -65,6 +66,7 @@ import { TaskLauncher, type TaskLaunchRequest, type TaskLaunchResult } from "../
 import { I18nProvider } from "../i18n/I18nProvider";
 import { __resetDoctorForTest } from "../launcher/doctorStore";
 import { fakeCapabilityCommands } from "./fakes/capabilityCommands";
+import { peekLauncherSeed, setLauncherSeed } from "../library/launcherSeed";
 import { __resetOffersForTest, clearLauncherDraft, setPendingSuggestion } from "../launcher/draft";
 import { isMac } from "../utils/platform";
 import type { AgentCapabilities } from "../agent/capabilities/types";
@@ -1017,5 +1019,49 @@ describe("TaskLauncher: a base branch the repository does not have", () => {
     expect(warning?.getAttribute("data-source")).toBe("repo");
     expect(within(warning).getByText("Parts of this choice are not available in this repository:")).toBeInTheDocument();
     expect(preview()).toContain("from main");
+  });
+});
+
+describe("TaskLauncher: a start from the Library", () => {
+  const persona = { id: "code-reviewer", version: "1.0.0", title: "Code reviewer", text: "You review changes." };
+
+  it("keeps the Library's persona when React throws away the first render of the sheet", async () => {
+    // A sibling that suspends once on mount: React discards the sheet's first
+    // render and renders it again, as it does when a render is interrupted.
+    let ready = false;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((r) => {
+      release = () => {
+        ready = true;
+        r();
+      };
+    });
+    function SuspendOnce() {
+      if (!ready) throw gate;
+      return null;
+    }
+    setLauncherSeed({ task: "", prompt: null, persona });
+    const onLaunch = vi.fn(async (_req: TaskLaunchRequest) => true as TaskLaunchResult);
+    render(
+      <I18nProvider>
+        <Suspense fallback={null}>
+          <TaskLauncher defaultRepo={REPO} onLaunch={onLaunch} onSignIn={vi.fn()} onOpenAdvanced={vi.fn()} onClose={vi.fn()} />
+          <SuspendOnce />
+        </Suspense>
+      </I18nProvider>,
+    );
+    await settle();
+    await act(async () => {
+      release();
+      await gate;
+    });
+    await settle();
+    await settle();
+    await waitFor(() => expect(document.querySelector(".task-launcher-library-persona")?.textContent).toContain("Code reviewer"));
+    await typeTask("Review the auth change");
+    await launchWithEnter();
+    expect(onLaunch.mock.calls[0][0].library?.persona?.text).toBe("You review changes.");
+    // Used up: the next sheet opens without it.
+    expect(peekLauncherSeed()).toBeNull();
   });
 });

@@ -99,6 +99,9 @@ pub struct LaunchInput<'a> {
     /// The task the user described in the task launcher (F15), handed to
     /// the agent as its first prompt on a fresh start.
     pub task: Option<&'a str>,
+    /// A library persona for the system prompt (catalog `system_prompt`),
+    /// on a fresh start only.
+    pub system_prompt: Option<&'a str>,
     /// The conversation to resume (a restored session's saved id).
     pub resume_id: Option<&'a str>,
     /// N19: the first prompt of a session started by "Continue in another
@@ -953,6 +956,11 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         (Some(template), Some(prompt)) => fill(template, &[("prompt", prompt)]),
         _ => Vec::new(),
     };
+    let system_args: Vec<String> =
+        match (&terminal.system_prompt, input.system_prompt.map(str::trim)) {
+            (Some(template), Some(text)) if !text.is_empty() => fill(template, &[("prompt", text)]),
+            _ => Vec::new(),
+        };
     let context_in_args = !prompt_args.is_empty() && input.context_path.is_some();
     let seed_in_args = !prompt_args.is_empty() && seed.is_some();
     let fresh_args = {
@@ -962,6 +970,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
             args.extend(fill(template, &[("session_id", id)]));
         }
         args.extend(permission.iter().cloned());
+        args.extend(system_args.iter().cloned());
         args.extend(signals.args.iter().cloned());
         args.extend(prompt_args.iter().cloned());
         args.extend(channel_args.iter().cloned());
@@ -1539,6 +1548,7 @@ pub(crate) fn prepare_helper_launch(
         cwd: &s.working_directory,
         context_path: context_path.as_deref(),
         task: s.task_prompt.as_deref(),
+        system_prompt: s.system_prompt.as_deref(),
         resume_id: s.vendor_session_id.as_deref(),
         seed_prompt: s.seed_prompt.as_deref(),
         user_status_line: limits_via_status_line(agent)
@@ -3499,6 +3509,7 @@ pub(crate) mod tests {
             cwd: "/fixture-home/repo",
             context_path: None,
             task: None,
+            system_prompt: None,
             resume_id,
             seed_prompt: None,
             user_status_line: false,
@@ -4582,6 +4593,51 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn a_library_persona_goes_to_the_system_prompt_only_where_the_flag_is_proven() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let persona =
+            "You are a security auditor; report \"exploitable\" issues only & $HOME stays literal";
+        // Claude: --append-system-prompt <persona>, before the first prompt.
+        let mut claude = input("claude", None, hi, dir);
+        claude.system_prompt = Some(persona);
+        claude.task = Some("review auth.ts");
+        let args = plan_launch(&claude).unwrap().spec.args;
+        let at = args
+            .iter()
+            .position(|a| a == "--append-system-prompt")
+            .expect("the persona flag");
+        assert_eq!(args[at + 1], persona);
+        assert_eq!(args.last().map(String::as_str), Some("review auth.ts"));
+        // Agents without a proven flag get no system-prompt argument (the
+        // launcher puts the persona in their first prompt instead).
+        for agent in ["codex", "gemini", "opencode", "copilot", "antigravity"] {
+            let mut other = input(agent, None, hi, dir);
+            other.system_prompt = Some(persona);
+            let args = plan_launch(&other).unwrap().spec.args;
+            assert!(!args.iter().any(|a| a == persona), "{agent}: {args:?}");
+        }
+        // A resumed conversation keeps the role it started with: not passed again.
+        let mut resumed = input("claude", Some("old-id"), hi, dir);
+        resumed.system_prompt = Some(persona);
+        assert!(!plan_launch(&resumed)
+            .unwrap()
+            .spec
+            .args
+            .iter()
+            .any(|a| a == persona));
+        // Blank is none.
+        let mut blank = input("claude", None, hi, dir);
+        blank.system_prompt = Some("   ");
+        assert!(!plan_launch(&blank)
+            .unwrap()
+            .spec
+            .args
+            .iter()
+            .any(|a| a == "--append-system-prompt"));
+    }
+
+    #[test]
     fn the_launcher_task_is_the_first_prompt_of_a_fresh_start_only() {
         let hi = Path::new("/app/hi");
         let dir = Path::new("/data/launch/hermes-1");
@@ -5427,6 +5483,7 @@ pub(crate) mod tests {
             signal_nonce: None,
             reported_status: None,
             task_prompt: None,
+            system_prompt: None,
             seed_prompt: None,
             parent_session_id: None,
         }

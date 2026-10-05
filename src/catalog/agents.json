@@ -19,6 +19,8 @@
         },
         "new_session_id": ["--session-id", "{session_id}"],
         "initial_prompt": ["{prompt}"],
+        "system_prompt": ["--append-system-prompt", "{prompt}"],
+        "paste_fold": { "chars": 800, "lines": 3 },
         "signals": {
           "method": "settings_file",
           "args": ["--settings", "{signals_file}"],

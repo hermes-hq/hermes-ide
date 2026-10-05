@@ -932,6 +932,9 @@ pub fn create_session(
     // The task launcher's task (F15): handed to the agent as its first
     // prompt through the `hi` helper.
     initial_prompt: Option<String>,
+    // A library persona for the agent's system prompt (its catalog's
+    // `system_prompt` flag, through the `hi` helper).
+    system_prompt: Option<String>,
     // N19: the first prompt of a handed-off session (the task and the work
     // so far). Only ever passed as a launch argument through `hi`.
     seed_prompt: Option<String>,
@@ -1119,6 +1122,9 @@ pub fn create_session(
         signal_nonce: None,
         reported_status: None,
         task_prompt: initial_prompt
+            .map(|t| t.trim().to_string())
+            .filter(|t| !t.is_empty()),
+        system_prompt: system_prompt
             .map(|t| t.trim().to_string())
             .filter(|t| !t.is_empty()),
         seed_prompt: seed_prompt.filter(|p| !p.trim().is_empty()),

@@ -327,6 +327,20 @@
         "initial_prompt": {
           "$ref": "#/definitions/shellArgsOrNull"
         },
+        "system_prompt": {
+          "description": "Arguments that add a role (a library persona) to the agent's system prompt ({prompt}). Only flags proven with the real CLI; absent or null: the persona goes into the first message instead.",
+          "$ref": "#/definitions/shellArgsOrNull"
+        },
+        "paste_fold": {
+          "description": "When the CLI folds a paste into a placeholder and follows instructions inside it only where the typed message asks it to (Claude Code: over 800 characters or 3 lines). Hermes then types one short lead line before pasting a prompt. Absent: the prompt is pasted alone.",
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["chars", "lines"],
+          "properties": {
+            "chars": { "type": "integer", "minimum": 1 },
+            "lines": { "type": "integer", "minimum": 1 }
+          }
+        },
         "signals": {
           "$ref": "#/definitions/signals"
         },

@@ -45,7 +45,7 @@ Hermes IDE is not affiliated with Nous Research or its Hermes Agent.
 
 ### AI Intelligence
 - **Ghost-text suggestions** — completions from your command history as you type; → accepts them (in shells without suggestions of their own) <!-- claim:ghost-text -->
-- **Prompt Composer** — build a structured prompt from a template, a task and a scope, and send it to the session <!-- claim:prompt-composer -->
+- **Prompts** (⌘J) — find a ready-made prompt or one of your own, fill in the blanks and put it in the session or a new task <!-- claim:prompt-composer -->
 - **Stuck detection** — when an Agent-view session ignores Stop, Hermes tells you it isn't responding and offers Force stop, keeping the conversation <!-- claim:stuck-detection -->
 
 ### Project Awareness

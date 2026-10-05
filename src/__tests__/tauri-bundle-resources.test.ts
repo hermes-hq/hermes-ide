@@ -13,6 +13,7 @@
  */
 
 import { readFileSync, existsSync } from "fs";
+import { createHash } from "crypto";
 import { describe, it, expect } from "vitest";
 
 const TAURI_CONF = "src-tauri/tauri.conf.json";
@@ -43,6 +44,7 @@ describe("tauri.conf.json bundle resources", () => {
       const own: string[] = JSON.parse(readFileSync(file, "utf-8"))?.bundle?.resources ?? [];
       if (own.length === 0) return;
       expect(own).toContain("bridge/runtime");
+      expect(own).toContain("library");
       expect(own.some((r) => r.includes("node_modules"))).toBe(false);
     });
   }
@@ -52,6 +54,36 @@ describe("tauri.conf.json bundle resources", () => {
     expect(cmd).toMatch(/prepare:bridge/);
     const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
     expect(pkg.scripts["prepare:bridge"]).toMatch(/pack-bridge-runtime\.mjs/);
+  });
+});
+
+describe("bundled prompt library", () => {
+  const conf = JSON.parse(readFileSync(TAURI_CONF, "utf-8"));
+  const lock = JSON.parse(readFileSync("prompt-library.lock.json", "utf-8"));
+
+  it("ships the library folder and fetches it before every build", () => {
+    expect(conf?.bundle?.resources ?? []).toContain("library");
+    expect(conf?.build?.beforeBuildCommand ?? "").toMatch(/prepare:library/);
+    const pkg = JSON.parse(readFileSync("package.json", "utf-8"));
+    expect(pkg.scripts["prepare:library"]).toMatch(/fetch-prompt-library\.mjs/);
+  });
+
+  it("pins a release tag, never @latest, and caps the archive at 6 MB", () => {
+    expect(lock.tag).toMatch(/^v\d{4}\.\d{4}\.\d+$/);
+    expect(JSON.stringify(lock.mirrors)).not.toMatch(/@latest|\/main\//);
+    expect(lock.max_archive_bytes).toBeLessThanOrEqual(6_000_000);
+  });
+
+  // The archive is generated (gitignored): checked whenever it has been fetched.
+  const sidecarPath = "src-tauri/library/catalog-v1.json";
+  it.skipIf(!existsSync(sidecarPath))("the fetched archive matches the lock, its sidecar and the size cap", () => {
+    const sidecar = JSON.parse(readFileSync(sidecarPath, "utf-8"));
+    const archive = readFileSync(`src-tauri/library/${sidecar.archive}`);
+    expect(sidecar.manifest_sha256).toBe(lock.manifest_sha256);
+    expect(sidecar.catalog).toBe(lock.catalog);
+    expect(archive.length).toBe(sidecar.archive_bytes);
+    expect(archive.length).toBeLessThanOrEqual(6_000_000);
+    expect(createHash("sha256").update(archive).digest("hex")).toBe(sidecar.archive_sha256);
   });
 });
 

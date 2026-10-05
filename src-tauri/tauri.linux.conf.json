@@ -12,6 +12,7 @@
     "targets": ["deb", "appimage"],
     "resources": [
       "bridge/runtime",
+      "library",
       "helpers/hi",
       "helpers/hermes-pty-host"
     ]

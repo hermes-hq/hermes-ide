@@ -114,6 +114,8 @@ tar = "0.4"
 # Unpacks the bridge runtime archive (zstd), pure Rust: no C toolchain on any target.
 ruzstd = "0.9"
 sha2 = "0.10"
+# The prompt library's signed catalog updates (already used by the app updater).
+minisign-verify = "0.2"
 anyhow = "1"
 notify = "8"
 dunce = "1"
@@ -127,6 +129,8 @@ hermes-pty-host = { path = "pty-host" }
 
 [dev-dependencies]
 criterion = { version = "0.8", features = ["html_reports"] }
+# Signs test catalogs with a fresh minisign key (already in the tree via rustls).
+ring = "0.17"
 
 [[bench]]
 name = "analyzer"

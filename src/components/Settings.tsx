@@ -60,6 +60,7 @@ const SETTINGS_TABS_ID = "settings";
 const PluginManager = lazyView("PluginManager", () => import("./PluginManager").then((m) => m.PluginManager));
 // The hidden controls preview (Flags tab) loads only when opened.
 const UiKitScreen = lazyView("UiKitScreen", () => import("./ui/UiKitScreen").then((m) => m.UiKitScreen));
+const LibrarySettings = lazyView("LibrarySettings", () => import("./library/LibrarySettings").then((m) => m.LibrarySettings));
 // Settings > Storage (diskGuard flag) loads when its tab is first opened.
 const StorageSettings = lazyView("StorageSettings", () => import("./StorageSettings").then((m) => m.StorageSettings));
 
@@ -269,6 +270,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     // The agent doctor (F16), the same one the welcome screens show.
     // 2.0 (agentCatalog): accounts, models and presets per agent.
     ...(isFeatureFlagEnabled("taskLauncher") || isFeatureFlagEnabled("agentCatalog") ? [{ id: "agents", label: t("settings.agents") }] : []),
+    // The prompt library: updates, personalisation, installs into projects.
+    { id: "library", label: t("app.library") },
     // Old worktrees and the disk they take (disk guard).
     ...(isFeatureFlagEnabled("diskGuard") ? [{ id: "storage", label: t("storage.title") }] : []),
     { id: "shortcuts", label: t("settings.shortcuts") },
@@ -903,6 +906,12 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                 </div>
                 <Suspense fallback={null}><PluginManager runtime={pluginRuntime} onConfirmUpdate={onConfirmPluginUpdate} onConfirmUpdateAll={onConfirmPluginUpdateAll} refreshTrigger={pluginRefreshTrigger} /></Suspense>
               </>
+            )}
+
+            {activeTab === "library" && (
+              <Suspense fallback={null}>
+                <LibrarySettings />
+              </Suspense>
             )}
 
             {activeTab === "agents" && isFeatureFlagEnabled("agentCatalog") && (

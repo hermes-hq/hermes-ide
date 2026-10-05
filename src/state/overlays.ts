@@ -1,5 +1,5 @@
-// One overlay at a time: the attention inbox, the command palette, the ⌘N
-// task launcher, Settings, Keyboard Shortcuts, the cost dashboard and the
+// One overlay at a time: the attention inbox, the command palette, Prompts
+// (⌘J), the ⌘N task launcher, Settings, Keyboard Shortcuts, the cost dashboard and the
 // classic New Session wizard.
 //
 // The rule, in one place: opening one of them closes the others. Each
@@ -16,7 +16,7 @@
 
 import { useEffect, useRef } from "react";
 
-export type OverlayId = "inbox" | "palette" | "launcher" | "settings" | "shortcuts" | "cost" | "creator";
+export type OverlayId = "inbox" | "palette" | "launcher" | "settings" | "shortcuts" | "cost" | "creator" | "prompts";
 
 /**
  * An overlay whose open state lives in a parent (Settings, Keyboard

@@ -1838,6 +1838,48 @@ features:
       QA-launcher-12:
         text: "Presets: names are unique whatever their case, an empty offer name keeps the offer, typed Claude model ids launch, and the preview says what the launch passes"
         scenarios: [QA-launcher-preset-names.mjs, QA-launcher-offer-empty-name.mjs, QA-launcher-typed-model.mjs, QA-launcher-preview.mjs]
+  REAL-HOD:
+    name: "The prompt library with the real Claude Code and Codex CLIs"
+    # Local only, like REAL above: needs the signed-in CLIs and costs a tiny
+    # turn each, so the scenario says SKIP in CI (e2e/app/ci-plan.mjs
+    # excludes it) and this entry asks for no result.
+    status: planned
+    criteria:
+      REAL-HOD-1:
+        text: "A library persona launched from the task launcher reaches the real Claude Code (system prompt) and Codex (first prompt), and each answers in that role; Use in session puts a rendered prompt into the real TUI's input without sending it"
+        scenarios: ["REAL-library-agents.mjs@darwin,linux"]
+  HOD:
+    # Hermes 2.1: Hodios, the open-source prompt library, imported by default
+    # (src-tauri/src/library, src/library, src/components/library). Fake
+    # agents stand in for Claude Code and Codex; the catalog mirror and its
+    # signing key are local and throwaway (test builds only).
+    name: "The prompt library is there by default, offline, fits the person, works with every agent and keeps what 2.0 saved"
+    status: shipped
+    criteria:
+      HOD-1:
+        text: "A fresh install with no network has the whole bundled catalog: the Library opens, every pinned row of every tier is there with its body, search works, an entry renders; a relaunch needs no second import"
+        scenarios: [HOD-offline-first-open.mjs]
+      HOD-2:
+        text: "Search answers at p95 <= 50 ms in the app (300 mixed queries), results follow typing within 500 ms, late answers are dropped, and paging is by cursor with a virtualized list"
+        scenarios: [HOD-search-latency.mjs]
+      HOD-3:
+        text: "For you is computed on the device: a TypeScript + React project leads with its stack and says why, a Python project changes the shelf, Show everything removes personalisation, and nothing is sent"
+        scenarios: [HOD-for-you-react.mjs]
+      HOD-4:
+        text: "Use in session puts the rendered prompt into a Claude Code and a Codex terminal session as one bracketed paste with no Enter; required arguments block it until filled"
+        scenarios: [HOD-use-in-session.mjs]
+      HOD-5:
+        text: "A persona at launch reaches every agent: Claude Code as --append-system-prompt, Codex in its first prompt before the task, a persona alone asks the agent to wait; the launcher's Prompts fills the task"
+        scenarios: [HOD-persona-launch.mjs]
+      HOD-6:
+        text: "A newer signed catalog is applied at runtime; unsigned, wrongly signed, tampered and older catalogs are refused; rollback returns to the bundle; project files never change"
+        scenarios: [HOD-update-applies.mjs]
+      HOD-7:
+        text: "Updating from 2.0 keeps every saved prompt, role, style, group and pin byte-identical; they are under Mine in the Library and in Prompts (one list, no template tabs), with the text 2.0 sent; every 2.0 built-in id resolves to its library entry (a pin on one is carried)"
+        scenarios: [HOD-migrate-saved.mjs]
+      HOD-8:
+        text: "Prompts (⌘J) works by keyboard from a session and from the launcher: filters, arrows, a readable preview with no template tags, Return to an empty required blank, ⌘Return inserts into Claude Code as a typed lead line plus one paste with no Enter; in the launcher it takes the sheet's place, the typed task fills the first blank and Return uses it as the task"
+        scenarios: [HOD-prompts-keyboard.mjs]
   README:
     name: "Every feature the README lists is proven in the real app"
     # docs/readme-claims.yml maps each README feature bullet to the scenario
@@ -1869,9 +1911,6 @@ features:
         # any shell with suggestions of its own.
         text: "Typing the start of an earlier command shows the rest as ghost text, → accepts it, and a prefix that matches nothing shows none"
         scenarios: ["ghost-text.mjs@darwin,linux"]
-      README-8:
-        text: "The Prompt Composer, opened from the command palette, builds a prompt from a template, a task and a scope and sends exactly the preview to the session"
-        scenarios: [prompt-composer.mjs]
       README-9:
         text: "Scanning two projects finds each one's languages, frameworks, architecture and conventions; both attach to one session, and the agent is pointed at a context file holding both, kept within the project's token budget"
         scenarios: [project-scanning.mjs]

@@ -297,6 +297,10 @@ pub struct Session {
     /// on its first start. Never saved; a restored session resumes instead.
     #[serde(skip)]
     pub task_prompt: Option<String>,
+    /// A library persona for the agent's system prompt, for agents whose
+    /// catalog has a proven `system_prompt` flag. First start only; never saved.
+    #[serde(skip)]
+    pub system_prompt: Option<String>,
     /// N19: the first prompt of a session started by "Continue in another
     /// agent" or "Duplicate to another agent". Passed as a launch argument
     /// through the `hi` helper and never typed; kept out of every saved or
