@@ -590,8 +590,10 @@ jobs:
           # No accessibility bus on a bare runner: do not look for one.
           NO_AT_BRIDGE: "1"
           GTK_A11Y: "none"
+        # A session bus of its own: without one every app start waited about
+        # 30 s on Linux before its window came up.
         run: |
-          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT" --repeat-scenario "F24-fleet-perf.mjs=$FLEET_REPEAT" ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT" --repeat-scenario "F24-fleet-perf.mjs=$FLEET_REPEAT" ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
 
       - name: Run scenarios
         if: runner.os != 'Linux'
