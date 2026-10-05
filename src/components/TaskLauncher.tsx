@@ -275,7 +275,15 @@ export function TaskLauncher({
     setBranchEditedState(v);
   }, []);
   const [checks, setChecks] = useState<string[]>([]);
-  const [checksEdited, setChecksEdited] = useState(false);
+  const [checksEdited, setChecksEditedState] = useState(false);
+  // Also read by the checks effect: the repository's probe can land just
+  // before a click on "+ add check", and that render's effect (its closure
+  // still "not edited") would then replace the new check with the file's.
+  const checksEditedRef = useRef(false);
+  const setChecksEdited = useCallback((v: boolean) => {
+    checksEditedRef.current = v;
+    setChecksEditedState(v);
+  }, []);
   const [expanded, setExpanded] = useState(false);
   const [menu, setMenu] = useState<Menu>(null);
   const [modePrefs, setModePrefs] = useState<SessionModeByProvider>({});
@@ -660,7 +668,7 @@ export function TaskLauncher({
   // "~/code/app" read as the folder it names, shown under the typed path.
   const resolvedPath = probed?.resolved && probed.resolved !== repoPath.trim() ? probed.resolved : null;
   useEffect(() => {
-    if (!checksEdited) setChecks(doneWhen.commands);
+    if (!checksEditedRef.current) setChecks(doneWhen.commands);
   }, [doneWhen, checksEdited]);
 
   useEffect(() => {
