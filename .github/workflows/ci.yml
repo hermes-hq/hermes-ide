@@ -590,8 +590,10 @@ jobs:
           # No accessibility bus on a bare runner: do not look for one.
           NO_AT_BRIDGE: "1"
           GTK_A11Y: "none"
+        # A session bus of its own: without one every app start waited about
+        # 30 s on Linux before its window came up.
         run: |
-          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT" --repeat-scenario "F24-fleet-perf.mjs=$FLEET_REPEAT" ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set shards --shard "$SHARD" --keep-going --repeat-scenario "terminal-echo.mjs=$REPEAT" --repeat-scenario "F24-fleet-perf.mjs=$FLEET_REPEAT" ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
 
       - name: Run scenarios
         if: runner.os != 'Linux'
@@ -614,7 +616,7 @@ jobs:
           WEBKIT_DISABLE_COMPOSITING_MODE: "1"
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
         run: |
-          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set keys --shard "$SHARD"
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set keys --shard "$SHARD"
 
       - name: Terminal keys with real key presses (Windows)
         if: ${{ !cancelled() && runner.os == 'Windows' }}
@@ -680,7 +682,7 @@ jobs:
           NO_AT_BRIDGE: "1"
           GTK_A11Y: "none"
         run: |
-          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set cow --shard "$SHARD" --keep-going ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
+          dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set cow --shard "$SHARD" --keep-going ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
 
       - name: Fast worktrees
         if: ${{ !cancelled() && runner.os != 'Linux' }}
@@ -771,7 +773,7 @@ jobs:
           WEBKIT_DISABLE_DMABUF_RENDERER: "1"
           NO_AT_BRIDGE: "1"
           GTK_A11Y: "none"
-        run: xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs F25-appimage-update.mjs
+        run: dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs F25-appimage-update.mjs
 
       # Negative control: the same scenario, served an update signed for
       # another file, must FAIL. Its evidence stays out of the gate's results.
@@ -786,7 +788,7 @@ jobs:
           HERMES_E2E_F25_SABOTAGE: "1"
         run: |
           export HERMES_E2E_EVIDENCE="$RUNNER_TEMP/hermes-e2e/negative-control/F25-appimage-update"
-          if xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/scenarios/F25-appimage-update.mjs; then
+          if dbus-run-session -- xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/scenarios/F25-appimage-update.mjs; then
             echo "::error::the sabotaged update was installed — the scenario cannot tell a bad update from a good one"; exit 1
           fi
           grep -q "the update downloaded and its signature verified (error)" "$HERMES_E2E_EVIDENCE/scenario.log"

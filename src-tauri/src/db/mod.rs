@@ -759,13 +759,44 @@ impl Database {
         Ok(())
     }
 
-    pub fn get_pin_session_id(&self, id: i64) -> Result<Option<String>, String> {
+    /// A pin's scope: its session (session pin) or project (project pin).
+    /// None when there is no such pin.
+    pub fn get_pin_scope(&self, id: i64) -> Result<Option<PinScope>, String> {
         let mut stmt = self
             .conn
-            .prepare("SELECT session_id FROM context_pins WHERE id = ?1")
+            .prepare("SELECT session_id, project_id FROM context_pins WHERE id = ?1")
             .map_err(|e| e.to_string())?;
-        let result = stmt.query_row(params![id], |row| row.get(0)).ok();
+        let result = stmt
+            .query_row(params![id], |row| Ok((row.get(0)?, row.get(1)?)))
+            .ok();
         Ok(result)
+    }
+
+    /// The pins a session's context uses: its own, those saved for its
+    /// primary project (the first one attached, as the context file the
+    /// agent reads uses), and global ones.
+    pub fn get_session_pins(&self, session_id: &str) -> Result<Vec<ContextPin>, String> {
+        let primary = self
+            .get_session_projects(session_id)?
+            .into_iter()
+            .next()
+            .map(|p| p.id);
+        self.get_context_pins(Some(session_id), primary.as_deref())
+    }
+
+    /// The sessions whose pin list changes when a pin with this scope is
+    /// added or removed: the session of a session pin, every session the
+    /// project is attached to for a project pin.
+    pub fn sessions_seeing_pin(
+        &self,
+        session_id: Option<&str>,
+        project_id: Option<&str>,
+    ) -> Result<Vec<String>, String> {
+        match (session_id, project_id) {
+            (Some(sid), _) => Ok(vec![sid.to_string()]),
+            (None, Some(pid)) => self.get_sessions_for_project(pid),
+            (None, None) => Ok(Vec::new()),
+        }
     }
 
     pub fn get_context_pins(
@@ -2196,6 +2227,9 @@ pub fn get_execution_log(
     db.get_execution_log_entries(&session_id, limit)
 }
 
+/// A pin's (session id, project id); one of them is set.
+pub type PinScope = (Option<String>, Option<String>);
+
 // ─── Context Pin Commands ────────────────────────────────────────────
 
 // Tauri command handler — params map to DB columns
@@ -2220,7 +2254,7 @@ pub fn add_context_pin(
         label.as_deref(),
         priority,
     )?;
-    if let Some(ref sid) = session_id {
+    for sid in db.sessions_seeing_pin(session_id.as_deref(), project_id.as_deref())? {
         let _ = app.emit(&format!("context-pins-changed-{}", sid), ());
     }
     Ok(id)
@@ -2233,14 +2267,18 @@ pub fn remove_context_pin(
     id: i64,
 ) -> Result<(), String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    let session_id = db.get_pin_session_id(id)?;
+    let scope = db.get_pin_scope(id)?;
     db.remove_context_pin(id)?;
-    if let Some(ref sid) = session_id {
-        let _ = app.emit(&format!("context-pins-changed-{}", sid), ());
+    if let Some((session_id, project_id)) = scope {
+        for sid in db.sessions_seeing_pin(session_id.as_deref(), project_id.as_deref())? {
+            let _ = app.emit(&format!("context-pins-changed-{}", sid), ());
+        }
     }
     Ok(())
 }
 
+/// With a session and no project: the pins that session's context uses,
+/// its primary project's included (`Database::get_session_pins`).
 #[tauri::command]
 pub fn get_context_pins(
     state: State<'_, AppState>,
@@ -2248,7 +2286,10 @@ pub fn get_context_pins(
     project_id: Option<String>,
 ) -> Result<Vec<ContextPin>, String> {
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.get_context_pins(session_id.as_deref(), project_id.as_deref())
+    match (session_id.as_deref(), project_id.as_deref()) {
+        (Some(sid), None) => db.get_session_pins(sid),
+        (sid, pid) => db.get_context_pins(sid, pid),
+    }
 }
 
 // ─── Context Snapshot Commands ────────────────────────────────────────
@@ -2304,6 +2345,98 @@ mod tests {
     fn test_db() -> Database {
         let tmp = NamedTempFile::new().unwrap();
         Database::new(tmp.path()).expect("Failed to create test database")
+    }
+
+    // ── context pins: what a session's panel lists ─────────────────────
+
+    #[test]
+    fn a_session_lists_its_primary_projects_pins_with_its_own() {
+        let db = test_db();
+        db.insert_project("p1", "/work/one", "one", "[]", "[]")
+            .unwrap();
+        db.insert_project("p2", "/work/two", "two", "[]", "[]")
+            .unwrap();
+        db.attach_session_project("s1", "p1", "primary").unwrap();
+        db.attach_session_project("s1", "p2", "primary").unwrap();
+        let own = db
+            .add_context_pin(Some("s1"), None, "memory", "a=1", None, None)
+            .unwrap();
+        let shared = db
+            .add_context_pin(None, Some("p1"), "file", "/work/one/notes.md", None, None)
+            .unwrap();
+        let other_project = db
+            .add_context_pin(None, Some("p2"), "file", "/work/two/x.md", None, None)
+            .unwrap();
+        let other_session = db
+            .add_context_pin(Some("s2"), None, "memory", "b=2", None, None)
+            .unwrap();
+
+        let ids: Vec<i64> = db
+            .get_session_pins("s1")
+            .unwrap()
+            .iter()
+            .map(|p| p.id)
+            .collect();
+        assert!(ids.contains(&own), "the session's own pin");
+        assert!(
+            ids.contains(&shared),
+            "the primary project's pin (the default scope in the panel)"
+        );
+        assert!(
+            !ids.contains(&other_project),
+            "only the primary project's, as in the context file"
+        );
+        assert!(!ids.contains(&other_session), "never another session's");
+        // The context file uses the same rule.
+        let assembled: Vec<i64> = db
+            .get_context_pins(Some("s1"), Some("p1"))
+            .unwrap()
+            .iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(ids, assembled);
+        // A session with no project sees only its own pins.
+        let lone: Vec<i64> = db
+            .get_session_pins("s2")
+            .unwrap()
+            .iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(lone, vec![other_session]);
+    }
+
+    #[test]
+    fn a_project_pin_changes_every_session_on_that_project() {
+        let db = test_db();
+        db.insert_project("p1", "/work/one", "one", "[]", "[]")
+            .unwrap();
+        db.attach_session_project("s1", "p1", "primary").unwrap();
+        db.attach_session_project("s2", "p1", "primary").unwrap();
+        let mut seeing = db.sessions_seeing_pin(None, Some("p1")).unwrap();
+        seeing.sort();
+        assert_eq!(seeing, vec!["s1".to_string(), "s2".to_string()]);
+        assert_eq!(
+            db.sessions_seeing_pin(Some("s3"), None).unwrap(),
+            vec!["s3".to_string()]
+        );
+        assert!(db.sessions_seeing_pin(None, None).unwrap().is_empty());
+
+        let pin = db
+            .add_context_pin(None, Some("p1"), "file", "/work/one/a.md", None, None)
+            .unwrap();
+        assert_eq!(
+            db.get_pin_scope(pin).unwrap(),
+            Some((None, Some("p1".to_string())))
+        );
+        let own = db
+            .add_context_pin(Some("s1"), None, "memory", "k=v", None, None)
+            .unwrap();
+        assert_eq!(
+            db.get_pin_scope(own).unwrap(),
+            Some((Some("s1".to_string()), None))
+        );
+        db.remove_context_pin(pin).unwrap();
+        assert_eq!(db.get_pin_scope(pin).unwrap(), None);
     }
 
     // ── insert + get_session_worktrees ─────────────────────────────────
