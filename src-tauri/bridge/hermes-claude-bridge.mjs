@@ -73,7 +73,12 @@ import {
   createControlOpBuffer,
   toSdkUserMessage,
   buildSdkEnv,
+  quietExpectedWarnings,
 } from "./bridgeRuntimeHelpers.mjs";
+
+// The SDK's notes about what the bridge does on purpose stay off stderr
+// (the Agent view shows stderr as a problem); any other warning still shows.
+quietExpectedWarnings(process);
 
 // ─── 1. Parse CLI args ──────────────────────────────────────────────
 

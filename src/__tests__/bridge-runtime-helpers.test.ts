@@ -18,6 +18,7 @@ import {
   createControlOpBuffer,
   toSdkUserMessage,
   buildSdkEnv,
+  quietExpectedWarnings,
 } from "../../src-tauri/bridge/bridgeRuntimeHelpers.mjs";
 import { buildUserEnvelope } from "../utils/submitToAgent";
 
@@ -180,5 +181,22 @@ describe("buildSdkEnv", () => {
   it("respects an explicit user value, including opting out", () => {
     const env = buildSdkEnv({ CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD: "0" }, "x");
     expect(env.CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD).toBe("0");
+  });
+});
+
+describe("quietExpectedWarnings", () => {
+  it("drops the SDK's note about tools the bridge approves on purpose, and nothing else", () => {
+    const seen: unknown[][] = [];
+    const proc = { emitWarning: (...args: unknown[]) => { seen.push(args); } };
+    const restore = quietExpectedWarnings(proc);
+    proc.emitWarning("canUseTool will not be invoked for: mcp__hermes__*", { code: "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED" });
+    proc.emitWarning("same, older signature", "Warning", "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED");
+    proc.emitWarning(Object.assign(new Error("as an Error"), { code: "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED" }));
+    proc.emitWarning("something else", { code: "SOME_OTHER_WARNING" });
+    proc.emitWarning("no code at all");
+    expect(seen.map((a) => (a[0] instanceof Error ? a[0].message : a[0]))).toEqual(["something else", "no code at all"]);
+    restore();
+    proc.emitWarning("back to normal", { code: "CLAUDE_SDK_CAN_USE_TOOL_SHADOWED" });
+    expect(seen).toHaveLength(3);
   });
 });

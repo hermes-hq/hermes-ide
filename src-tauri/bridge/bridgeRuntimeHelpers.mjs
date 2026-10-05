@@ -171,3 +171,39 @@ export function buildSdkEnv(baseEnv, clientApp) {
     CLAUDE_AGENT_SDK_CLIENT_APP: clientApp,
   };
 }
+
+/**
+ * Warnings the bridge expects and acts on by design, by code. They went to
+ * stderr, and the Agent view showed them as an STDERR panel under the
+ * conversation as if something were wrong.
+ *
+ *   CLAUDE_SDK_CAN_USE_TOOL_SHADOWED  the SDK notes that the tools in
+ *     `allowedTools` (Hermes's own MCP tools and the task list) are approved
+ *     without asking `canUseTool`. That is exactly why they are listed.
+ */
+export const EXPECTED_WARNING_CODES = new Set(["CLAUDE_SDK_CAN_USE_TOOL_SHADOWED"]);
+
+/**
+ * Wraps `proc.emitWarning` so warnings with a code in `codes` are dropped
+ * and every other warning is emitted as before. Returns a function that
+ * puts the original back.
+ *
+ * @param {{ emitWarning: (...args: unknown[]) => void }} proc
+ * @param {Set<string>} [codes]
+ */
+export function quietExpectedWarnings(proc, codes = EXPECTED_WARNING_CODES) {
+  const original = proc.emitWarning;
+  proc.emitWarning = function emitWarning(warning, ...rest) {
+    // emitWarning(warning, { code }), emitWarning(warning, type, code), or an Error carrying .code.
+    const options = rest[0];
+    const code =
+      (options && typeof options === "object" ? options.code : undefined) ??
+      (typeof rest[1] === "string" ? rest[1] : undefined) ??
+      (warning && typeof warning === "object" ? warning.code : undefined);
+    if (typeof code === "string" && codes.has(code)) return;
+    return original.call(this, warning, ...rest);
+  };
+  return () => {
+    proc.emitWarning = original;
+  };
+}
