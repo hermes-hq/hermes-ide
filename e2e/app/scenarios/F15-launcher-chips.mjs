@@ -274,9 +274,14 @@ try {
   await openLauncher(bridge);
   await typeInto(bridge, ".task-launcher-task", "Update the README");
   await pickInMenu(bridge, "where", '[data-where="current-checkout"]');
-  await bridge.waitFor("the repository's branch in the where chip", `return /current checkout · main/.test(e2e.first('[data-chip="where"]')?.innerText ?? "");`, { timeoutMs: 20_000 });
+  // The preview can catch up after the chip (Linux CI): wait for both.
+  await bridge.waitFor("the repository's branch in the where chip and the preview", `
+    const where = e2e.norm(e2e.first('[data-chip="where"]')?.innerText ?? "");
+    const preview = e2e.norm(e2e.first(".task-launcher-command")?.textContent ?? "");
+    return /current checkout · main/.test(where) && /in launcher-repo \(main\)/.test(preview);
+  `, { timeoutMs: 20_000 });
   st = await launcherState(bridge);
-  assert(/current checkout · main/.test(st.where) && /in launcher-repo \(main\)/.test(st.preview), `the where chip and the preview say so (${st.where})`);
+  assert(/current checkout · main/.test(st.where) && /in launcher-repo \(main\)/.test(st.preview), `the where chip and the preview say so (${st.where}; ${st.preview})`);
   await waitLaunchEnabled(bridge);
   before = await bridge.terminalIds();
   n1 = fx.records().length;
