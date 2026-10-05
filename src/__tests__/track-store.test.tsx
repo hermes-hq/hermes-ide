@@ -149,6 +149,18 @@ describe("the ◆ inbox items", () => {
     expect(listInboxItems()).toHaveLength(0);
   });
 
+  it("keeps a newer report when an older read arrives after it", () => {
+    // track_watch read the folder before the feature existed; the watcher's
+    // change event (read later) reached the window first.
+    applyTrackSnapshot(snap({ at: 30_000 }));
+    const kept = applyTrackSnapshot({ worktreePath: WT, branch: "hermes/demo", features: [], at: 29_500 });
+    expect(kept.slug).toBe("demo");
+    expect(getTrackState(WT).features.map((f) => f.slug)).toEqual(["demo"]);
+    // A newer read still lands.
+    applyTrackSnapshot({ worktreePath: WT, branch: "hermes/demo", features: [], at: 30_500 });
+    expect(getTrackState(WT).features).toEqual([]);
+  });
+
   it("raises nothing for a Quick worktree with no feature", () => {
     applyTrackSnapshot({ worktreePath: WT, branch: "hermes/quick", features: [], at: 1 });
     expect(getTrackState(WT).slug).toBeNull();

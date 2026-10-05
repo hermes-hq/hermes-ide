@@ -60,12 +60,16 @@ await runScenario("QA-review-track-big-files", async ({ evidenceDir, log, check 
     if (measure) log(`idle CPU with a small feature.md: ${(small * 100).toFixed(1)} % of a core`);
 
     writeFileSync(join(fdir, "feature.md"), head + ("log line " + "x".repeat(90) + "\n").repeat(200_000));
+    // A poll can land while the file is still being written (the note then
+    // names the size so far); the next poll after the write has the 19 MB.
+    const TOO_LARGE = /feature\.md is too large \(\d[\d.,]* MB\); open it in your editor/;
+    const noteText = `const n = e2e.first("[data-testid=track-too-large]"); const t = n ? e2e.norm(n.innerText) : "";`;
     const note = await bridge
-      .waitFor("the too-large note", `const n = e2e.first("[data-testid=track-too-large]"); return n ? e2e.norm(n.innerText) : null;`, { timeoutMs: 15_000 })
-      .catch(() => "");
+      .waitFor("the too-large note with the file's size", `${noteText} return ${TOO_LARGE}.test(t) ? t : null;`, { timeoutMs: 15_000 })
+      .catch(() => bridge.eval(`${noteText} return t;`));
     log(`Track panel: ${JSON.stringify(note)}`);
     await bridge.screenshot(join(evidenceDir, "too-large.png"));
-    check(/feature\.md is too large \(\d[\d.,]* MB\); open it in your editor/.test(note), "the Track panel says the file is too large and offers the editor");
+    check(TOO_LARGE.test(note), "the Track panel says the file is too large and offers the editor");
     await sleep(2000);
     if (measure) {
       const big = await cpuShare(app.child.pid, 8000);

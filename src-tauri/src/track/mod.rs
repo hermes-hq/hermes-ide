@@ -95,17 +95,38 @@ fn mtime_ms(path: &Path) -> i64 {
         .unwrap_or(0)
 }
 
-/// The first `cap` bytes of a file as text (cut back to a character
-/// boundary), and whether there was more.
-fn read_capped(path: &Path, cap: u64) -> Option<(String, bool)> {
-    use std::io::Read;
+/// What [`read_capped`] read of a file.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct Capped {
+    /// The first `cap` bytes as text (cut back to a character boundary).
+    text: String,
+    /// The file is larger than `cap`: `text` is its start.
+    truncated: bool,
+    /// The file's size in bytes, as of the read.
+    size: u64,
+}
+
+/// The first `cap` bytes of a file as text, whether there was more, and
+/// its size. The size comes from the same open file, after the read, and is
+/// never less than what was read: a file an agent is rewriting is still
+/// reported as one consistent thing (never "cut, 0 B").
+fn read_capped(path: &Path, cap: u64) -> Option<Capped> {
     let file = std::fs::File::open(path).ok()?;
+    cap_text(&file, cap, || file.metadata().ok().map(|m| m.len()))
+}
+
+/// [`read_capped`] on any reader; `size_now` is asked once the read is done.
+fn cap_text<R: std::io::Read>(
+    reader: R,
+    cap: u64,
+    size_now: impl FnOnce() -> Option<u64>,
+) -> Option<Capped> {
+    use std::io::Read;
     let mut buf = Vec::new();
-    file.take(cap + 1).read_to_end(&mut buf).ok()?;
-    let truncated = buf.len() as u64 > cap;
-    if truncated {
-        buf.truncate(cap as usize);
-    }
+    reader.take(cap + 1).read_to_end(&mut buf).ok()?;
+    let size = size_now().unwrap_or(0).max(buf.len() as u64);
+    let truncated = size > cap;
+    buf.truncate(cap as usize);
     let text = match String::from_utf8(buf) {
         Ok(t) => t,
         Err(e) => {
@@ -115,7 +136,11 @@ fn read_capped(path: &Path, cap: u64) -> Option<(String, bool)> {
             String::from_utf8(bytes).unwrap_or_default()
         }
     };
-    Some((text, truncated))
+    Some(Capped {
+        text,
+        truncated,
+        size,
+    })
 }
 
 /// A file's line count, read in blocks (never the whole file at once).
@@ -142,12 +167,8 @@ pub fn snapshot(worktree: &Path) -> TrackWorktreeSnapshot {
     for slug in ht::list_features(worktree) {
         let dir = ht::FeatureDir::new(worktree, &slug);
         let feature_file = dir.feature_file();
-        let feature_size = std::fs::metadata(&feature_file)
-            .map(|m| m.len())
-            .unwrap_or(0);
-        let (feature_text, feature_truncated) =
-            read_capped(&feature_file, TEXT_CAP).unwrap_or_default();
-        let questions_text = read_capped(&dir.dir().join("questions.md"), TEXT_CAP).map(|(t, _)| t);
+        let feature = read_capped(&feature_file, TEXT_CAP).unwrap_or_default();
+        let questions_text = read_capped(&dir.dir().join("questions.md"), TEXT_CAP).map(|c| c.text);
         let mut files = Vec::new();
         for name in READABLE.iter().skip(1) {
             let path = dir.dir().join(name);
@@ -161,10 +182,10 @@ pub fn snapshot(worktree: &Path) -> TrackWorktreeSnapshot {
         }
         features.push(TrackFeatureSnapshot {
             slug,
-            feature_text,
+            feature_text: feature.text,
             feature_modified_at: mtime_ms(&feature_file),
-            feature_size,
-            feature_truncated,
+            feature_size: feature.size,
+            feature_truncated: feature.truncated,
             questions_text,
             files,
         });
@@ -1077,17 +1098,84 @@ mod tests {
         assert_eq!(fnv1a(b"foobar"), "85944171f73967e8");
     }
 
+    /// QA-review-track-big-files on macOS CI: a snapshot taken while an
+    /// agent rewrote feature.md said "too large (0 B)". The size came from
+    /// a stat before the read; the file grew in between.
+    #[test]
+    fn a_snapshot_taken_mid_write_never_calls_a_cut_file_small() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        ht::create(&root, "big", ht::Track::Light, "Big", "").unwrap();
+        let file = root.join(".hermes/features/big/feature.md");
+        let done = Arc::new(AtomicBool::new(false));
+        let writer = {
+            let (file, done) = (file.clone(), Arc::clone(&done));
+            std::thread::spawn(move || {
+                use std::io::Write;
+                let chunk = vec![b'x'; 64 * 1024];
+                for _ in 0..40 {
+                    let mut f = std::fs::File::create(&file).unwrap();
+                    for _ in 0..16 {
+                        f.write_all(&chunk).unwrap();
+                    }
+                }
+                done.store(true, Ordering::SeqCst);
+            })
+        };
+        let mut bad = Vec::new();
+        while !done.load(Ordering::SeqCst) {
+            for f in snapshot(&root).features {
+                let consistent = (f.feature_size as usize) >= f.feature_text.len()
+                    && f.feature_truncated == (f.feature_size > TEXT_CAP);
+                if !consistent {
+                    bad.push((f.feature_size, f.feature_text.len(), f.feature_truncated));
+                }
+            }
+        }
+        writer.join().unwrap();
+        assert!(
+            bad.is_empty(),
+            "{} snapshots disagreed with themselves (size, text, truncated): {:?}",
+            bad.len(),
+            &bad[..bad.len().min(5)]
+        );
+    }
+
     #[test]
     fn a_file_of_exactly_the_cap_is_whole_and_one_byte_more_is_cut() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("f.md");
         std::fs::write(&path, "abcd").unwrap();
-        assert_eq!(read_capped(&path, 4), Some(("abcd".to_string(), false)));
-        assert_eq!(read_capped(&path, 3), Some(("abc".to_string(), true)));
+        let read = |cap| read_capped(&path, cap).map(|c| (c.text, c.truncated, c.size));
+        assert_eq!(read(4), Some(("abcd".to_string(), false, 4)));
+        assert_eq!(read(3), Some(("abc".to_string(), true, 4)));
         // A feature.md of 100 KB is read whole (the cap is 256 KB).
         let big = "x".repeat(100 * 1024);
         std::fs::write(&path, &big).unwrap();
-        assert_eq!(read_capped(&path, TEXT_CAP), Some((big, false)));
+        assert_eq!(read(TEXT_CAP), Some((big, false, 100 * 1024)));
+    }
+
+    #[test]
+    fn the_size_agrees_with_what_was_read_when_the_file_moves_under_the_read() {
+        // The stat lags the read (the file was emptied and is being
+        // refilled): the size is at least what was read, so still "cut".
+        let lagging = cap_text(&b"0123456789"[..], 4, || Some(0)).unwrap();
+        assert_eq!(
+            (lagging.text.as_str(), lagging.truncated, lagging.size),
+            ("0123", true, 5)
+        );
+        // The file grew past the cap right after a short read.
+        let grew = cap_text(&b"abc"[..], 4, || Some(9_000)).unwrap();
+        assert_eq!(
+            (grew.text.as_str(), grew.truncated, grew.size),
+            ("abc", true, 9_000)
+        );
+        // No size at all: what was read is the size.
+        let unknown = cap_text(&b"abc"[..], 4, || None).unwrap();
+        assert_eq!(
+            (unknown.text.as_str(), unknown.truncated, unknown.size),
+            ("abc", false, 3)
+        );
     }
 
     #[test]

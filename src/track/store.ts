@@ -308,6 +308,10 @@ function setBaseline(worktreePath: string, slug: string, name: string, text: str
 /** Fold one watcher report into the store and run the derivations. */
 export function applyTrackSnapshot(snap: TrackWorktreeSnapshot): TrackWorktreeState {
   const prev = states.get(snap.worktreePath);
+  // The answer to track_watch and the watcher's change events travel apart:
+  // a read taken before the newest one must not replace it (a feature
+  // folder made right after the session started would vanish for good).
+  if (prev && snap.at < prev.at) return prev;
   const features = snap.features.map((f) => parseFeatureSnapshot(f, prev?.features.find((p) => p.slug === f.slug)));
   const next: TrackWorktreeState = Object.freeze({
     worktreePath: snap.worktreePath,
