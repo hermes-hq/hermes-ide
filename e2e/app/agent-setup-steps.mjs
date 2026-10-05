@@ -276,7 +276,13 @@ export async function startAgentViewSession(bridge, log, { folder }) {
 
 /** Types a message into the Agent view composer and sends it. */
 export async function sendAgentMessage(bridge, log, text) {
-  if (!(await bridge.exists(".session-composer-input"))) await bridge.click(".session-composer-fab");
+  // The composer mounts a moment after the view: wait for it (open, or
+  // collapsed to its button) before deciding whether to open it.
+  const open = await bridge.waitFor("the composer", `
+    if (e2e.first(".session-composer-input")) return "open";
+    return e2e.first(".session-composer-fab") ? "collapsed" : null;
+  `, { timeoutMs: 20_000 });
+  if (open === "collapsed") await bridge.click(".session-composer-fab");
   await bridge.clickWhenReady(`
     const ta = e2e.must(e2e.first(".session-composer-input"), "the composer");
     ta.focus();
