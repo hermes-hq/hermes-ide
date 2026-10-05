@@ -33,7 +33,7 @@ on:
         required: false
         default: "1"
       scenario_repeat:
-        description: "Run one more scenario several times on each OS, as FILE=N (for example F21-review-desk.mjs=5); empty for none"
+        description: "Run more scenarios several times on each OS, as FILE=N or FILE=N,FILE=N (for example F21-review-desk.mjs=5); empty for none"
         required: false
         default: ""
 
@@ -680,7 +680,7 @@ jobs:
           NO_AT_BRIDGE: "1"
           GTK_A11Y: "none"
         run: |
-          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set cow --shard "$SHARD" --keep-going
+          xvfb-run -a -s "-screen 0 1600x1000x24" node e2e/app/run.mjs --ci-set cow --shard "$SHARD" --keep-going ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
 
       - name: Fast worktrees
         if: ${{ !cancelled() && runner.os != 'Linux' }}
@@ -688,7 +688,7 @@ jobs:
         env:
           CI: "true"
         run: |
-          node e2e/app/run.mjs --ci-set cow --shard "$SHARD" --keep-going
+          node e2e/app/run.mjs --ci-set cow --shard "$SHARD" --keep-going ${SCENARIO_REPEAT:+--repeat-scenario "$SCENARIO_REPEAT"}
 
       - name: Upload evidence
         if: always()

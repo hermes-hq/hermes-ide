@@ -11,7 +11,8 @@
 //   --repeat N      run each scenario N times (default 1); a scenario is
 //                   green only when every run passes
 //   --repeat-scenario FILE=N
-//                   run FILE N times instead (repeatable)
+//                   run FILE N times instead (repeatable; several at once
+//                   as FILE=N,FILE=N)
 //   --ci-set SET    with no scenarios named: run a CI set from ci-plan.mjs
 //                   instead of every file. `shards`: the scenarios the shard
 //                   jobs split between them; `build`, `keys`: the ones CI
@@ -63,9 +64,12 @@ for (let i = 0; i < args.length; i++) {
   };
   if (a === "--repeat") repeat = Number(next());
   else if (a === "--repeat-scenario") {
-    const m = /^(.+)=(\d+)$/.exec(next());
-    if (!m || Number(m[2]) < 1) throw new Error("--repeat-scenario wants FILE=N with N of at least 1");
-    repeatFor.set(asFile(m[1]), Number(m[2]));
+    const items = next().split(",").map((x) => x.trim());
+    for (const item of items) {
+      const m = /^(.+)=(\d+)$/.exec(item);
+      if (!m || Number(m[2]) < 1) throw new Error("--repeat-scenario wants FILE=N (or FILE=N,FILE=N) with N of at least 1");
+      repeatFor.set(asFile(m[1]), Number(m[2]));
+    }
   } else if (a === "--out") out = resolve(next());
   else if (a === "--keep-going") keepGoing = true;
   else if (a === "--fresh") fresh = true;

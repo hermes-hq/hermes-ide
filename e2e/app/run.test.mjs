@@ -180,6 +180,14 @@ describe("run.mjs repeat and shards", { timeout: 60_000 }, () => {
     expect(results.filter((x) => x.scenario === "a")).toHaveLength(1);
   });
 
+  it("--repeat-scenario takes several scenarios at once", () => {
+    const r = rig({ "a.mjs": PASS, "b.mjs": PASS, "c.mjs": PASS });
+    const { code, results } = run(r, ["--repeat-scenario", "a.mjs=2,b=3"]);
+    expect(code).toBe(0);
+    const runsOf = (n) => results.filter((x) => x.scenario === n).length;
+    expect([runsOf("a"), runsOf("b"), runsOf("c")]).toEqual([2, 3, 1]);
+  });
+
   it("a repeated scenario that fails once fails the invocation", () => {
     const r = rig({ "flaky.mjs": FAIL });
     const { code, out } = run(r, ["--keep-going", "--repeat", "2", "flaky.mjs"]);
@@ -244,6 +252,7 @@ describe("run.mjs repeat and shards", { timeout: 60_000 }, () => {
     expect(run(r, ["--shard", "4/3"]).code).not.toBe(0);
     expect(run(r, ["--shard", "two"]).code).not.toBe(0);
     expect(run(r, ["--repeat-scenario", "a.mjs=0"]).code).not.toBe(0);
+    expect(run(r, ["--repeat-scenario", "a.mjs=2,"]).code).not.toBe(0);
     expect(run(r, ["--repeat-scenario", "missing.mjs=2"]).code).not.toBe(0);
   });
 });
