@@ -1536,6 +1536,10 @@ features:
       REAL-7:
         text: "The context gauge equals the real codex's own /status (window, tokens used within 0.1K) and footer percent; the real agy shows no gauge"
         scenarios: ["REAL-context-codex.mjs@darwin,linux"]
+      REAL-8:
+        # e2e/app/scenarios/REAL-agent-view-resume.mjs, local only like the others.
+        text: "An Agent-view session with the real claude comes back after a restart with its earlier messages drawn from claude's transcript, no STDERR panel, and the resumed claude remembers the earlier turn"
+        scenarios: ["REAL-agent-view-resume.mjs@darwin,linux"]
   UI:
     name: "One consistent control set (UI kit foundation)"
     # Foundation only: tokens, the base.css reset, the components in
@@ -1897,7 +1901,7 @@ features:
         text: "An image pasted into the Agent-view composer reaches Claude as an image block with exactly the pasted bytes"
         scenarios: [agent-images.mjs]
       README-4:
-        text: "After the app quits and starts again, an Agent-view session comes back in Agent view, Claude is started with --resume and the same session id, and a new message is answered"
+        text: "After the app quits and starts again, an Agent-view session comes back in Agent view with its earlier messages drawn again from Claude's transcript, Claude is started with --resume and the same session id, and a new message is answered after them"
         scenarios: [N13-resume-agents.mjs]
       README-5:
         text: "Split right puts two sessions side by side, split down stacks them, and closing a pane gives its space back"

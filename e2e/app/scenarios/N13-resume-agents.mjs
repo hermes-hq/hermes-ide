@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 // N13-resume-agents — README claim "Persistent conversations — Agent-view
-// sessions resume across app restarts".
+// sessions come back after an app restart with the earlier conversation".
 //
 // The fake bridge (e2e/app/fixtures/fake-claude-bridge.mjs, started through
 // HERMES_BRIDGE_PATH like the real one) logs how each process was started
-// (its argv) and every message it receives.
+// (its argv) and every message it receives, and writes the conversation
+// where Claude Code keeps it (CLAUDE_CONFIG_DIR, a folder of this run).
 //
 //   run 1  fresh install: onboarding; a new Agent-view session for Claude;
 //          one message and its answer. The bridge was started as a new
@@ -12,13 +13,16 @@
 //   run 2  the same data: the session is back, in Agent view (not a
 //          terminal), and Hermes starts the agent again with
 //          --resume <the same id>, so Claude continues that conversation.
-//          A new message gets an answer from the resumed process.
-// What the view shows of the earlier turns after the restart is logged.
+//          The earlier message and its answer are drawn again, before
+//          anything new. A new message gets an answer from the resumed
+//          process, after them.
 //
-// Negative control (by reasoning): a build that restored the session as a
-// terminal, or started a fresh conversation (--session-id) instead of
-// resuming, fails the run 2 checks; the id compared is the one run 1's
-// process was given.
+// Negative controls: HERMES_E2E_N13A_NEGATIVE=no-transcript runs without
+// CLAUDE_CONFIG_DIR (Claude kept no transcript): the earlier messages are
+// not drawn and the run must end in RESULT: FAIL. By reasoning: a build
+// that restored the session as a terminal, or started a fresh conversation
+// (--session-id) instead of resuming, fails the run 2 checks; the id
+// compared is the one run 1's process was given.
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/N13-resume-agents.mjs
@@ -34,6 +38,7 @@ const SCENARIO = "N13-resume-agents";
 const FIRST = "remember the word heliotrope";
 const SECOND = "which word did I ask you to remember?";
 const onWindows = platform() === "win32";
+const NO_TRANSCRIPT = process.env.HERMES_E2E_N13A_NEGATIVE === "no-transcript";
 
 await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }) => {
   const work = mkdtempSync(join(tmpdir(), "hermes-e2e-n13-agents-"));
@@ -54,7 +59,10 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
     const i = argv.indexOf(flag);
     return i >= 0 ? argv[i + 1] : null;
   };
-  const env = { HERMES_BRIDGE_PATH: bridgeCopy, HERMES_FAKE_BRIDGE_LOG: fakeLog };
+  // Claude Code's folder for this run (never the machine's ~/.claude).
+  const claudeConfig = join(work, "claude-config");
+  const env = { HERMES_BRIDGE_PATH: bridgeCopy, HERMES_FAKE_BRIDGE_LOG: fakeLog, ...(NO_TRANSCRIPT ? {} : { CLAUDE_CONFIG_DIR: claudeConfig }) };
+  if (NO_TRANSCRIPT) log("negative control: no CLAUDE_CONFIG_DIR, so no transcript");
   const launch = (run, { first = false } = {}) => {
     const runDir = join(evidenceDir, `run-${run}`);
     return onWindows
@@ -121,16 +129,26 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   assert(!!restart, "Hermes started the agent again for the restored session");
   assert(argAfter(restart.argv, "--resume") === conversation, `it resumes the same conversation (--resume ${conversation})`);
   assert(argAfter(restart.argv, "--session-id") === null, "it does not start a new conversation");
+  const earlierShown = await app.bridge
+    .waitFor("the earlier conversation drawn again", `
+      const t = document.querySelector('.agent-session-view[data-session-id="' + CSS.escape(${JSON.stringify(sid2)}) + '"]')?.innerText || "";
+      return t.includes(${JSON.stringify(FIRST)}) && t.includes(${JSON.stringify(`fake reply: ${FIRST}`)});`, { timeoutMs: 15_000 })
+    .then(() => true, () => false);
   const shownAfter = await viewText(app.bridge, sid2);
-  const earlierVisible = shownAfter.includes(FIRST);
-  log(`  earlier messages visible after the restart: ${earlierVisible} (view text: ${JSON.stringify(shownAfter.slice(0, 300))})`);
+  log(`  view after the restart: ${JSON.stringify(shownAfter.slice(0, 300))}`);
   await app.bridge.screenshot(join(evidenceDir, "02-restored.png"));
+  assert(earlierShown, "the earlier message and its answer are drawn again after the restart");
 
   log("run 2: a new message gets an answer from the resumed agent");
   await sendAgentMessage(app.bridge, log, SECOND);
   await app.bridge.waitFor("the answer after the restart", `return (document.querySelector('.agent-session-view[data-session-id="' + CSS.escape(${JSON.stringify(sid2)}) + '"]')?.innerText || "").includes(${JSON.stringify(`fake reply: ${SECOND}`)});`, { timeoutMs: 30_000 });
   const answeredBy = fakeEvents().filter((e) => e.event === "input" && e.type === "user" && e.pid === restart.pid);
   assert(answeredBy.length === 1, "the message went to the resumed process");
+  const order = await viewText(app.bridge, sid2);
+  const at = (s) => order.indexOf(s);
+  assert(at(FIRST) >= 0 && at(`fake reply: ${FIRST}`) > at(FIRST) && at(SECOND) > at(`fake reply: ${FIRST}`) && at(`fake reply: ${SECOND}`) > at(SECOND),
+    "the conversation reads in order: the earlier turn, then the new one");
+  assert(order.split(`fake reply: ${FIRST}`).length === 2, "the earlier answer is shown once");
   await app.bridge.screenshot(join(evidenceDir, "03-answered.png"));
   exit = await app.stop();
   log(`  app exited: ${JSON.stringify(exit)}`);

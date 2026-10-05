@@ -15,6 +15,12 @@
 //                            blocks (an image as media type, size and sha256)
 //   HERMES_FAKE_MCP_SERVERS  comma-separated MCP server names the init
 //                            message reports as connected
+//   CLAUDE_CONFIG_DIR        when set, the conversation is also written where
+//                            Claude Code keeps it:
+//                            <dir>/projects/<working dir as a folder name>/<id>.jsonl
+//                            (one line per user message and per reply, in
+//                            Claude Code's record shape). Never written
+//                            without it, so a test never touches ~/.claude.
 //
 // Modes, applied to each user message:
 //   ok          replies "fake reply: <text>" and stays up for more messages
@@ -29,7 +35,8 @@
 // The replies are synthetic; nothing here was recorded from a real account.
 
 import { createHash } from "node:crypto";
-import { appendFileSync, readFileSync } from "node:fs";
+import { appendFileSync, mkdirSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline";
 
 const argv = process.argv.slice(2);
@@ -39,6 +46,18 @@ const flag = (name) => {
 };
 const sessionId = flag("--session-id") || flag("--resume") || "fake-session";
 const cwd = flag("--working-dir") || process.cwd();
+
+/** Claude Code's project folder name: every character that is not an ASCII letter or digit becomes "-". */
+const projectFolder = (dir) => dir.replace(/[^A-Za-z0-9]/g, "-");
+
+/** Appends one record to the conversation's transcript, as Claude Code does (only with CLAUDE_CONFIG_DIR). */
+function transcript(record) {
+  const config = process.env.CLAUDE_CONFIG_DIR;
+  if (!config) return;
+  const dir = join(config, "projects", projectFolder(cwd));
+  mkdirSync(dir, { recursive: true });
+  appendFileSync(join(dir, `${sessionId}.jsonl`), JSON.stringify({ ...record, sessionId, cwd, timestamp: new Date().toISOString(), isSidechain: false }) + "\n");
+}
 
 function log(entry) {
   const file = process.env.HERMES_FAKE_BRIDGE_LOG;
@@ -128,18 +147,15 @@ function onUserMessage(text) {
     });
   }
   const reply = `fake reply: ${text}`;
-  out({
-    type: "assistant",
-    message: {
-      id: `fake-msg-${process.pid}-${turn}`,
-      type: "message",
-      role: "assistant",
-      model: "fake-model",
-      content: [{ type: "text", text: reply }],
-    },
-    parent_tool_use_id: null,
-    session_id: sessionId,
-  });
+  const message = {
+    id: `fake-msg-${process.pid}-${turn}`,
+    type: "message",
+    role: "assistant",
+    model: "fake-model",
+    content: [{ type: "text", text: reply }],
+  };
+  out({ type: "assistant", message, parent_tool_use_id: null, session_id: sessionId });
+  transcript({ type: "assistant", uuid: `fake-a-${process.pid}-${turn}`, message: { ...message, stop_reason: "end_turn" } });
   out({ type: "result", subtype: "success", is_error: false, result: reply, session_id: sessionId, num_turns: turn });
 }
 
@@ -180,6 +196,8 @@ rl.on("line", (line) => {
     : Array.isArray(content)
       ? content.filter((b) => b?.type === "text").map((b) => b.text).join(" ")
       : "";
+  // Claude Code keeps a typed prompt as a plain string.
+  transcript({ type: "user", uuid: `fake-u-${process.pid}-${turn + 1}`, message: { role: "user", content: text } });
   onUserMessage(text);
 });
 rl.on("close", () => finish(0));

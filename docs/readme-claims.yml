@@ -39,8 +39,7 @@ claims:
     scenario: agent-images.mjs
   agent-persistent-conversations:
     text: "Persistent conversations"
-    # The earlier messages are not drawn again after the restart; the README
-    # says only that the session comes back and Claude continues it.
+    # With the real claude: REAL-agent-view-resume.mjs (local only).
     scenario: N13-resume-agents.mjs
   agent-own-auth:
     text: "Bring your own auth"

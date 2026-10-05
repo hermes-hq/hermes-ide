@@ -35,7 +35,7 @@ Hermes IDE is not affiliated with Nous Research or its Hermes Agent.
 - **Opt in per session** — tick "Agent view for Claude" in the New Session wizard to have Hermes render the conversation instead of Claude's terminal interface <!-- claim:agent-view-opt-in -->
 - **Structured conversation** — thinking blocks, tool-call cards, and diff previews <!-- claim:agent-chat -->
 - **Real images** — paste images straight into the composer; Claude sees the actual pixels <!-- claim:agent-images -->
-- **Persistent conversations** — Agent-view sessions come back after an app restart and Claude continues the same conversation <!-- claim:agent-persistent-conversations -->
+- **Persistent conversations** — Agent-view sessions come back after an app restart with the earlier conversation on screen, and Claude continues it <!-- claim:agent-persistent-conversations -->
 
 ### Git Integration
 - **Built-in git view** — the Review Desk lists staged, unstaged, and untracked files per project <!-- claim:git-panel -->
