@@ -541,7 +541,14 @@ function finish(code, why) {
 
 let waiter = null;
 let closed = false;
-if (process.stdin.isTTY) process.stdin.setRawMode(true);
+if (process.stdin.isTTY) {
+	// Breadcrumbs for a launch the shell reported "Stopped" (UI-chrome, macOS
+	// CI, once): a record that ends at "raw-mode" stopped in this call, which
+	// changes the terminal's settings (SIGTTOU when not in the foreground).
+	note("raw-mode");
+	process.stdin.setRawMode(true);
+	note("raw-mode-set");
+}
 process.stdin.setEncoding("latin1");
 process.stdin.on("data", (chunk) => {
 	for (const ch of chunk) {

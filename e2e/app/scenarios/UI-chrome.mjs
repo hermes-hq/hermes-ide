@@ -58,7 +58,7 @@
 //   node e2e/app/scenarios/UI-chrome.mjs
 
 import { execFileSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep, skipScenario } from "../harness.mjs";
@@ -141,6 +141,42 @@ if (onWindows && !canEditRegistryPath) {
 function launch() {
   const common = { runDir: join(evidenceDir, "run"), log, env: { HERMES_FAKE_DIR: recordDir } };
   return onWindows ? launchApp({ ...common, home: "real", resetData: true }) : launchApp({ ...common, home: "private", homeDir: privateHome });
+}
+
+/**
+ * Once on macOS CI the shell stopped `hi run` right after it started ("[1]+
+ * Stopped"). Say how far the fake got (its records end at "raw-mode" when
+ * changing the terminal's settings stopped it) and which processes are
+ * stopped (STAT T) against the terminal's foreground group (TPGID).
+ */
+function describeStoppedLaunch(appPid) {
+  try {
+    const records = readdirSync(recordDir).filter((f) => f.startsWith("launch-"));
+    log(`  fake launches: ${records.length}`);
+    for (const f of records) {
+      const r = JSON.parse(readFileSync(join(recordDir, f), "utf8"));
+      log(`    ${f}: events ${JSON.stringify(r.events.map((e) => `${e.ev}@${e.t}`))}, exit ${JSON.stringify(r.exit)}`);
+    }
+  } catch (e) {
+    log(`  (could not read the fake's records: ${e.message})`);
+  }
+  if (onWindows) return;
+  try {
+    const rows = execFileSync("ps", ["-A", "-o", "pid=,ppid=,pgid=,tpgid=,stat=,command="], { encoding: "utf8" }).split("\n");
+    const cols = rows.map((r) => r.trim().split(/\s+/)).filter((c) => c.length > 5);
+    const parent = new Map(cols.map((c) => [c[0], c[1]]));
+    // The terminals live under the app, or under its session host (whose
+    // data folder is in this run's home).
+    const roots = new Set([String(appPid), ...cols.filter((c) => c.slice(5).join(" ").includes(privateHome)).map((c) => c[0])]);
+    const underApp = (pid) => {
+      for (let p = pid, hops = 0; p && p !== "0" && p !== "1" && hops < 50; p = parent.get(p), hops++) if (roots.has(p)) return true;
+      return false;
+    };
+    log("  processes under the app (pid ppid pgid tpgid stat command):");
+    for (const c of cols) if (underApp(c[0])) log(`    ${c.join(" ").slice(0, 160)}`);
+  } catch (e) {
+    log(`  (ps failed: ${e.message})`);
+  }
 }
 
 // ─── UI steps ─────────────────────────────────────────────────────────
@@ -766,7 +802,10 @@ try {
   // Each asks while it is in view (only the pane in view has a terminal to type into).
   const askPermission = async () => {
     const id = await createClaudeSession(bridge);
-    await bridge.waitForTerminal(id, /fake-cli: ready/, { timeoutMs: 30_000 });
+    await bridge.waitForTerminal(id, /fake-cli: ready/, { timeoutMs: 30_000 }).catch((e) => {
+      describeStoppedLaunch(app.child.pid);
+      throw e;
+    });
     await bridge.typeInTerminal(id, "p");
     await bridge.waitFor(`the strip of ${id} to say needs approval`, `return e2e.first('.session-status-strip[data-strip-session="${id}"]')?.dataset.statusKind === "needs_approval";`, { timeoutMs: 15_000 });
     return id;
