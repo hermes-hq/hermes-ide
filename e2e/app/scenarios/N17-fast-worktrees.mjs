@@ -371,16 +371,20 @@ async function createSessionOnNewBranch(bridge, branch, shotPrefix) {
   await bridge.waitFor("the current branch to be pre-selected", `
     return !!e2e.first(".session-creator-branch-selected-label");
   `, { timeoutMs: 20_000 });
-  for (let attempt = 0; attempt < 5; attempt++) {
-    await sleep(500);
-    if (await bridge.exists(".branch-selector-tabs")) break;
-    if (!(await bridge.exists(".branch-selector-body"))) {
-      await bridge.click(".session-creator-branch-project-header");
+  // The wizard opens the row, then closes it once a branch is picked for it.
+  // Open it only while it is closed (a click on an open row shuts it), then
+  // take the New branch tab, until the new-branch form is there.
+  await bridge.waitFor("the new-branch form", `
+    if (e2e.first(".branch-selector-field-input")) return true;
+    const tabs = e2e.all(".branch-selector-tab");
+    if (tabs.length === 2) {
+      e2e.click(tabs[1]);
+      return false;
     }
-  }
-  await bridge.waitFor("the branch tabs", `return e2e.all(".branch-selector-tab").length === 2;`, { timeoutMs: 20_000 });
-  await bridge.clickWhenReady(`return e2e.click(e2e.must(e2e.all(".branch-selector-tab")[1], "New branch tab"));`);
-  await bridge.waitFor("the new-branch form", `return !!e2e.first(".branch-selector-field-input");`);
+    const row = e2e.first(".session-creator-branch-project");
+    if (row && !row.classList.contains("expanded")) e2e.click(e2e.must(row.querySelector(".session-creator-branch-project-header"), "the branch row"));
+    return false;
+  `, { timeoutMs: 20_000, intervalMs: 250 });
   await setInput(bridge, ".branch-selector-field-input", branch);
   await bridge.waitFor("Create & use to become enabled", `
     const b = e2e.first(".branch-selector-body .session-creator-actions .branch-selector-create");
