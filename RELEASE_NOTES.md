@@ -28,3 +28,4 @@ Hermes 2.1 brings thousands of ready-made prompts into the app and keeps old tas
 
 - Task folders left behind by sessions that ended without being closed (a quit, a crash, a restore that failed) are now found and tidied up safely, instead of staying on disk forever.
 - Two clean-up paths that could delete a folder that still held uncommitted changes now keep it.
+- An agent's first turn is no longer sometimes missing from its history when the agent reports its start a moment late.
