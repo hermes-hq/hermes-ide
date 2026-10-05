@@ -756,10 +756,9 @@ fn type_agent_launch(
             a.context_injected = true;
         }
     }
-    if let Ok(mut w) = writer.lock() {
-        let _ = w.write_all(format!("{}\r", launch.cmd).as_bytes());
-        let _ = w.flush();
-    }
+    // The phase before the line: this runs off the reader thread, which
+    // moves the phase on (Busy) as soon as the agent prints, and a later
+    // LaunchingAgent would undo that (the turn ledger then misses the turn).
     if let Ok(mut s) = session.lock() {
         if launch.context_in_args {
             s.context_injected = true;
@@ -767,6 +766,10 @@ fn type_agent_launch(
         s.phase = SessionPhase::LaunchingAgent;
         let update = SessionUpdate::from(&*s);
         let _ = app.emit("session-updated", &update);
+    }
+    if let Ok(mut w) = writer.lock() {
+        let _ = w.write_all(format!("{}\r", launch.cmd).as_bytes());
+        let _ = w.flush();
     }
     if let Some(watch) = launch.watch {
         crate::pty::launch::watch_signals(app.clone(), Arc::clone(session), watch);
