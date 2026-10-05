@@ -7,6 +7,7 @@
 //! sessions run in terminal mode (ADR 003).  See `docs/adr/001-agent-mode.md` for the design
 //! rationale and `wondrous-wishing-quilt` plan for the phase-by-phase build.
 
+pub mod history;
 pub mod prewarm;
 mod respawn;
 pub mod runtime;

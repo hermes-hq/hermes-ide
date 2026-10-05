@@ -1044,6 +1044,7 @@ pub fn run() {
             clipboard::copy_image_to_clipboard,
             platform::read_clipboard_text,
             // Transcript watching
+            agent::history::agent_history,
             transcript::start_transcript_watcher,
             transcript::stop_transcript_watcher,
             // Agent mode (Claude SDK bridge — see agent/mod.rs)

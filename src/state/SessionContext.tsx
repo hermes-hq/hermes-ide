@@ -94,10 +94,10 @@ import {
   loadNotesMap,
   serializeNotesMap,
 } from "../utils/workbenchLayout";
-import { spawnAgentSession, restartAgentSession, closeAgentSession, sendAgentInput, updateHermesState, setAgentPermissionMode } from "../api/agent";
+import { spawnAgentSession, restartAgentSession, closeAgentSession, sendAgentInput, updateHermesState, setAgentPermissionMode, getAgentHistory } from "../api/agent";
 import { reportAgentSpawnFailure } from "../utils/agentSpawnFailure";
 import { createRespawnQueue, respawnJoinDisabledForTest } from "../utils/respawnQueue";
-import { destroyAgentSessionStore } from "../agent/agentSessionStore";
+import { destroyAgentSessionStore, getOrCreateAgentSessionStore } from "../agent/agentSessionStore";
 import { cleanupSessionRefs } from "../utils/sessionRefCleanup";
 import { cacheAgentInit, clearAgentInitCache, peekAgentInitCache } from "../agent/useAgentInit";
 import { clearSessionEvents } from "../agent/contract/sessionEventStore";
@@ -1858,6 +1858,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 if (saved.agent_effort) claudeEfforts.current.set(newSession.id, saved.agent_effort);
                 const restoredDirs = saved.agent_add_dirs ?? newSession.workspace_paths;
                 claudeAddDirs.current.set(newSession.id, [...restoredDirs]);
+                // Claude resumes with the context but streams only what comes
+                // next: draw the earlier conversation from its transcript.
+                if (saved.claude_session_uuid) {
+                  getAgentHistory(newSession.working_directory, saved.claude_session_uuid)
+                    .then((history) => {
+                      if (history.length === 0) return;
+                      getOrCreateAgentSessionStore(newSession.id, listen).seedHistory(history as AgentEvent[]);
+                    })
+                    .catch((err) => console.warn("[SessionContext] Failed to read the earlier conversation:", err));
+                }
                 spawnAgentSession({
                   sessionId: newSession.id,
                   workingDir: newSession.working_directory,

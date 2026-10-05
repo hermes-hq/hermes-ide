@@ -1087,6 +1087,66 @@ export function reduceAll(events: AgentEvent[]): AgentSessionState {
   return events.reduce(reduceEvent, emptyState());
 }
 
+/** The time a history event was said (epoch ms), when the transcript has it. */
+function historyTimestamp(event: AgentEvent): number | null {
+  const ts = (event as { _hermes_history_ts?: unknown })._hermes_history_ts;
+  return typeof ts === "number" && Number.isFinite(ts) ? ts : null;
+}
+
+/**
+ * Puts a restored session's earlier conversation (read back from the
+ * agent's own transcript) in front of what this store already shows.
+ *
+ * The history is finished: nothing in it is running, streaming or thinking
+ * any more, and a turn it ends on did not get an answer because the app
+ * quit, so it does not read as waiting. Messages the store already has
+ * (by id) are not added twice. Each message keeps the time it was said.
+ */
+export function withHistory(state: AgentSessionState, history: AgentEvent[]): AgentSessionState {
+  if (history.length === 0) return state;
+  const past = reduceAll(history);
+  if (past.messages.length === 0) return state;
+
+  const said = new Map<string, number>();
+  for (const event of history) {
+    const ts = historyTimestamp(event);
+    if (ts === null) continue;
+    if (isAssistantEvent(event)) {
+      if (!said.has(event.message.id)) said.set(event.message.id, ts);
+    } else if (isUserEvent(event) && event.uuid) {
+      said.set(`user-${event.uuid}`, ts);
+    }
+  }
+  const have = new Set(state.messages.map((m) => m.id));
+  const earlier = past.messages
+    .filter((m) => !have.has(m.id))
+    .map((m) => {
+      const ts = said.get(m.id);
+      return ts === undefined ? m : { ...m, timestamp: ts };
+    });
+  if (earlier.length === 0) return state;
+
+  const toolResults = new Map(past.toolResults);
+  for (const [id, result] of state.toolResults) toolResults.set(id, result);
+
+  // Thinking blocks of the past keep no timer: how long they took is not in
+  // the transcript, and a time measured now would be wrong.
+
+  const lastEarlier = earlier[earlier.length - 1];
+  const endedOnPrompt = state.messages.length === 0 && lastEarlier.role === "user";
+  const resultEventAt = endedOnPrompt
+    ? Math.max(state.resultEventAt ?? 0, lastEarlier.timestamp ?? 0)
+    : state.resultEventAt;
+
+  return {
+    ...state,
+    messages: [...earlier, ...state.messages],
+    toolResults,
+    compactions: [...past.compactions, ...state.compactions],
+    resultEventAt,
+  };
+}
+
 /**
  * Derive a coarse "what is the agent doing right now?" status from the live
  * reducer state.  Used by the session header to show one of:

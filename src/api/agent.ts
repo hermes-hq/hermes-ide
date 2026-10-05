@@ -79,6 +79,12 @@ export function restartAgentSession(opts: SpawnOptions): Promise<string> {
   });
 }
 
+/** The earlier conversation of a Claude session, read back from Claude's own
+ *  transcript as Agent-view events (oldest first); empty when there is none. */
+export function getAgentHistory(workingDir: string, claudeSessionId: string): Promise<unknown[]> {
+  return invoke<unknown[]>("agent_history", { workingDir, claudeSessionId });
+}
+
 /** Send one JSON event (typically a user message) to the agent's stdin. */
 export function sendAgentInput(sessionId: string, payload: unknown): Promise<void> {
   return invoke("send_agent_input", { sessionId, payload });

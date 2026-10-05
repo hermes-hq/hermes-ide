@@ -62,7 +62,7 @@ const CLAUDE_PROJECT_DIR_MAX_LEN: usize = 200;
 /// `-` (one per UTF-16 unit, as Claude Code's JavaScript does). The leading
 /// `/` is kept, so real names start with `-`:
 /// `/work/test/my.app` -> `-work-test-my-app`, `C:\work` -> `C--work`.
-fn claude_project_dir_name(working_directory: &str) -> String {
+pub(crate) fn claude_project_dir_name(working_directory: &str) -> String {
     let mut out = String::with_capacity(working_directory.len());
     for c in working_directory.chars() {
         if c.is_ascii_alphanumeric() {

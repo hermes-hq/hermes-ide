@@ -44,7 +44,7 @@
 
 import type { AgentEvent } from "./types";
 import { isInitEvent } from "./types";
-import { emptyState, freezePendingThinking, reduceEvent } from "./messageStore";
+import { emptyState, freezePendingThinking, reduceEvent, withHistory } from "./messageStore";
 import type { AgentSessionState } from "./messageStore";
 import { isPermRequest, type PermRequest } from "../utils/permissionRequest";
 import type { AgentErrorKind } from "../api/agent";
@@ -306,6 +306,16 @@ export class AgentSessionStore {
       pendingPermRequest: null,
       protocolError: null,
     };
+    this.notify();
+  };
+
+  /** A restored session's earlier conversation, read back from the agent's
+   *  transcript, drawn in front of anything already shown. */
+  seedHistory = (history: AgentEvent[]) => {
+    if (this.destroyed) return;
+    const state = withHistory(this.snapshot.state, history);
+    if (state === this.snapshot.state) return;
+    this.snapshot = { ...this.snapshot, state };
     this.notify();
   };
 
