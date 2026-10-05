@@ -151,8 +151,12 @@ try {
       check(s.catalog.rows === base.rows.length + 1, `with the new entry (${s.catalog.rows} rows)`);
       check(fetched.filter((h) => h.startsWith("o/")).length <= 4, "downloading only what it did not have (list, shard, one body)");
       await bridge.click(".lib-badge-btn").catch(() => null);
-      await sleep(400);
-      const fresh = await bridge.eval(`return e2e.first(".lib-badge-btn")?.getAttribute("data-fresh") === "true";`);
+      // The dot follows the app's "library updated" event, which arrives after
+      // the status already reports the new catalog: wait for it, not a fixed time.
+      const fresh = await bridge
+        .waitFor("the updated dot", `return e2e.first(".lib-badge-btn")?.getAttribute("data-fresh") === "true";`, { timeoutMs: 10_000 })
+        .then(() => true)
+        .catch(() => false);
       check(fresh, "the badge shows the updated dot");
       const rows = await search(bridge, "release notes breaking changes").catch(() => []);
       check(rows.includes(PROBE_ID), "the new entry is searchable");
