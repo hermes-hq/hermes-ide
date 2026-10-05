@@ -9,14 +9,12 @@
 // run a stand-in CLI that records how it was started.
 //   1. Session A on the project: in its Context panel, "Add memory fact"
 //      saves deploy_target = staging-eu for the project (listed), and "Add
-//      pin" pins docs/decisions.md for the project (saved).
-//   2. Session B on the same project: its Context panel lists the fact; its
-//      agent's first prompt points at a context file holding the fact under
-//      "## Memory" and the pinned file (with its text) under
-//      "## Pinned Context".
-//   (The Context panel lists only the session's own pins, not the
-//   project's, so the pin is checked where it takes effect: the context
-//   file the agent reads.)
+//      pin" pins docs/decisions.md for the project: the panel lists it at
+//      once, as a project pin.
+//   2. Session B on the same project: its Context panel lists the fact and
+//      the project's pin; its agent's first prompt points at a context file
+//      holding the fact under "## Memory" and the pinned file (with its
+//      text) under "## Pinned Context".
 //   3. The app is quit and started again on the same data; session C on the
 //      project gets the same fact and pin in its context file.
 //
@@ -119,6 +117,11 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   log(`  session A's panel: ${JSON.stringify(inA)}`);
   assert(hasFact(inA), `session A lists the fact ${KEY} = ${VALUE} (project)`);
   assert(savedPins.some((p) => p.kind === "file" && p.target === pinned && (SESSION_ONLY ? p.session_id === a.sid : p.session_id === null)), "the pinned file is saved");
+  const listsPin = (state) => state.pins.some((p) => p.target.includes("decisions.md") && /project/i.test(p.scope));
+  const pinListed = await bridge
+    .waitFor("the pin in session A's panel", `return e2e.all(".ctx-pin-row").some((r) => (r.querySelector(".ctx-pin-target")?.innerText ?? "").includes("decisions.md"));`, { timeoutMs: 10_000 })
+    .then(() => true, () => false);
+  assert(pinListed && listsPin(await panelState()), "session A's Context panel lists the pin at once, as a project pin");
   await bridge.screenshot(join(evidenceDir, "01-session-a.png"));
 
   /** The context file of a session: the fact under Memory, the file (with its text) under Pinned Context. */
@@ -140,6 +143,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   const inB = await panelState();
   log(`  session B's panel: ${JSON.stringify(inB)}`);
   assert(hasFact(inB), "session B's Context panel lists the fact");
+  assert(listsPin(inB), "and the project's pin");
   await bridge.screenshot(join(evidenceDir, "02-session-b.png"));
   checkContextFile(b.ctx, "session B");
 

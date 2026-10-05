@@ -141,7 +141,8 @@ export function useContextState(session: SessionData | null): ContextManager {
       initial.model = latestInit.detected_agent?.model ?? null;
       initial.memoryFacts = latestInit.metrics.memory_facts;
 
-      // Fetch pins (session + project-scoped)
+      // Fetch pins: the session's own, its primary project's and global ones
+      // (the backend resolves the project, as for the context file)
       try {
         initial.pinnedItems = await getContextPins(session.id, null);
       } catch (err) { console.warn("[useContextState] Failed to load pins:", err); }
@@ -253,6 +254,15 @@ export function useContextState(session: SessionData | null): ContextManager {
           }
         })
         .catch((err) => console.warn("[useContextState] Failed to refresh projects:", err));
+      // The pins listed follow the primary project, which may have changed.
+      getContextPins(session.id, null)
+        .then((pins) => {
+          if (!cancelled) setContext((prev) => {
+            if (structuralEqual(prev.pinnedItems, pins)) return prev;
+            return { ...prev, pinnedItems: pins };
+          });
+        })
+        .catch((err) => console.warn("[useContextState] Failed to refresh pins:", err));
     }).then((u) => {
       if (cancelled) { u(); } else { unlisten = u; }
     });
