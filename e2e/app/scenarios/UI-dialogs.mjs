@@ -503,6 +503,10 @@ try {
   // The editor saves on its own 2 s after the last change, so Back only asks
   // while a change is fresh: type, then press Back right away.
   const typeOne = async () => {
+    // An autosave already due (from the last character; a busy runner runs
+    // it late) would also save this one at once and the dot would never
+    // show: wait until the editor holds no unsaved change first.
+    await bridge.waitFor("the editor to hold no unsaved change", `return !e2e.first(".file-preview-header .file-editor-dirty-dot");`, { timeoutMs: 10_000 });
     const typed = await bridge.eval(`
       const content = e2e.first(".cm-content");
       content.focus();

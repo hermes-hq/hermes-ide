@@ -99,7 +99,9 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, apps, onCleanup }) => {
   log(`  shell ${shell}; projects: ${attached.length}`);
   await menu(bridge, "edit.find");
   await bridge.waitFor("the Search panel", `return !!e2e.first(".search-panel");`);
-  await sleep(500);
+  // While the session's projects are read the panel says nothing (by design,
+  // see step 1b2); on a busy runner that takes longer than a fixed pause.
+  await bridge.waitFor("the session's projects read (the panel shows its hint)", `return !!e2e.first(".search-no-project");`, { timeoutMs: 10_000 }).catch(() => {});
   s = await searchState(bridge);
   log(`  ${JSON.stringify(s)}`);
   check(s.hint === "This session has no project. Add one to search its files.", `a session without a project says so ("${s.hint}")`);
@@ -173,7 +175,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, apps, onCleanup }) => {
   await sleep(2500);
   if (!(await bridge.exists(".search-panel"))) await menu(bridge, "edit.find");
   await bridge.waitFor("the Search panel", `return !!e2e.first(".search-panel");`);
-  await sleep(800);
+  await bridge.waitFor("the panel's hint", `return !!e2e.first(".search-no-project, .search-no-session");`, { timeoutMs: 10_000 }).catch(() => {});
   s = await searchState(bridge);
   log(`  German: ${JSON.stringify(s)}`);
   check(s.title.toLowerCase() === "suche" && s.placeholder === "Dateien durchsuchen…", "the panel's title and field are German");
