@@ -389,16 +389,26 @@ pub struct Proc {
     pub start_s: u64,
 }
 
+/// The children of `parent`. Windows reuses process ids and keeps an
+/// orphan's old parent id, so a process that started before its "parent"
+/// is not its child (an unknown start time, 0, is given the benefit).
+pub fn children_of<'a>(procs: &'a [Proc], parent: &'a Proc) -> impl Iterator<Item = &'a Proc> {
+    procs.iter().filter(move |p| {
+        p.parent == Some(parent.pid)
+            && (p.start_s == 0 || parent.start_s == 0 || p.start_s >= parent.start_s)
+    })
+}
+
 /// Every descendant of `root` (not `root` itself).
-pub fn descendants(procs: &[Proc], root: u32) -> Vec<&Proc> {
+pub fn descendants<'a>(procs: &'a [Proc], root: &'a Proc) -> Vec<&'a Proc> {
     let mut out = Vec::new();
     let mut frontier = vec![root];
-    let mut seen: HashSet<u32> = HashSet::from([root]);
+    let mut seen: HashSet<u32> = HashSet::from([root.pid]);
     while let Some(parent) = frontier.pop() {
-        for p in procs.iter().filter(|p| p.parent == Some(parent)) {
+        for p in children_of(procs, parent) {
             if seen.insert(p.pid) {
                 out.push(p);
-                frontier.push(p.pid);
+                frontier.push(p);
             }
         }
     }
@@ -427,10 +437,7 @@ pub fn sample_of(
             cpu_before.unwrap_or(0),
         );
     };
-    let agent = procs
-        .iter()
-        .filter(|p| p.parent == Some(helper.pid))
-        .max_by_key(|p| p.pid);
+    let agent = children_of(procs, helper).max_by_key(|p| p.pid);
     let Some(agent) = agent else {
         return (
             Sample {
@@ -443,7 +450,7 @@ pub fn sample_of(
             cpu_before.unwrap_or(0),
         );
     };
-    let below = descendants(procs, agent.pid);
+    let below = descendants(procs, agent);
     let tool = below
         .iter()
         .find(|p| is_command_shell(procs, agent, p))
@@ -459,6 +466,28 @@ pub fn sample_of(
             interval_ms,
         },
         total,
+    )
+}
+
+/// The helper's children and the agent's tree with each process's CPU total
+/// (`pid name cpu_ms`), for the debug trace of [`run`].
+pub fn tree_figures(procs: &[Proc], session_id: &str) -> String {
+    let Some(helper) = procs.iter().find(|p| is_launch_of(&p.cmd, session_id)) else {
+        return "no helper".to_string();
+    };
+    let children: Vec<&Proc> = children_of(procs, helper).collect();
+    let Some(agent) = children.iter().max_by_key(|p| p.pid) else {
+        return format!("helper {}, no agent", helper.pid);
+    };
+    let tree: Vec<String> = std::iter::once(*agent)
+        .chain(descendants(procs, agent))
+        .map(|p| format!("{} {} {}ms", p.pid, p.name, p.cpu_ms))
+        .collect();
+    format!(
+        "helper {} ({} children), tree: {}",
+        helper.pid,
+        children.len(),
+        tree.join(", ")
     )
 }
 
@@ -675,7 +704,9 @@ fn run() {
             }
             continue;
         }
+        let read_started = Instant::now();
         let procs = read_processes(&mut sys);
+        let read_ms = read_started.elapsed().as_millis();
         let now_ms = crate::turn_ledger::now_ms();
         let mut out: Vec<(AppHandle, String, SessionEvent)> = Vec::new();
         let mut settle: Vec<(AppHandle, Arc<StdMutex<Session>>)> = Vec::new();
@@ -686,6 +717,17 @@ fn run() {
                 w.last = Instant::now();
                 let (sample, total) = sample_of(&procs, sid, w.cpu_total, interval);
                 w.cpu_total = Some(total);
+                // Per-sample figures, for diagnosing a status (RUST_LOG=
+                // hermes_ide_lib::pty::os_activity=debug; off by default).
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(
+                        "[OSL] {sid}: at {now_ms} cpu {} ms over {} ms, command {:?}, read {read_ms} ms; {}",
+                        sample.cpu_ms,
+                        sample.interval_ms,
+                        sample.tool,
+                        tree_figures(&procs, sid)
+                    );
+                }
                 if sample.helper_alive {
                     w.seen_helper = true;
                     w.gone_ticks = 0;
@@ -963,6 +1005,71 @@ mod tests {
         assert!(other.helper_alive && !other.agent_alive);
         let (none, _) = sample_of(&procs, "s-3", None, 500);
         assert!(!none.helper_alive);
+    }
+
+    /// A process that started at `start_s`.
+    fn at(mut proc: Proc, start_s: u64) -> Proc {
+        proc.start_s = start_s;
+        proc
+    }
+
+    #[test]
+    fn orphans_under_a_reused_process_id_are_not_the_agent_or_its_tree() {
+        // From a Windows CI run: the helper got the process id of a session
+        // manager that had died long ago, whose children (started at boot)
+        // still name it as their parent. dwm.exe has the highest id.
+        let mut procs = vec![
+            at(p(6708, 6648, "winlogon.exe", &["winlogon.exe"], 78), 100),
+            at(p(6788, 6648, "dwm.exe", &["dwm.exe"], 2250), 100),
+            at(
+                p(6756, 6648, "fontdrvhost.exe", &["fontdrvhost.exe"], 46),
+                100,
+            ),
+            at(p(6648, 1, "hi.exe", &["hi.exe", "run", "s-1"], 15), 2000),
+            at(
+                p(4692, 6648, "cmd.exe", &["cmd.exe", "/c", "codex.cmd"], 0),
+                2000,
+            ),
+            at(
+                p(6644, 4692, "node.exe", &["node.exe", "fake-cli.mjs"], 234),
+                2000,
+            ),
+            // An orphan whose dead parent's id the agent's node now holds.
+            at(p(7000, 6644, "pwsh.exe", &["pwsh.exe"], 900), 50),
+        ];
+        let (first, total) = sample_of(&procs, "s-1", None, 500);
+        assert!(first.agent_alive);
+        assert_eq!(first.tool, None, "an orphan shell is not a command");
+        assert_eq!(total, 234, "only the agent's own tree counts");
+        // The command the agent runs is seen; dwm's CPU is not the agent's.
+        procs[6].cpu_ms = 2400;
+        procs.push(at(
+            p(7100, 6644, "cmd.exe", &["cmd.exe", "/c", "ping"], 15),
+            2010,
+        ));
+        let (second, _) = sample_of(&procs, "s-1", Some(total), 500);
+        assert_eq!(second.tool.as_deref(), Some("cmd.exe"));
+        assert_eq!(second.cpu_ms, 15);
+        assert_eq!(
+            tree_figures(&procs, "s-1"),
+            "helper 6648 (1 children), tree: 4692 cmd.exe 0ms, 6644 node.exe 234ms, 7100 cmd.exe 15ms"
+        );
+    }
+
+    #[test]
+    fn the_trace_lists_the_agents_tree_with_each_processs_cpu() {
+        let procs = vec![
+            p(11, 1, "hi", &["/app/hi", "run", "s-1"], 1),
+            p(12, 11, "claude", &["claude"], 1000),
+            p(13, 12, "node", &["node", "spin.js"], 300),
+            p(20, 1, "hi", &["/app/hi", "run", "s-2"], 1),
+        ];
+        assert_eq!(
+            tree_figures(&procs, "s-1"),
+            "helper 11 (1 children), tree: 12 claude 1000ms, 13 node 300ms"
+        );
+        assert_eq!(tree_figures(&procs, "s-2"), "helper 20, no agent");
+        assert_eq!(tree_figures(&procs, "s-3"), "no helper");
     }
 
     #[test]

@@ -211,6 +211,39 @@ async function waitForOsEvent(bridge, sid, after, pred, label, { timeoutMs = 8_0
   }
   throw new Error(`the OS layer never reported ${label} within ${timeoutMs} ms (saw: ${JSON.stringify(seen)})`);
 }
+/**
+ * Until the OS layer has no opinion on the session (its last event, at any
+ * time, is "idle", or it sent none). It reports only when it changes its
+ * mind, so a step that waits for a new "working" must start from here: a
+ * layer still "working" from the step before (the CPU an agent uses as its
+ * command ends) would carry straight on and send nothing new.
+ */
+async function waitForOsQuiet(bridge, sid, label, { timeoutMs = 10_000 } = {}) {
+  const t0 = Date.now();
+  let last = null;
+  while (Date.now() < t0 + timeoutMs) {
+    last = await bridge.eval(`
+      const os = window.__HERMES_E2E__.sessionEventSnapshot(${JSON.stringify(sid)}).events.filter((e) => e.source === "os");
+      const e = os.at(-1);
+      return e ? { at: e.at, kind: e.status?.kind, detail: e.status?.detail } : null;
+    `);
+    if (!last || last.kind === "idle") return Date.now() - t0;
+    await sleep(100);
+  }
+  throw new Error(`the OS layer never went quiet ${label} within ${timeoutMs} ms (last: ${JSON.stringify(last)}; samples: ${osSamples(sid).join(" | ")})`);
+}
+/** The OS layer's last per-sample figures for a session, from the app log (its debug trace). */
+function osSamples(sid, n = 20) {
+  try {
+    return readFileSync(app.appLog, "utf8")
+      .split(/\r?\n/)
+      .filter((l) => l.includes(`[OSL] ${sid}:`))
+      .slice(-n)
+      .map((l) => l.slice(l.indexOf("[OSL]") + sid.length + 8));
+  } catch {
+    return [];
+  }
+}
 
 /** The session's inbox items and what the attention center notified. */
 const attention = (bridge, sid) =>
@@ -248,7 +281,13 @@ let undoRegistryPath = null;
 try {
   log(`scenario: ${SCENARIO}   platform: ${platform()}   fake agents: ${fakeBin}   negative control (no shell): ${NO_SHELL}   part C only: ${AGY_ONLY}`);
   undoRegistryPath = addFakeBinToRegistryPath();
-  const env = { HERMES_FAKE_DIR: recordDir, HERMES_FAKE_TOOL_MS: String(TOOL_MS), ...(NO_SHELL ? { HERMES_FAKE_TOOL_SHELL: "0" } : {}) };
+  const env = {
+    HERMES_FAKE_DIR: recordDir,
+    HERMES_FAKE_TOOL_MS: String(TOOL_MS),
+    ...(NO_SHELL ? { HERMES_FAKE_TOOL_SHELL: "0" } : {}),
+    // The OS layer's per-sample figures in the app log, for the evidence.
+    RUST_LOG: `${process.env.RUST_LOG || "info"},hermes_ide_lib::pty::os_activity=debug`,
+  };
   app = await launchApp(
     onWindows
       ? { runDir: join(evidenceDir, "run-1"), log, env, home: "real", resetData: true }
@@ -291,10 +330,17 @@ try {
     const tags = samples.map((s) => s.tag).filter(Boolean);
     assert(tags.length > 0 && tags.every((t) => t.confidence === "exact" && t.source === "hook:claude"), `the sidebar kept the agent's exact status (${JSON.stringify(tags.at(-1))})`);
     await bridge.screenshot(join(evidenceDir, "01-exact-holds-over-a-command.png"));
+    const quietMs = await waitForOsQuiet(bridge, a, "after the command");
+    log(`  the OS layer went quiet after the command (${quietMs} ms after the last look)`);
     const tA2 = Date.now();
     await bridge.typeInTerminal(a, "b");
-    const osA2 = await waitForOsEvent(bridge, a, tA2, (e) => e.kind === "working" && /CPU/.test(e.detail ?? ""), "CPU use under Claude");
-    log(`  the OS layer saw the CPU: "${osA2.detail}"`);
+    let osA2;
+    try {
+      osA2 = await waitForOsEvent(bridge, a, tA2, (e) => e.kind === "working" && /CPU/.test(e.detail ?? ""), "CPU use under Claude");
+    } finally {
+      log(`  per-sample figures: ${osSamples(a).join(" | ")}`);
+    }
+    log(`  the OS layer saw the CPU: "${osA2.detail}" ${osA2.at - tA2} ms after the key`);
     const busy = await stripOf(bridge, a);
     assert(busy.kind === "done_unread" && busy.confidence === "exact", `the strip still says "${busy.kind} · ${busy.sourceText}" while the agent spins`);
 
@@ -313,7 +359,12 @@ try {
     const { strip: after, ms: afterMs } = await waitForStrip(bridge, b, "no longer working", (s) => s.kind !== "working", { timeoutMs: TOOL_MS + 5_000 });
     assert(after.confidence !== "exact", `once the command ended the strip leaves working ("${after.kind} · ${after.sourceText}", ${afterMs + workingMs} ms after the key)`);
     await bridge.typeInTerminal(b, "b");
-    const { strip: cpu } = await waitForStrip(bridge, b, "working from CPU use", (s) => s.kind === "working" && s.source === "os", { timeoutMs: 4_000 });
+    let cpu;
+    try {
+      ({ strip: cpu } = await waitForStrip(bridge, b, "working from CPU use", (s) => s.kind === "working" && s.source === "os", { timeoutMs: 4_000 }));
+    } finally {
+      log(`  per-sample figures: ${osSamples(b).join(" | ")}`);
+    }
     assert(/CPU/.test(cpu.detail), `CPU use shows as working too ("${cpu.detail}")`);
     const all = await osEvents(bridge, b, tB);
     assert(all.every((e) => e.confidence === "guessed"), `every OS-layer report is a guess (${all.length} reports)`);
@@ -377,6 +428,7 @@ try {
         return window.__HERMES_E2E__.terminalIds().map((id) => ({ id, tail: (window.__HERMES_E2E__.readTerminal(id) || []).slice(-8), events: window.__HERMES_E2E__.sessionEventSnapshot(id).events.slice(-10) }));
       `);
       log(`  what the app had: ${JSON.stringify(dump)}`);
+      for (const { id } of dump) log(`  the OS layer's last looks at ${id}: ${osSamples(id, 12).join(" | ") || "none"}`);
     }
   } catch (inner) {
     log(`  (could not capture failure evidence: ${inner.message})`);
