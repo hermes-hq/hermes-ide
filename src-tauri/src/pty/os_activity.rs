@@ -716,6 +716,15 @@ fn run() {
                     continue;
                 }
                 let verdict = w.judge.observe(&sample);
+                // Per-sample figures, for diagnosing a status (RUST_LOG=
+                // hermes_ide_lib::pty::os_activity=debug; off by default).
+                log::debug!(
+                    "[OSL] {sid}: at {now_ms} cpu {} ms over {} ms, command {:?}, verdict {:?}",
+                    sample.cpu_ms,
+                    sample.interval_ms,
+                    sample.tool,
+                    verdict
+                );
                 if let Some(verdict) = &verdict {
                     out.push((w.app.clone(), sid.clone(), verdict_event(verdict, now_ms)));
                 }
