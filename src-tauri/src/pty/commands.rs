@@ -705,6 +705,9 @@ struct AgentLaunch {
     /// launch folder, whether silence means a startup prompt, the nonce the
     /// launch's spool lines carry, the agent and its event stream).
     watch: Option<crate::pty::launch::SignalWatch>,
+    /// The command goes after a `cd` into the session's folder: the shell's
+    /// answer to that `cd` is watched.
+    cd_first: bool,
 }
 
 /// How long an agent's launch line waits for the terminal's real size.
@@ -758,6 +761,9 @@ fn type_agent_launch(
         // Mark context as injected if it was baked into the launch command
         if launch.context_in_args {
             a.context_injected = true;
+        }
+        if launch.cd_first {
+            a.launch_cd_check_remaining = 10;
         }
     }
     // The phase before the line: this runs off the reader thread, which
@@ -846,6 +852,7 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
                 provider,
                 context_in_args: prepared.context_in_args,
                 watch: Some(prepared.watch),
+                cd_first: false,
             });
         }
         // This build cannot launch through the helper although it should:
@@ -921,11 +928,23 @@ fn resolve_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>) -> Op
         cmd.push_str(&settings_arg);
         s.signal_nonce = Some(nonce);
     }
+    // Into the session's folder first: a shell that could not read its
+    // folder as it started (zsh shows ".") makes the agent fail at once,
+    // and a fresh `cd` fixes that. The helper sets its agent's folder itself.
+    let mut cd_first = false;
+    let dir = std::path::Path::new(&s.working_directory);
+    if cfg!(unix) && s.ssh_info.is_none() && dir.is_absolute() && dir.is_dir() {
+        if let Some(line) = crate::pty::launch::cd_then(&s.shell, &s.working_directory, &cmd) {
+            cmd = line;
+            cd_first = true;
+        }
+    }
     Some(AgentLaunch {
         cmd,
         provider,
         context_in_args,
         watch: None,
+        cd_first,
     })
 }
 
@@ -1800,6 +1819,20 @@ pub fn create_session(
                             // Emit event if AI CLI was not found
                             if let Some(failed_provider) = a.ai_launch_failed.take() {
                                 let _ = app_clone.emit("ai-launch-failed", &failed_provider);
+                            }
+                            // The shell refused the `cd` before the agent.
+                            if std::mem::take(&mut a.launch_cd_failed) {
+                                let cwd = session_clone
+                                    .lock()
+                                    .map(|s| s.working_directory.clone())
+                                    .unwrap_or_default();
+                                block_agent_launch(
+                                    &app_clone,
+                                    &session_clone,
+                                    &crate::pty::launch::folder_blocked_message(
+                                        std::path::Path::new(&cwd),
+                                    ),
+                                );
                             }
 
                             // Auto-inject context when agent prompt is first detected

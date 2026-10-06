@@ -559,6 +559,9 @@ features:
       FIX-open-files-limit-3:
         text: "When the person starts typing in a session's shell before its agent starts, Hermes types nothing into their line and says so"
         scenarios: ["FIX-open-files-limit.mjs@darwin,linux"]
+      FIX-open-files-limit-4:
+        text: "A shell that cannot read the folder it stands in (zsh shows \".\") still starts its agent in the session's folder, through the launch helper and with the typed command"
+        scenarios: ["FIX-open-files-limit.mjs@darwin,linux"]
   FIX-launcher-draft:
     # A bug fix, not new 2.0 work (the maintainer's test of 2.0). Negative
     # control (run by hand): a build of main before the fix ends in

@@ -242,10 +242,10 @@ const hooks = {
     window.__HERMES_TEST_UPDATE__.forcedUpdate = { version, body };
   },
   /** A plain shell session (no agent), shown in the focused pane. Returns its id. */
-  newTerminal: async (opts: { label?: string; cwd?: string } = {}): Promise<string | null> => {
+  newTerminal: async (opts: { label?: string; cwd?: string; aiProvider?: string } = {}): Promise<string | null> => {
     const bridge = getE2ESessionBridge();
     if (!bridge) throw new Error("the session provider has not registered its e2e bridge");
-    const session = await bridge.createSession({ mode: "terminal", label: opts.label, workingDirectory: opts.cwd });
+    const session = await bridge.createSession({ mode: "terminal", label: opts.label, workingDirectory: opts.cwd, aiProvider: opts.aiProvider });
     if (!session) return null;
     bridge.show(session.id);
     return session.id;

@@ -12,13 +12,18 @@
 //      descriptors") starts nothing and says why, with the fix.
 //   3. A session where the person starts typing before the agent's launch is
 //      due: Hermes types nothing into their line and says so.
+//   4. A shell that cannot read the folder it stands in, while the session's
+//      folder itself is fine (macOS refusing Documents to a shell just as it
+//      starts; zsh then shows "."): the agent still starts in the session's
+//      folder, through the launch helper (4a) and with the typed command,
+//      which goes behind a `cd` into the folder (4b).
 //
 //   node e2e/app/build.mjs
 //   node e2e/app/scenarios/FIX-open-files-limit.mjs
 //
 // macOS and Linux only: the fake claude and the shell setup are POSIX.
 
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { platform, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { createLogger, finishScenario, launchApp, outDir, sleep, skipScenario } from "../harness.mjs";
@@ -49,7 +54,9 @@ const open = join(work, "projects", "open");
 const lockedAbove = join(work, "projects", "hermes-locked");
 const locked = join(lockedAbove, "app");
 const slow = join(work, "projects", "hermes-slow", "app");
-for (const d of [fakeBin, home, open, locked, slow]) mkdirSync(d, { recursive: true });
+const flaky = join(work, "projects", "hermes-flaky", "app");
+const limbo = join(work, "limbo");
+for (const d of [fakeBin, home, open, locked, slow, flaky]) mkdirSync(d, { recursive: true });
 
 // The fake agent reports what it inherited: the soft limit and every open
 // descriptor (ls adds one of its own for the folder it lists).
@@ -57,7 +64,7 @@ writeFileSync(
   join(fakeBin, "claude"),
   [
     "#!/bin/sh",
-    `echo "${BANNER} soft=$(ulimit -Sn) fds=[$(ls /dev/fd | sort -n | tr '\\n' ' ')]"`,
+    `echo "${BANNER} soft=$(ulimit -Sn) fds=[$(ls /dev/fd | sort -n | tr '\\n' ' ')] cwd=$(/bin/pwd -P 2>/dev/null || echo UNREADABLE)"`,
     "while IFS= read -r line; do echo \"fake claude got: $line\"; done",
     "",
   ].join("\n"),
@@ -73,11 +80,13 @@ for (const name of Object.keys(process.env)) {
 // The person's shell setup: in hermes-locked, the folder above the shell's
 // loses its permissions once the shell stands in it (as a revoked privacy
 // grant does); in hermes-slow the shell takes 4 s to start, time in which
-// the person starts typing.
+// the person starts typing; in hermes-flaky the shell ends up standing in a
+// folder it cannot read, with "." as its folder name.
 const rc = [
   'case "$PWD" in',
   '  */hermes-locked/*) chmod 000 "${PWD%/*}" ;;',
   "  */hermes-slow/*) sleep 4 ;;",
+  `  */hermes-flaky/*) chmod 755 '${limbo}' 2>/dev/null; mkdir -p '${limbo}/in' && cd '${limbo}/in' && chmod 000 '${limbo}' && PWD=. ;;`,
   "esac",
   "",
 ].join("\n");
@@ -153,14 +162,52 @@ try {
   assert(!/typed-by-person\S*(claude|hi run|Read the file)/.test(t3), `the person's command ran on its own (${t3.split("\n").filter((l) => l.includes("typed-by-person")).join(" | ")})`);
   await bridge.screenshot(join(evidenceDir, "03-typing-kept.png"));
   log(`  toasts at the end: ${JSON.stringify(await toasts(bridge))}`);
+
+  // ── 4. The shell cannot read where it stands; the folder is fine ──
+  const wantCwd = realpathSync(flaky);
+  const agentCwd = async (b, id) => {
+    const { line: l } = await b.waitForTerminal(id, new RegExp(`${BANNER} soft=`), { timeoutMs: 45_000 });
+    return /cwd=(.*)$/.exec(l.trim())?.[1] ?? "";
+  };
+  log("step 4a: launch helper, in a shell standing in a folder it cannot read");
+  const s4a = await launch(bridge, flaky, "fd-flaky-helper");
+  const cwd4a = await agentCwd(bridge, s4a);
+  assert(cwd4a === wantCwd, `the agent runs in the session's folder (${cwd4a})`);
+  await app.stop({ stopPrograms: true });
+  app = null;
+  chmodSync(limbo, 0o755);
+
+  log("step 4b: the typed command (launch helper off), same shell trouble");
+  app = await launchApp({
+    runDir: join(evidenceDir, "run-typed"),
+    log,
+    home: "private",
+    homeDir: home,
+    openFilesSoftLimit: 256,
+    flagDefaults: { taskLauncher: false, launchHelper: false },
+  });
+  const b2 = app.bridge;
+  await b2.waitFor("the app UI", `return !!e2e.first(".topbar") && !e2e.first(".onboarding-backdrop");`, { timeoutMs: 30_000 });
+  await sleep(300);
+  if (await b2.exists(".whatsnew-backdrop")) await b2.click(".whatsnew-footer .whatsnew-btn-primary");
+  const s4b = await b2.eval(`return await window.__HERMES_E2E__.newTerminal(${JSON.stringify({ label: "fd-flaky-typed", cwd: flaky, aiProvider: "claude" })});`, { timeoutMs: 30_000 });
+  assert(!!s4b, "a Claude session with the typed command was created");
+  const cwd4b = await agentCwd(b2, s4b);
+  const t4b = await terminalText(b2, s4b);
+  log(`  typed: ${t4b.split("\n").find((l) => l.includes("claude")) ?? "(not found)"}`);
+  assert(/cd -- '[^']*hermes-flaky\/app' && claude/.test(t4b.replace(/\n/g, "")), "the launch went behind a cd into the session's folder");
+  assert(cwd4b === wantCwd, `the agent runs in the session's folder (${cwd4b})`);
+  await b2.screenshot(join(evidenceDir, "04-typed-launch-recovered.png"));
 } catch (e) {
   failed = true;
   log(`FAIL: ${e.stack || e}`);
   if (app) await app.bridge.screenshot(join(evidenceDir, "failure.png")).catch(() => {});
 } finally {
-  try {
-    chmodSync(lockedAbove, 0o755);
-  } catch {}
+  for (const d of [lockedAbove, limbo]) {
+    try {
+      chmodSync(d, 0o755);
+    } catch {}
+  }
   if (app) await app.stop({ stopPrograms: true }).catch((e) => log(`stop: ${e}`));
   rmSync(work, { recursive: true, force: true });
 }
