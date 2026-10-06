@@ -194,6 +194,9 @@ jobs:
     needs: config
     if: needs.config.outputs.release == 'true'
     runs-on: ubuntu-24.04
+    # The CI run for the merged commit can queue behind other runs on a busy
+    # day; wait up to 5 hours for its gate before giving up.
+    timeout-minutes: 320
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v6
         with:
@@ -206,7 +209,7 @@ jobs:
       - name: The released commit passed the CI gate and the ledger is well-formed
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node e2e/release-gate.mjs --sha "$(git rev-parse HEAD^{commit})" --check gate --ci-workflow ci.yml --wait-minutes 90 --missing-grace-minutes 15
+        run: node e2e/release-gate.mjs --sha "$(git rev-parse HEAD^{commit})" --check gate --ci-workflow ci.yml --wait-minutes 300 --missing-grace-minutes 15
 
   # ── Frontend tests ─────────────────────────────────────────────────
   test-frontend:
