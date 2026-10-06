@@ -362,6 +362,7 @@ export const jaPack: LanguagePack = {
     "review.keySend": "送信",
     "review.keyRevert": "取り消し",
     "review.noRepository": "このセッションのフォルダに git リポジトリがありません。",
+    "review.folderNotGit": "このセッションのフォルダーは git リポジトリではありません。git プロジェクトは上に表示されています。",
     "review.conflictResolved": "{path} を解決しました",
     "review.mergeAborted": "マージを中止しました",
     "palette.searchInFolder": "フォルダ内を検索",

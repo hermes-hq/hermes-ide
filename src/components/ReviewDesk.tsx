@@ -240,6 +240,21 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
   const [diffError, setDiffError] = useState<string | null>(null);
   // The folder is not a git repository (or the session has none): a plain empty state, not an error.
   const [noRepository, setNoRepository] = useState(false);
+  // A mixed session: its own folder is not a git repository, another of its projects is.
+  const [otherGitProject, setOtherGitProject] = useState(false);
+  useEffect(() => {
+    if (!noRepository) {
+      setOtherGitProject(false);
+      return;
+    }
+    let live = true;
+    gitStatus(sessionId)
+      .then((s) => live && setOtherGitProject(s.projects.some((p) => p.is_git_repo)))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [noRepository, sessionId]);
   const [loading, setLoading] = useState(true);
   const [turns, setTurns] = useState<TurnEntry[]>([]);
   const [groupBy, setGroupBy] = useState<GroupBy>("file");
@@ -855,8 +870,8 @@ export function ReviewDesk({ sessionId, sessions, onClose }: ReviewDeskProps) {
                 {loading && <div className="review-empty">{t("review.loading")}</div>}
                 {!loading && diffError && <div className="review-error">{diffError}</div>}
                 {!loading && noRepository && (
-                  <div className="review-empty" data-empty="no-repository">
-                    {t("review.noRepository")}
+                  <div className="review-empty" data-empty="no-repository" data-other-git={otherGitProject ? "true" : undefined}>
+                    {otherGitProject ? t("review.folderNotGit") : t("review.noRepository")}
                   </div>
                 )}
                 {!loading && !diffError && !noRepository && groupBy === "file" && files.length === 0 && <div className="review-empty">{t("review.nothingChanged")}</div>}

@@ -362,6 +362,7 @@ export const frPack: LanguagePack = {
     "review.keySend": "envoyer",
     "review.keyRevert": "annuler",
     "review.noRepository": "Aucun dépôt git dans les dossiers de cette session.",
+    "review.folderNotGit": "Le dossier de cette session n'est pas un dépôt git ; ses projets git sont listés au-dessus.",
     "review.conflictResolved": "{path} résolu",
     "review.mergeAborted": "Fusion abandonnée",
     "palette.searchInFolder": "Rechercher dans le dossier",

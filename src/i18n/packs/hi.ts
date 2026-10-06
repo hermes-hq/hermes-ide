@@ -587,6 +587,7 @@ export const hiPack: LanguagePack = {
     "review.keySend": "भेजें",
     "review.keyRevert": "वापस करें",
     "review.noRepository": "इस सत्र के फ़ोल्डरों में कोई git रिपॉज़िटरी नहीं है।",
+    "review.folderNotGit": "इस सत्र का फ़ोल्डर git रिपॉज़िटरी नहीं है; इसके git प्रोजेक्ट ऊपर दिए गए हैं।",
     "review.conflictResolved": "{path} सुलझाया गया",
     "review.mergeAborted": "मर्ज रद्द किया गया",
     "palette.searchInFolder": "फोल्डर में खोजें",

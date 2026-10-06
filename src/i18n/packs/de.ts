@@ -362,6 +362,7 @@ export const dePack: LanguagePack = {
     "review.keySend": "senden",
     "review.keyRevert": "zurücknehmen",
     "review.noRepository": "Kein Git-Repository in den Ordnern dieser Sitzung.",
+    "review.folderNotGit": "Der Ordner dieser Sitzung ist kein Git-Repository; ihre Git-Projekte stehen oben.",
     "review.conflictResolved": "{path} aufgelöst",
     "review.mergeAborted": "Merge abgebrochen",
     "palette.searchInFolder": "Im Ordner suchen",
