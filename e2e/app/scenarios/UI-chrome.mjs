@@ -24,6 +24,9 @@
 //   bars      the status bar's icon buttons are 28 px and sit inside it; the
 //             activity bar's count is a neutral 16 px Counter; the title-bar
 //             inbox badge's count is brass (attention) while agents wait
+//   labels    each activity-bar label, hovered, is a tooltip beside the
+//             bar: opaque, edged, on top of the sidebar; the button keeps
+//             its size
 //   inbox     opened with ⌘⇧I (Ctrl+Shift+A): 44 px rows; ↓ moves the
 //             highlight (aria-activedescendant, the hover fill); the session
 //             in view is the current row (fill + brass rail); text ≥ 4.5:1;
@@ -635,6 +638,47 @@ async function checkOneClose(bridge, theme) {
   check(m.textX.length === 0, `${theme}: no button in the chrome draws a text × (${m.textX.join(" | ")})`);
 }
 
+/**
+ * Each activity-bar label, hovered (its :hover rules copied onto
+ * [data-simhover]: the test window has no pointer), is a tooltip: beside
+ * the bar, on an opaque edged surface, on top of whatever it lies over
+ * (the sidebar's header and rows), and the button keeps its size.
+ */
+async function checkActivityLabels(bridge, theme) {
+  const rows = await bridge.eval(`${PAGE}
+    if (!window.__simHover) {
+      const css = [];
+      const walk = (rules) => { for (const r of rules) {
+        if (r.selectorText) { if (r.selectorText.includes("activity-bar") && r.selectorText.includes(":hover")) css.push(r.cssText.replaceAll(":hover", "[data-simhover]")); }
+        else if (r.cssRules && !(r instanceof CSSKeyframesRule)) walk(r.cssRules);
+      } };
+      for (const sh of document.styleSheets) { try { walk(sh.cssRules); } catch (e) {} }
+      const st = document.createElement("style"); st.textContent = css.join("\\n"); document.head.appendChild(st);
+      window.__simHover = true;
+    }
+    const bar = document.querySelector(".activity-bar-left").getBoundingClientRect();
+    return [...document.querySelectorAll(".activity-bar-left button")].map((b) => {
+      const w0 = box(b).w;
+      b.setAttribute("data-simhover", "");
+      const l = b.querySelector(".activity-bar-label");
+      for (const a of l.getAnimations()) a.finish();
+      const r = box(l), cs = getComputedStyle(l), y = (r.top + r.bottom) / 2;
+      // A tooltip takes no pointer events; let the hit test see it.
+      l.style.pointerEvents = "auto";
+      const onTop = [0.1, 0.5, 0.9].every((f) => l.contains(document.elementFromPoint(r.left + r.w * f, y)));
+      l.style.pointerEvents = "";
+      const out = { name: b.getAttribute("aria-label") ?? l.textContent, w0, w1: box(b).w, left: r.left, barRight: bar.right, bg: rgb(cs.backgroundColor).a, opacity: +cs.opacity, shadow: cs.boxShadow !== "none", border: parseFloat(cs.borderTopWidth) || 0, onTop };
+      b.removeAttribute("data-simhover");
+      return out;
+    });
+  `);
+  check(rows.length >= 4, `${theme}: the activity bar has labels to check (${rows.length})`);
+  for (const r of rows) {
+    const ok = r.w1 === r.w0 && r.left >= r.barRight && r.bg === 1 && r.opacity === 1 && r.shadow && r.border > 0 && r.onTop;
+    check(ok, `${theme}: hovering "${r.name}" shows its label beside the bar as an opaque, edged tooltip on top of the sidebar, the button keeps its size (${JSON.stringify(r)})`);
+  }
+}
+
 async function checkFocus(bridge, theme, roots, { min = 10 } = {}) {
   await bridge.eval(`${PAGE}; window.__uiFocus.install(); return true;`);
   let total = 0;
@@ -863,6 +907,7 @@ try {
     await checkHeaderStripBars(bridge, theme.id, B);
     await checkOneClose(bridge, theme.id);
     await checkFocus(bridge, theme.id, [".session-list", ".split-pane-header", ".session-status-strip", ".status-bar", ".activity-bar", ".topbar .attention-center"]);
+    await checkActivityLabels(bridge, theme.id);
     // The rings as drawn: the current row's Close, the strip's ⌘I, "+ Add
     // Project", the pane's Close and the status bar's buttons with the
     // simulated focus (one screenshot; each ring shows whole).

@@ -43,17 +43,10 @@
   color: var(--text-2);
   cursor: pointer;
   padding: 0 5px;
-  white-space: nowrap;
-  overflow: hidden;
-  max-width: var(--btn-size);
-  /* No height change on hover — only width + label reveal.
-   * We deliberately do NOT use `justify-content: center`: the label is
-   * always in flow (just opacity 0) and would push the icon out of the
-   * visible window if we centered the flex children. The natural
-   * flex-start packing keeps the icon glued to the leading edge. */
+  /* Fixed geometry: hover never widens the button. The label is a
+   * pop-out beside it (see "Label" below), not part of its width. */
+  width: var(--btn-size);
   transition:
-    max-width var(--dur-base) var(--ease-out-expo),
-    gap var(--dur-quick) var(--ease-out-soft),
     background var(--dur-quick) var(--ease-out-soft),
     color var(--dur-quick) var(--ease-out-soft);
 }
@@ -68,9 +61,6 @@
 .activity-bar-tab:hover {
   background: var(--bg-hover);
   color: var(--text-1);
-  max-width: 180px;
-  gap: var(--space-2);
-  padding: 0 var(--space-2);
 }
 
 .activity-bar-tab-active {
@@ -98,34 +88,6 @@
   flex-direction: row-reverse;
 }
 
-/* Accent rail — sits at the outer bar edge (compensates for the
- * tab's 4px outer margin so the rail aligns flush with the bar edge). */
-.activity-bar-left .activity-bar-tab-active::before {
-  content: "";
-  position: absolute;
-  left: -4px;
-  top: 50%;
-  height: 16px;
-  width: 2px;
-  transform: translateY(-50%);
-  background: var(--brass, var(--voice-user));
-  border-radius: 0 2px 2px 0;
-  box-shadow: 0 0 8px color-mix(in srgb, var(--brass, var(--voice-user)) 30%, transparent);
-}
-
-.activity-bar-right .activity-bar-tab-active::before {
-  content: "";
-  position: absolute;
-  right: -4px;
-  top: 50%;
-  height: 16px;
-  width: 2px;
-  transform: translateY(-50%);
-  background: var(--brass, var(--voice-user));
-  border-radius: 2px 0 0 2px;
-  box-shadow: 0 0 8px color-mix(in srgb, var(--brass, var(--voice-user)) 30%, transparent);
-}
-
 /* ─── Icon wrap ────────────────────────────────────────────── */
 
 .activity-bar-icon-wrap {
@@ -138,22 +100,50 @@
   flex-shrink: 0;
 }
 
-/* ─── Label (hidden until hover) ───────────────────────────── */
+/* ─── Label (a tooltip, shown on hover and keyboard focus) ─── */
 
+/* A pop-out beside the icon on the popover surface: opaque, edged and
+ * raised, so whatever it lies over (the sidebar's header, its rows) is
+ * hidden under it rather than showing through. The button's name is
+ * its aria-label; this copy is aria-hidden. */
 .activity-bar-label {
+  position: absolute;
+  top: 50%;
+  left: calc(100% + var(--space-2));
+  z-index: 1;
+  transform: translateY(-50%);
+  padding: var(--space-1) var(--space-2);
+  border: var(--control-border-width) solid var(--rule-zone);
+  border-radius: var(--radius);
+  background: var(--popover-bg);
+  box-shadow: var(--shadow-3);
+  white-space: nowrap;
   font-family: var(--font-ui);
   font-size: var(--text-xs);
   font-weight: var(--weight-medium);
+  line-height: var(--leading-tight);
   letter-spacing: var(--tracking-snug);
-  color: var(--text-1);
+  color: var(--text-0);
   opacity: 0;
   transition: opacity var(--dur-quick) var(--ease-out-soft);
   pointer-events: none;
 }
 
+.activity-bar-right .activity-bar-label {
+  left: auto;
+  right: calc(100% + var(--space-2));
+}
+
 .activity-bar-tab:hover .activity-bar-label,
-.activity-bar-action:hover .activity-bar-label {
+.activity-bar-action:hover .activity-bar-label,
+.activity-bar-tab:focus-visible .activity-bar-label,
+.activity-bar-action:focus-visible .activity-bar-label {
   opacity: 1;
+}
+
+/* No tooltip while a tab is being dragged. */
+.activity-bar-tab-dragging .activity-bar-label {
+  opacity: 0;
 }
 
 /* ─── Badge ────────────────────────────────────────────────── */
@@ -181,12 +171,8 @@
   color: var(--text-2);
   cursor: pointer;
   padding: 0 5px;
-  white-space: nowrap;
-  overflow: hidden;
-  max-width: var(--btn-size);
+  width: var(--btn-size);
   transition:
-    max-width var(--dur-base) var(--ease-out-expo),
-    gap var(--dur-quick) var(--ease-out-soft),
     background var(--dur-quick) var(--ease-out-soft),
     color var(--dur-quick) var(--ease-out-soft);
 }
@@ -194,9 +180,6 @@
 .activity-bar-action:hover {
   background: var(--bg-hover);
   color: var(--text-0);
-  max-width: 180px;
-  gap: var(--space-2);
-  padding: 0 var(--space-2);
 }
 
 /* ─── Separator — etched groove between pinned and reorderable ── */

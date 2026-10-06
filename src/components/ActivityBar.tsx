@@ -158,9 +158,10 @@ export function ActivityBar({ side, tabs, activeTabId, onTabClick, onReorder, to
         <button
           className={`activity-bar-action activity-bar-expandable activity-bar-expand-${side}`}
           onClick={topAction.onClick}
+          aria-label={topAction.label}
         >
           <span className="activity-bar-icon-wrap">{topAction.icon}</span>
-          <span className="activity-bar-label">{topAction.label}</span>
+          <span className="activity-bar-label" aria-hidden="true">{topAction.label}</span>
         </button>
       )}
       {pinnedTabs && pinnedTabs.map((tab) => (
@@ -169,12 +170,13 @@ export function ActivityBar({ side, tabs, activeTabId, onTabClick, onReorder, to
           data-tab-id={tab.id}
           className={`activity-bar-tab activity-bar-expandable activity-bar-expand-${side}${activeTabId === tab.id ? " activity-bar-tab-active" : ""}`}
           onClick={() => onTabClick(tab.id)}
+          aria-label={tab.label}
         >
           <span className="activity-bar-icon-wrap">
             {tab.icon}
             <TabBadge tab={tab} />
           </span>
-          <span className="activity-bar-label">{tab.label}</span>
+          <span className="activity-bar-label" aria-hidden="true">{tab.label}</span>
         </button>
       ))}
       {(topAction || (pinnedTabs && pinnedTabs.length > 0)) && (
@@ -191,12 +193,13 @@ export function ActivityBar({ side, tabs, activeTabId, onTabClick, onReorder, to
               className={`activity-bar-tab activity-bar-expandable activity-bar-expand-${side}${activeTabId === tab.id ? " activity-bar-tab-active" : ""}${dragId === tab.id ? " activity-bar-tab-dragging" : ""}`}
               onMouseDown={(e) => handleMouseDown(e, tab.id)}
               onClick={onReorder ? undefined : () => onTabClick(tab.id)}
+              aria-label={tab.label}
             >
               <span className="activity-bar-icon-wrap">
                 {tab.icon}
                 <TabBadge tab={tab} />
               </span>
-              <span className="activity-bar-label">{tab.label}</span>
+              <span className="activity-bar-label" aria-hidden="true">{tab.label}</span>
             </button>
           </div>
         ))}
@@ -212,9 +215,10 @@ export function ActivityBar({ side, tabs, activeTabId, onTabClick, onReorder, to
               key={i}
               className={`activity-bar-action activity-bar-expandable activity-bar-expand-${side}`}
               onClick={action.onClick}
+              aria-label={action.label}
             >
               <span className="activity-bar-icon-wrap">{action.icon}</span>
-              <span className="activity-bar-label">{action.label}</span>
+              <span className="activity-bar-label" aria-hidden="true">{action.label}</span>
             </button>
           ))}
         </>
