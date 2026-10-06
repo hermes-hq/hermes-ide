@@ -20,7 +20,8 @@ name: Release
 #   5. Only then is the tag created on the merged commit and the release
 #      published as a PRERELEASE: the beta channel (channels/beta.json) points
 #      at it, while `releases/latest` (stable clients) is untouched.
-#   6. promote.yml flips it to the latest release after the soak period.
+#   6. publish-beta then starts promote.yml for the tag, which makes it the
+#      latest release straight away (an open `release-hold` issue still stops it).
 #
 # Tags are never moved: a re-run with an existing tag must point at the same
 # commit or it fails. A failed candidate is fixed by shipping the next version.
@@ -60,12 +61,13 @@ permissions:
   contents: write
   id-token: write
   attestations: write
+  actions: write
 
 env:
   CARGO_INCREMENTAL: 0
   CARGO_NET_RETRY: 10
   RUSTUP_MAX_RETRIES: 10
-  SOAK_NOTE: "Published to the beta channel first; promoted to stable after the soak period."
+  SOAK_NOTE: "Published to the beta channel, then promoted to stable straight away."
 
 jobs:
   # ── Decide whether this commit is a release ────────────────────────
@@ -1002,6 +1004,15 @@ jobs:
           git commit -m "beta: $TAG" || echo "beta.json unchanged"
           git push origin HEAD:channels
           echo "Beta clients now read $TAG from channels/beta.json"
+
+      - name: Promote to stable now
+        run: |
+          set -euo pipefail
+          # No soak: promote.yml makes this the latest release, checks the
+          # public manifest and puts the previous release back if that fails.
+          # An open `release-hold` issue still stops it.
+          gh workflow run promote.yml --repo "${{ github.repository }}" -f tag="$TAG"
+          echo "Started promote.yml for $TAG"
 
   # ── winget installs the published release ──────────────────────────
   # Installs the release just published through the winget manifests the

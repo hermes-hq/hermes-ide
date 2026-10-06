@@ -2,7 +2,9 @@ name: Promote release
 
 # Moves a build from the beta channel to stable.
 #
-# Every hour: the newest prerelease that has soaked for 24 hours becomes the
+# Right after the release train publishes a build (release.yml starts this
+# workflow with its tag), and as an hourly safety net: the newest prerelease
+# becomes the
 # latest release (stable clients read `releases/latest/download/latest.json`,
 # which only a non-prerelease can occupy). An open issue labelled
 # `release-hold` stops it: naming a tag in the title holds that tag, naming
@@ -26,7 +28,7 @@ on:
       soak_hours:
         description: "Soak period in hours for automatic promotion"
         required: false
-        default: "24"
+        default: "0"
         type: string
 
 permissions:
@@ -52,7 +54,7 @@ jobs:
         id: pick
         env:
           TAG_INPUT: ${{ inputs.tag }}
-          SOAK_HOURS: ${{ inputs.soak_hours || '24' }}
+          SOAK_HOURS: ${{ inputs.soak_hours || '0' }}
         run: |
           set -euo pipefail
           ARGS=(pick --repo "$REPO" --soak-hours "$SOAK_HOURS")

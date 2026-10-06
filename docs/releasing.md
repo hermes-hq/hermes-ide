@@ -73,8 +73,9 @@ foreign manifest fails the check rather than installing it.
 
 ## Promotion to stable
 
-`.github/workflows/promote.yml` runs hourly. The newest prerelease that has
-soaked for 24 hours becomes the latest release. Then a canary reads the public
+The release train starts `.github/workflows/promote.yml` with the new tag as
+soon as it is published, so it becomes the latest release straight away (the
+workflow also runs hourly as a safety net). There is no soak period. Then a canary reads the public
 stable manifest and downloads every asset it points at; if that fails the
 previous release is made latest again and the candidate goes back to
 prerelease.
