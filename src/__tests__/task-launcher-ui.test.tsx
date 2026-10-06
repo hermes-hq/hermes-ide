@@ -855,10 +855,34 @@ describe("TaskLauncher: rows that stop Launch", () => {
     expect(chip("model")).toHaveTextContent("model: opus");
   });
 
-  it("a folder that is not a git repository blocks Launch", async () => {
-    await open({ defaultRepo: "/fixture-home/plain" });
+  it("a folder that is not a git repository launches in that folder: no worktree, no branch, a plain hint", async () => {
+    const plain = "/fixture-home/plain";
+    h.probe.set(plain, { git_root: null, branch_exists: false, local_branches: [], worktree_toml: null, current_branch: null, exists: true, is_dir: true, has_commits: false, resolved: plain });
+    const { onLaunch } = await open({ defaultRepo: plain });
+    await typeTask("Fix it");
+    expect(blocks()).toEqual([]);
+    // Nothing to choose about worktrees or branches there.
+    expect(chip("where")).toBeNull();
+    expect(chip("project")).not.toHaveClass("danger");
+    expect(document.querySelector(".task-launcher-plain-folder")).toHaveTextContent("Not a git repository: the agent works directly in this folder.");
+    expect(preview()).toMatch(/ {2}·  in plain \(no worktree\)$/);
+    await expand();
+    expect(document.querySelector(".task-launcher-options [data-where]")).toBeNull();
+    expect(launchButton()).toBeEnabled();
+    await launchWithEnter();
+    expect(onLaunch).toHaveBeenCalledTimes(1);
+    const req = onLaunch.mock.calls[0][0];
+    expect(req.repoRoot).toBe(plain);
+    expect(req.agents[0]).toMatchObject({ branch: "", createBranch: false, baseBranch: "", worktree: false });
+  });
+
+  it("nothing at the path still stops Launch, with what is wrong", async () => {
+    const gone = "/fixture-home/gone";
+    h.probe.set(gone, { git_root: null, branch_exists: false, local_branches: [], worktree_toml: null, current_branch: null, exists: false, is_dir: false, has_commits: false, resolved: gone });
+    await open({ defaultRepo: gone });
     await typeTask("Fix it");
     expect(blocks()).toEqual(["not-git"]);
+    expect(document.querySelector('.task-launcher-block[data-kind="not-git"]')).toHaveTextContent("No folder at this path.");
     expect(launchButton()).toBeDisabled();
   });
 

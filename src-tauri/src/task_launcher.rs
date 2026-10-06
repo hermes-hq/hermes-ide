@@ -203,16 +203,14 @@ pub fn valid_slug(slug: &str) -> bool {
 }
 
 /// Write `<checkout>/.hermes/features/<slug>/feature.md`, unless one is
-/// already there. Returns the file's path.
+/// already there. Returns the file's path. `checkout` is a git checkout, or a
+/// plain folder a task runs in directly (no worktree there).
 pub fn write_feature_file(checkout: &Path, slug: &str, contents: &str) -> Result<PathBuf, String> {
     if !valid_slug(slug) {
         return Err(format!("not a valid feature name: {slug:?}"));
     }
     if !checkout.is_dir() {
         return Err("the task's folder does not exist".to_string());
-    }
-    if Repository::open(checkout).is_err() {
-        return Err("the task's folder is not a git checkout".to_string());
     }
     let dir = checkout.join(".hermes").join("features").join(slug);
     let file = dir.join("feature.md");
@@ -501,8 +499,16 @@ mod tests {
             "---\nslug: fix-login\n---\n"
         );
         assert!(write_feature_file(dir.path(), "../escape", "x").is_err());
+        assert!(write_feature_file(&dir.path().join("missing"), "ok", "x").is_err());
+    }
+
+    #[test]
+    fn a_plain_folder_takes_a_feature_file_too() {
+        // A task in a folder that is not a git repository runs in it directly.
         let plain = tempfile::tempdir().unwrap();
-        assert!(write_feature_file(plain.path(), "ok", "x").is_err());
+        let file = write_feature_file(plain.path(), "ok", "x").unwrap();
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), "x");
+        assert!(!plain.path().join(".git").exists(), "no repository is made");
     }
 
     #[test]

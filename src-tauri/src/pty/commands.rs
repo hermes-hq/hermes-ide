@@ -4545,6 +4545,51 @@ mod tests {
     }
 
     #[test]
+    fn a_session_in_a_folder_that_is_not_git_starts_and_restores_in_that_folder() {
+        // A plain folder, a parent folder holding several repositories, and a
+        // mixed session (a repository and a plain folder, no worktree asked):
+        // the session runs in the folder it was given, at creation and on
+        // restore alike, and no worktree is made anywhere.
+        let root = tempfile::tempdir().unwrap();
+        let plain = root.path().join("notes");
+        let parent = root.path().join("code");
+        std::fs::create_dir_all(&plain).unwrap();
+        for name in ["api", "web"] {
+            std::fs::create_dir_all(parent.join(name)).unwrap();
+            git2::Repository::init(parent.join(name)).unwrap();
+        }
+        let repo = root.path().join("app");
+        git2::Repository::init(&repo).unwrap();
+        let db = test_db();
+        for (id, path) in [("plain", &plain), ("parent", &parent), ("repo", &repo)] {
+            db.insert_project(id, path.to_str().unwrap(), id, "[]", "[]")
+                .unwrap();
+        }
+        let db = Mutex::new(db);
+        let cases: [(&str, &std::path::Path, Vec<String>); 3] = [
+            ("s-plain", &plain, vec!["plain".into()]),
+            ("s-parent", &parent, vec!["parent".into()]),
+            ("s-mixed", &plain, vec!["plain".into(), "repo".into()]),
+        ];
+        for (sid, folder, projects) in cases {
+            let wanted = folder.to_string_lossy().to_string();
+            for _start_and_restore in 0..2 {
+                let (cwd, recovery) =
+                    resolve_session_cwd(&db, sid, wanted.clone(), Some(&projects));
+                assert_eq!(cwd, wanted, "{sid}");
+                assert_eq!(recovery, None, "{sid}");
+            }
+            let db = db.lock().unwrap();
+            assert!(db.get_session_worktrees(sid).unwrap().is_empty(), "{sid}");
+        }
+        for nested in [parent.join("api"), parent.join("web"), repo.clone()] {
+            let r = git2::Repository::open(&nested).unwrap();
+            assert_eq!(r.worktrees().unwrap().len(), 0, "{}", nested.display());
+        }
+        assert!(!plain.join(".git").exists() && !parent.join(".git").exists());
+    }
+
+    #[test]
     fn resolve_session_cwd_uses_the_worktree_when_it_exists() {
         let db = test_db();
         let (_repo, _app_data, wt_path) = repo_with_hermes_worktree(&db);

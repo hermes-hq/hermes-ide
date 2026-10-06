@@ -114,11 +114,12 @@ describe("blocking rows", () => {
     expect(isAddedAccount(null)).toBe(false);
   });
 
-  it("tells a missing folder, a file and an empty repository from a folder that is not one (NEWCOMER-07, QAGIT-15)", () => {
+  it("tells a missing folder, a file and an empty repository apart; a plain folder never blocks (NEWCOMER-07, QAGIT-15)", () => {
     const path = "/fixture-home/repo";
     expect(blockingRows(check({ gitRoot: null, folder: { exists: false, isDir: false, hasCommits: false } }))[0]).toEqual({ kind: "not-git", path, missing: "missing" });
     expect(blockingRows(check({ gitRoot: null, folder: { exists: true, isDir: false, hasCommits: false } }))[0]).toEqual({ kind: "not-git", path, missing: "file" });
-    expect(blockingRows(check({ gitRoot: null, folder: { exists: true, isDir: true, hasCommits: false } }))[0]).toEqual({ kind: "not-git", path });
+    // A folder that is not a git repository is fine: the agent works in it directly.
+    expect(blockingRows(check({ gitRoot: null, folder: { exists: true, isDir: true, hasCommits: false } }))).toEqual([]);
     expect(blockingRows(check({ folder: { exists: true, isDir: true, hasCommits: false } }))).toEqual([{ kind: "no-commits" }]);
     // The current checkout of an empty repository makes no branch: nothing to say.
     expect(blockingRows(check({ agents: [], folder: { exists: true, isDir: true, hasCommits: false } }))).toEqual([]);

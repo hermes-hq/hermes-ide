@@ -365,3 +365,12 @@
   font-size: var(--text-sm);
   line-height: var(--leading-normal);
 }
+
+/* A chosen folder that is not a git repository: the agent works in it directly. */
+.session-creator-nongit {
+  padding: var(--space-1) var(--space-3);
+  color: var(--text-2);
+  font-size: var(--text-xs);
+  line-height: var(--leading-normal);
+  overflow-wrap: anywhere;
+}

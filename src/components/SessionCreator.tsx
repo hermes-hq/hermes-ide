@@ -566,6 +566,12 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // worktree).
   const gitCheckPending =
     checkingGit || (selectedProjectIds.length > 0 && gitCheckedFor !== selectedProjectIds);
+  /** Names of the chosen folders that are not git repositories (once checked). */
+  const nonGitSelected = gitCheckPending
+    ? []
+    : selectedProjectIds
+        .filter((id) => !gitProjectIds.includes(id))
+        .map((id) => allProjects.find((r) => r.id === id)?.name || id);
   /** Names of the chosen repositories with no commits yet. */
   const unbornSelected = selectedProjectIds
     .filter((id) => unbornProjectIds.includes(id))
@@ -1165,6 +1171,13 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                 {t("common.scan")}
               </Button>
             </div>
+            {nonGitSelected.length > 0 && (
+              <div className="session-creator-nongit" role="note">
+                {nonGitSelected.map((name) => (
+                  <div key={name} className="session-creator-nongit-row">{t("folder.notGitNamed", { name })}</div>
+                ))}
+              </div>
+            )}
             <div className="session-creator-hints">
               <span><kbd>&uarr;&darr;</kbd> {t("common.navigate")}</span>
               <span><kbd>Space</kbd> {isShellOnly ? t("common.select") : t("common.toggle")}</span>

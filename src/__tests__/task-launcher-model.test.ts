@@ -10,6 +10,7 @@ import {
   appendTaskLaunches,
   blockingRows,
   canLaunch,
+  launchRoot,
   doneWhenFromToml,
   featureMarkdown,
   formatBytes,
@@ -175,8 +176,16 @@ describe("blocking rows", () => {
     }
   });
 
-  it("a folder that is not a repository blocks, and no branch is judged there", () => {
-    expect(blockingRows(check({ gitRoot: null, branches: ["hermes/fix-login"] }))).toEqual([{ kind: "not-git", path: "/fixture-home/repo" }]);
+  it("a folder that is not a repository never blocks, and no branch is judged there", () => {
+    expect(blockingRows(check({ gitRoot: null, branches: ["hermes/fix-login"] }))).toEqual([]);
+    expect(blockingRows(check({ gitRoot: null, branches: ["hermes/fix-login"], folder: { exists: true, isDir: true, hasCommits: false } }))).toEqual([]);
+    // It is where the launch runs; nothing at the path is nowhere.
+    expect(launchRoot(null, { exists: true, isDir: true }, " /fixture-home/notes ")).toBe("/fixture-home/notes");
+    expect(launchRoot(null, { exists: false, isDir: false }, "/fixture-home/gone")).toBeNull();
+    expect(launchRoot(null, { exists: true, isDir: false }, "/fixture-home/file.txt")).toBeNull();
+    expect(launchRoot("/fixture-home/repo", { exists: true, isDir: true }, "/fixture-home/repo/src")).toBe("/fixture-home/repo");
+    expect(launchRoot(undefined, null, "/fixture-home/repo")).toBeUndefined();
+    expect(canLaunch("do it", "/fixture-home/notes", [])).toBe(true);
     expect(blockingRows(check({ repoPath: "  ", gitRoot: undefined }))).toEqual([{ kind: "no-repo" }]);
     // Still checking: nothing to say yet, and Launch waits.
     expect(blockingRows(check({ gitRoot: undefined }))).toEqual([]);

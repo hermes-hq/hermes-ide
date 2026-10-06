@@ -228,23 +228,24 @@ describe("SetupWizard", () => {
     expect(h.settings.get("onboarding_completed")).toBe("true");
   });
 
-  it("a folder that is not a repository cannot be picked", async () => {
+  it("any folder can be picked: a plain one says the agent works in it directly; nothing at the path cannot", async () => {
     await openWizard();
     acceptPolicy();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
     await settle();
     fireEvent.change(document.querySelector(".setup-repo-input")!, { target: { value: "/fixture-home/plain" } });
     await settle();
-    expect(screen.getByText("This folder isn't a git repository. Pick the folder that contains .git, or run git init there.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
+    expect(screen.getByText("Not a git repository: the agent works directly in this folder.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeEnabled();
     // Said where a screen reader hears it, and tied to Continue.
     expect(document.getElementById("setup-repo-state")?.getAttribute("role")).toBe("status");
-    expect(screen.getByRole("button", { name: "Continue" })).toHaveAccessibleDescription(/isn't a git repository/);
-    // Nothing at the path: said so, not "not a repository" (NEWCOMER-07).
+    expect(screen.getByRole("button", { name: "Continue" })).toHaveAccessibleDescription(/Not a git repository/);
+    // Nothing at the path: said so, and Continue waits (NEWCOMER-07).
     h.missing = true;
     fireEvent.change(document.querySelector(".setup-repo-input")!, { target: { value: "/fixture-home/projcets/demo" } });
     await settle();
     expect(screen.getByText("No folder at this path")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Continue" })).toBeDisabled();
     h.missing = false;
     // A repository: its root is shown, and Enter in the field moves on (NEWCOMER-09).
     fireEvent.change(document.querySelector(".setup-repo-input")!, { target: { value: "~/repo" } });
