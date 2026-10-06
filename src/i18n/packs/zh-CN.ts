@@ -362,6 +362,7 @@ export const zhCNPack: LanguagePack = {
     "review.keySend": "发送",
     "review.keyRevert": "撤销",
     "review.noRepository": "此会话的文件夹中没有 git 仓库。",
+    "review.folderNotGit": "此会话的文件夹不是 git 仓库；它的 git 项目列在上方。",
     "review.conflictResolved": "已解决 {path}",
     "review.mergeAborted": "合并已中止",
     "palette.searchInFolder": "在文件夹中搜索",

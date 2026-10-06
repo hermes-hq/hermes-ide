@@ -362,6 +362,7 @@ export const ptBRPack: LanguagePack = {
     "review.keySend": "enviar",
     "review.keyRevert": "reverter",
     "review.noRepository": "Nenhum repositório git nas pastas desta sessão.",
+    "review.folderNotGit": "A pasta desta sessão não é um repositório git; os projetos git dela estão listados acima.",
     "review.conflictResolved": "{path} resolvido",
     "review.mergeAborted": "Merge abortado",
     "palette.searchInFolder": "Buscar na pasta",

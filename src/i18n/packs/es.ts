@@ -362,6 +362,7 @@ export const esPack: LanguagePack = {
     "review.keySend": "enviar",
     "review.keyRevert": "revertir",
     "review.noRepository": "No hay repositorio git en las carpetas de esta sesión.",
+    "review.folderNotGit": "La carpeta de esta sesión no es un repositorio git; sus proyectos git aparecen arriba.",
     "review.conflictResolved": "{path} resuelto",
     "review.mergeAborted": "Fusión abortada",
     "palette.searchInFolder": "Buscar en carpeta",

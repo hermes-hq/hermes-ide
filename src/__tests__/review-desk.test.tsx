@@ -411,6 +411,19 @@ describe("ReviewDesk: what the git panel it replaces offered", () => {
     expect(document.body.textContent).not.toMatch(/fatal:/);
   });
 
+  it("a mixed session whose own folder is not a repository points at its git projects", async () => {
+    backend({
+      review_diff: () => {
+        throw "fatal: not a git repository (or any of the parent directories): .git";
+      },
+      git_status: () => ({ projects: [{ ...FOLDER, is_git_repo: false }, FOLDER], timestamp: 0 }),
+    });
+    await open();
+    await waitFor(() => expect(document.querySelector('.review-empty[data-empty="no-repository"]')).toHaveAttribute("data-other-git", "true"));
+    expect(document.querySelector('.review-empty[data-empty="no-repository"]')).toHaveTextContent("This session's folder is not a git repository; its git projects are listed above.");
+    expect(document.querySelector(".review-error")).toBeNull();
+  });
+
   it("any other diff failure is still shown as an error", async () => {
     backend({
       review_diff: () => {

@@ -392,6 +392,7 @@ const ENGLISH_PACK: LanguagePack = {
     "review.keySend": "send",
     "review.keyRevert": "revert",
     "review.noRepository": "No git repository in this session's folders.",
+    "review.folderNotGit": "This session's folder is not a git repository; its git projects are listed above.",
     "review.conflictResolved": "Resolved {path}",
     "review.mergeAborted": "Merge aborted",
     "palette.searchInFolder": "Search in Folder",

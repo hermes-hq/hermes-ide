@@ -362,6 +362,7 @@ export const ruPack: LanguagePack = {
     "review.keySend": "отправить",
     "review.keyRevert": "откатить",
     "review.noRepository": "В папках этой сессии нет git-репозитория.",
+    "review.folderNotGit": "Папка этой сессии не git-репозиторий; её git-проекты перечислены выше.",
     "review.conflictResolved": "{path} разрешён",
     "review.mergeAborted": "Слияние прервано",
     "palette.searchInFolder": "Поиск в папке",
