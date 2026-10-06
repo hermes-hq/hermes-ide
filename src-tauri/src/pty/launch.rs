@@ -96,6 +96,10 @@ pub struct LaunchInput<'a> {
     /// The session's context file, when the session has project context to
     /// hand to the agent on its first prompt.
     pub context_path: Option<&'a str>,
+    /// The agent starts in a folder that is not a git repository (no
+    /// worktree): the pointer to the context says so, and that the agent may
+    /// make a worktree or branch in a repository inside it itself.
+    pub not_git: bool,
     /// The task the user described in the task launcher (F15), handed to
     /// the agent as its first prompt on a fresh start.
     pub task: Option<&'a str>,
@@ -243,20 +247,27 @@ fn split_words(fragment: &str) -> Vec<String> {
         .collect()
 }
 
-fn context_prompt(context_path: &str) -> String {
-    format!("Read the file at {context_path} for project context about the attached workspaces.")
+fn context_prompt(context_path: &str, not_git: bool) -> String {
+    let pointer = format!(
+        "Read the file at {context_path} for project context about the attached workspaces."
+    );
+    if not_git {
+        format!("{pointer} {}", crate::project::attunement::NOT_GIT_GUIDANCE)
+    } else {
+        pointer
+    }
 }
 
 /// The first prompt of a fresh start: the launcher's task, then the pointer
 /// to the session's context file, or whichever of the two there is. On
 /// Windows it is one line, because an agent installed as a `.cmd` shim is
 /// started through cmd.exe, which cannot take a line break in an argument.
-fn first_prompt(task: Option<&str>, context_path: Option<&str>) -> Option<String> {
+fn first_prompt(task: Option<&str>, context_path: Option<&str>, not_git: bool) -> Option<String> {
     let task = task.map(str::trim).filter(|t| !t.is_empty());
     let text = match (task, context_path) {
-        (Some(t), Some(ctx)) => format!("{t}\n\n{}", context_prompt(ctx)),
+        (Some(t), Some(ctx)) => format!("{t}\n\n{}", context_prompt(ctx, not_git)),
         (Some(t), None) => t.to_string(),
-        (None, Some(ctx)) => context_prompt(ctx),
+        (None, Some(ctx)) => context_prompt(ctx, not_git),
         (None, None) => return None,
     };
     Some(if cfg!(windows) { one_line(&text) } else { text })
@@ -951,7 +962,7 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         (Some(seed), Some(task)) => Some(format!("{seed}\n\n{task}")),
         (seed, task) => seed.or(task).map(str::to_string),
     };
-    let prompt = first_prompt(task_text.as_deref(), input.context_path);
+    let prompt = first_prompt(task_text.as_deref(), input.context_path, input.not_git);
     let prompt_args: Vec<String> = match (&terminal.initial_prompt, &prompt) {
         (Some(template), Some(prompt)) => fill(template, &[("prompt", prompt)]),
         _ => Vec::new(),
@@ -1547,6 +1558,9 @@ pub(crate) fn prepare_helper_launch(
         channels: &s.channels,
         cwd: &s.working_directory,
         context_path: context_path.as_deref(),
+        // Outside git there is no worktree: the agent works in the folder.
+        not_git: context_path.is_some()
+            && git2::Repository::discover(Path::new(&s.working_directory)).is_err(),
         task: s.task_prompt.as_deref(),
         system_prompt: s.system_prompt.as_deref(),
         resume_id: s.vendor_session_id.as_deref(),
@@ -3727,6 +3741,7 @@ pub(crate) mod tests {
             channels: &[],
             cwd: "/fixture-home/repo",
             context_path: None,
+            not_git: false,
             task: None,
             system_prompt: None,
             resume_id,
@@ -4927,16 +4942,51 @@ pub(crate) mod tests {
     }
 
     #[test]
+    fn an_agent_started_in_a_plain_folder_is_told_it_decides_about_git() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        for provider in ["claude", "codex", "opencode"] {
+            let mut inp = input(provider, None, hi, dir);
+            inp.task = Some("tidy the notes");
+            inp.context_path = Some("/data/context/hermes-1.md");
+            inp.not_git = true;
+            let plan = plan_launch(&inp).unwrap();
+            let prompt = plan.first_prompt.clone().expect(provider);
+            assert!(prompt.starts_with("tidy the notes"), "{prompt}");
+            assert!(
+                prompt.contains("Read the file at /data/context/hermes-1.md for project context about the attached workspaces. This folder is not a single git repository."),
+                "{prompt}"
+            );
+            assert!(
+                prompt.ends_with(
+                    "you may create a worktree or branch there yourself when it makes sense."
+                ),
+                "{prompt}"
+            );
+            // In a git checkout the pointer reads as before.
+            inp.not_git = false;
+            let git = plan_launch(&inp).unwrap().first_prompt.unwrap();
+            assert!(
+                git.ends_with("for project context about the attached workspaces."),
+                "{git}"
+            );
+            assert!(!git.contains("not a single git repository"), "{git}");
+        }
+        // No context file: nothing to point at, nothing added.
+        assert_eq!(first_prompt(Some("x"), None, true).as_deref(), Some("x"));
+    }
+
+    #[test]
     fn a_multi_line_task_is_one_argument() {
-        let prompt = first_prompt(Some("line one\nline two\r\n\nline three"), None).unwrap();
+        let prompt = first_prompt(Some("line one\nline two\r\n\nline three"), None, false).unwrap();
         if cfg!(windows) {
             assert_eq!(prompt, "line one line two line three");
         } else {
             assert_eq!(prompt, "line one\nline two\r\n\nline three");
         }
         assert_eq!(one_line(" a \r\n\n b\n"), "a b");
-        assert_eq!(first_prompt(None, None), None);
-        assert_eq!(first_prompt(Some(""), None), None);
+        assert_eq!(first_prompt(None, None, false), None);
+        assert_eq!(first_prompt(Some(""), None, false), None);
     }
 
     #[test]

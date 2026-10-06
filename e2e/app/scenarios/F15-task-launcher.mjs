@@ -490,13 +490,14 @@ try {
   log(`  panes on screen: ${JSON.stringify(panes)}`);
   await bridge.screenshot(join(evidenceDir, "05-two-agents.png"));
 
-  log("step 6: a folder that is not a git repository blocks Launch");
+  log("step 6: a folder that is not a git repository is fine: no worktree, the agent works in it");
   await openLauncher(bridge);
   await setRepo(bridge, plain);
   await typeInto(bridge, ".task-launcher-task", "Anything");
-  await bridge.waitFor("the not-a-repository row", `return e2e.all('.task-launcher-block[data-kind="not-git"]').length === 1;`, { timeoutMs: 20_000 });
+  await bridge.waitFor("the plain-folder hint", `return !!e2e.first(".task-launcher-plain-folder");`, { timeoutMs: 20_000 });
   st = await launcherState(bridge);
-  assert(st.launchDisabled, "Launch is disabled outside a repository");
+  assert(!st.blocks.some((b) => b.kind === "not-git") && !st.launchDisabled, "Launch is possible in a folder that is not a repository");
+  assert(!(await bridge.exists('[data-chip="where"]')), "no worktree or branch to choose there");
   await bridge.screenshot(join(evidenceDir, "06-not-git.png"));
 
   log("step 7: the launcher's Advanced link and ⌘⇧N open the old creator, which offers SSH");

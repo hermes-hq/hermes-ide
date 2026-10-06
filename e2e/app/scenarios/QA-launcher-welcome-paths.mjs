@@ -4,8 +4,8 @@
 //   - "~/code/demo" (a git repository in the home folder) is read as that
 //     folder: accepted, its full path shown under the field;
 //   - a folder that does not exist says "No folder at this path";
-//   - a folder that is no repository says what to do ("Pick the folder that
-//     contains .git, or run git init there.");
+//   - a folder that is no repository is accepted, and says the agent works
+//     directly in it (any folder will do: no worktree there);
 //   - each answer is announced (role=status) and describes Continue.
 //
 // Negative control: a build before the fix calls every one of them "Not a
@@ -48,7 +48,8 @@ await runLauncherQa(
     await sleep(900);
     s = await state(bridge);
     log(`  a folder that is no repository: ${JSON.stringify(s)}`);
-    check(s.text === "This folder isn't a git repository. Pick the folder that contains .git, or run git init there.", "a plain folder is said to be no repository, with what to do");
+    check(s.text === "Not a git repository: the agent works directly in this folder.", "a plain folder is said to be no repository, worked in directly");
+    check(!s.continueDisabled, "and it can be picked (any folder will do)");
 
     if (!onWindows) {
       const home = (await invoke(bridge, "task_repo_probe", { path: "~", branch: null })).resolved;

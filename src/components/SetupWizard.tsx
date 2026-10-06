@@ -157,16 +157,19 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
 
   const repoChecked = repoState && repoState.path === repo.trim() ? repoState : null;
   const repoRoot = repoChecked?.root ?? null;
+  // Any folder will do: a git repository's main checkout, or a plain folder
+  // (the agent then works directly in it, with no worktree).
+  const repoFolder = repoRoot ?? (repoChecked && repoChecked.exists && repoChecked.isDir ? repoChecked.resolved ?? repoChecked.path : null);
   const anyInstalled = useMemo(() => (doctor.rows ?? []).some((r) => r.installed), [doctor.rows]);
 
   const finish = useCallback(async () => {
     // Usage stats stay off: this screen never turns them on (Settings does).
     await setAnalyticsEnabled(false);
     // The repository picked on step 2 is a project from now on (⌘N starts there).
-    if (repoRoot) {
+    if (repoFolder) {
       try {
         const known = await getProjectsOrdered().catch(() => [] as ProjectOrdered[]);
-        if (!known.some((p) => p.path === repoRoot)) await createProject(repoRoot, null);
+        if (!known.some((p) => p.path === repoFolder)) await createProject(repoFolder, null);
       } catch (err) {
         console.warn("[SetupWizard] could not add the repository as a project:", err);
       }
@@ -174,7 +177,7 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
     await setSetting(ONBOARDING_COMPLETED_SETTING, "true").catch(console.warn);
     setVisible(false);
     onDone?.();
-  }, [onDone, repoRoot]);
+  }, [onDone, repoFolder]);
 
   const signIn = useCallback(
     (agentId: string, accountId?: string | null) => {
@@ -247,7 +250,7 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
         ? t("onboarding.repo.missing")
         : !repoChecked.isDir
           ? t("onboarding.repo.notAFolder")
-          : t("onboarding.repo.notGitHelp");
+          : t("folder.notGitHint");
   const hasTask = step === "task" && taskText.trim().length > 0;
 
   return (
@@ -338,7 +341,7 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
                   onChange={(e) => setRepo(e.target.value)}
                   onKeyDown={(e) => {
                     // Enter on a repository moves on, as Continue does.
-                    if (e.key === "Enter" && !e.nativeEvent.isComposing && repoRoot) {
+                    if (e.key === "Enter" && !e.nativeEvent.isComposing && repoFolder) {
                       e.preventDefault();
                       setStep("task");
                     }
@@ -357,7 +360,7 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
               {/* Always in the page, so a screen reader hears each new answer. */}
               <div id="setup-repo-state" className="setup-repo-live" role="status" aria-live="polite">
                 {repoChecked && (
-                  <div className={`setup-repo-state${repoRoot ? " ok" : " bad"}`} data-git={repoRoot ? "true" : "false"} data-missing={!repoChecked.exists ? "true" : undefined}>
+                  <div className={`setup-repo-state${repoFolder ? " ok" : " bad"}`} data-git={repoRoot ? "true" : "false"} data-missing={!repoChecked.exists ? "true" : undefined}>
                     {repoChecked.resolved && <span className="setup-repo-resolved">{t("launcher.repoResolved", { path: repoChecked.resolved })} </span>}
                     {repoMessage}
                   </div>
@@ -371,7 +374,7 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
               <p className="setup-intro">{anyInstalled ? t("onboarding.task.intro") : t("onboarding.task.noAgent", { shortcut: shortcutLabel("file.new-session") })}</p>
               <TaskLauncher
                 inline
-                defaultRepo={repoRoot}
+                defaultRepo={repoFolder}
                 initialTask={taskText}
                 controlRef={launcher}
                 onStateChange={onTaskState}
@@ -442,7 +445,7 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
                 <Button
                   variant="primary"
                   className="setup-continue"
-                  disabled={!repoRoot}
+                  disabled={!repoFolder}
                   aria-describedby={repoChecked ? "setup-repo-state" : undefined}
                   onClick={() => setStep("task")}
                 >

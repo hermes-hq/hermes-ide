@@ -384,3 +384,37 @@ describe("a task the agent's launch could not carry", () => {
     expect(notify).not.toHaveBeenCalled();
   });
 });
+
+describe("launchTask in a folder that is not a git repository", () => {
+  // What the launcher plans there: no worktree, no branch (TaskLauncher's plainFolder).
+  const inFolder = (id: string, mode: "terminal" | "agent" = "terminal") => agent(id, mode, "", { createBranch: false, worktree: false });
+
+  it("a plain folder: the session starts in it with no branch selection, so no worktree is made", async () => {
+    const f = fakeDeps({ worktreePath: vi.fn(async () => null) });
+    const r = await launchTask(req({ repoRoot: "/fixture-home/notes", agents: [inFolder("claude")], doneWhen: [] }), f.deps);
+    expect(r.ok).toBe(true);
+    expect(f.deps.projectFor).toHaveBeenCalledWith("/fixture-home/notes");
+    expect(f.created).toHaveLength(1);
+    expect(f.created[0]).toMatchObject({ workingDirectory: "/fixture-home/notes", projectIds: ["proj-1"], initialPrompt: "Fix the login bug" });
+    expect(f.created[0].branchSelections).toBeUndefined();
+    expect(f.records()[0]).toMatchObject({ repo: "/fixture-home/notes", branch: "" });
+  });
+
+  it("a parent folder holding several repositories: one session in the parent, none in the repositories inside it", async () => {
+    const f = fakeDeps({ worktreePath: vi.fn(async () => null) });
+    await launchTask(req({ repoRoot: "/fixture-home/code", agents: [inFolder("codex"), inFolder("opencode")] }), f.deps);
+    expect(f.deps.projectFor).toHaveBeenCalledTimes(1);
+    expect(f.created.map((o) => [o.aiProvider, o.workingDirectory, o.branchSelections])).toEqual([
+      ["codex", "/fixture-home/code", undefined],
+      ["opencode", "/fixture-home/code", undefined],
+    ]);
+  });
+
+  it("a Full-track task keeps its feature.md in the folder itself, and no checks file is kept (there is no worktree)", async () => {
+    const writeDoneWhen = vi.fn(async () => "x");
+    const f = fakeDeps({ worktreePath: vi.fn(async () => null), writeDoneWhen });
+    await launchTask(req({ repoRoot: "/fixture-home/notes", agents: [inFolder("claude")], track: "Full" }), f.deps);
+    expect(f.files.map(([checkout, slug]) => [checkout, slug])).toEqual([["/fixture-home/notes", "fix-the-login-bug"]]);
+    expect(writeDoneWhen).not.toHaveBeenCalled();
+  });
+});

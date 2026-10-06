@@ -1061,13 +1061,17 @@ function AppContent() {
     // the launcher then starts on the most used project.
     if (s && !s.ssh_info && !s.agent_launch?.login) {
       let candidate = s.working_directory;
+      // A folder the session was opened on (git or not) is a place to start a task too.
+      let project: string | null = null;
       try {
-        candidate = (await getSessionProjects(s.id))[0]?.path ?? s.working_directory;
+        project = (await getSessionProjects(s.id))[0]?.path ?? null;
+        candidate = project ?? s.working_directory;
       } catch {
         // the session's own folder
       }
       try {
-        repo = candidate ? (await probeTaskRepo(candidate)).git_root : null;
+        const probe = candidate ? await probeTaskRepo(candidate) : null;
+        repo = probe?.git_root ?? (project && probe?.is_dir ? project : null);
       } catch {
         repo = null;
       }

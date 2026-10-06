@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // QA-launcher-reason-visible (NEWCOMER-12): the launcher with "+ options"
-// open, on a folder that is no repository. Launch is disabled, and the
+// open, on a path with no folder at it (a folder that is no repository is
+// fine now: the agent works in it directly). Launch is disabled, and the
 // reason stays in view next to it (outside the part of the sheet that
 // scrolls) and describes the Launch button; the project chip is red.
 //
@@ -15,7 +16,7 @@ await runLauncherQa("QA-launcher-reason-visible", async ({ bridge, fx, log, chec
   await openLauncher(bridge);
   await typeInto(bridge, ".task-launcher-task", "Fix it");
   await openChip(bridge, "project");
-  await typeInto(bridge, ".task-launcher-repo", fx.work);
+  await typeInto(bridge, ".task-launcher-repo", join(fx.work, "no-such-folder"));
   await sleep(800);
   await pressKey(bridge, ".task-launcher-repo", "Enter");
   await expandOptions(bridge);

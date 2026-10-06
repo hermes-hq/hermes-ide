@@ -65,6 +65,7 @@ import {
   autoTaskBranch,
   blockingRows,
   canLaunch,
+  launchRoot,
   doneWhenFromToml,
   formatBytes,
   isAddedAccount,
@@ -667,6 +668,11 @@ export function TaskLauncher({
   );
   // "~/code/app" read as the folder it names, shown under the typed path.
   const resolvedPath = probed?.resolved && probed.resolved !== repoPath.trim() ? probed.resolved : null;
+  // A folder that is not a git repository: the agent works directly in it
+  // (no worktree, no branch). Where the launch runs: the repository's main
+  // checkout, or that folder.
+  const plainFolder = gitRoot === null && !!folder && folder.exists && folder.isDir;
+  const root = launchRoot(gitRoot, folder, probed?.resolved || repoPath.trim());
   useEffect(() => {
     if (!checksEditedRef.current) setChecks(doneWhen.commands);
   }, [doneWhen, checksEdited]);
@@ -840,7 +846,8 @@ export function TaskLauncher({
   const plannedAgents = useMemo<PlannedAgent[]>(() => {
     if (!effective) return [];
     const mk = (c: LaunchChoice, br: string, mode: SessionMode): PlannedAgent => {
-      const w = c.where;
+      // Not a git repository: no worktree and no branch, the folder itself.
+      const w: LaunchChoice["where"] = plainFolder ? { kind: "current-checkout" } : c.where;
       return {
         id: c.agentId,
         mode,
@@ -863,7 +870,7 @@ export function TaskLauncher({
       list.push(mk(also, alsoBranch, "terminal"));
     }
     return list;
-  }, [effective, branch, viewMode, capsOf, where, task, backend, fallbackId]);
+  }, [effective, branch, viewMode, capsOf, where, task, backend, fallbackId, plainFolder]);
 
   /** Whether the account an agent runs on is signed in, as the capability backend says (undefined: not known). */
   const accountSignedIn = useCallback(
@@ -930,15 +937,16 @@ export function TaskLauncher({
   // A stored choice that could not be made launchable is judged live by the
   // rows above (agent missing, account signed out), with today's answers.
   const canGo =
-    !!choice && ready && canLaunch(task.trim() || (libPersona?.title ?? ""), gitRoot, rows) && plannedAgents.length > 0 && !launching && !customMissing && !validation && !capsError && !staleBase && !holdActive;
+    !!choice && ready && canLaunch(task.trim() || (libPersona?.title ?? ""), root, rows) && plannedAgents.length > 0 && !launching && !customMissing && !validation && !capsError && !staleBase && !holdActive;
   // Why Launch is not possible, for the Launch button's description.
   const blocked = rows.length > 0 || holdActive || !!validation || customMissing || !!capsError || failed;
 
   useEffect(() => {
     if (!effective) return;
     let cancelled = false;
-    const place =
-      where.kind === "new-worktree"
+    const place = plainFolder
+      ? t("launcher.previewFolder", { folder: baseName(root ?? repoPath) || "—" })
+      : where.kind === "new-worktree"
         ? t("launcher.previewWorktree", { branch: branch.trim() || taskBranch(task, fallbackId), base: where.baseBranch || currentBranch || "HEAD" })
         : where.kind === "existing-branch"
           ? t("launcher.previewExisting", { branch: where.branch })
@@ -952,7 +960,7 @@ export function TaskLauncher({
     return () => {
       cancelled = true;
     };
-  }, [effective, backend, task, where, branch, currentBranch, repoPath, t, fallbackId]);
+  }, [effective, backend, task, where, branch, currentBranch, repoPath, t, fallbackId, plainFolder, root]);
   const previewLine = previewLineState;
   // The launch adds a pointer to the session's project context after the
   // task (an agent that takes the task on its command line): said, not hidden.
@@ -989,7 +997,7 @@ export function TaskLauncher({
 
   const launch = useCallback(
     async (next: boolean) => {
-      if (!canGo || !effective || !gitRoot) return;
+      if (!canGo || !effective || !root) return;
       setLaunching(true);
       setFailed(false);
       setMenu(null);
@@ -1005,7 +1013,7 @@ export function TaskLauncher({
       try {
         result = await onLaunch({
           task: trimmed,
-          repoRoot: gitRoot,
+          repoRoot: root,
           agents: plannedAgents,
           track: effective.trackAsFeature ? "Full" : "Quick",
           doneWhen: checks.map((c) => c.trim()).filter(Boolean),
@@ -1026,7 +1034,7 @@ export function TaskLauncher({
       let offer = false;
       let count = 0;
       try {
-        ({ suggestPreset: offer, count } = await backend.remember(remembered, gitRoot));
+        ({ suggestPreset: offer, count } = await backend.remember(remembered, root));
       } catch (err) {
         console.warn("[TaskLauncher] could not record the launch:", err);
       }
@@ -1062,7 +1070,7 @@ export function TaskLauncher({
       }
       onClose?.({ keepDraft: false });
     },
-    [canGo, effective, gitRoot, plannedAgents, modePrefs, task, onLaunch, checks, backend, presets, inline, onClose, defaultPresetName, focusTask, setBranchEdited, libPrompt, libPersona],
+    [canGo, effective, root, plannedAgents, modePrefs, task, onLaunch, checks, backend, presets, inline, onClose, defaultPresetName, focusTask, setBranchEdited, libPrompt, libPersona],
   );
 
   /**
@@ -1362,8 +1370,8 @@ export function TaskLauncher({
         );
       case "not-git":
         return (
-          <div className="task-launcher-block" data-kind={row.kind} data-missing={row.missing ?? undefined} key={key}>
-            {row.missing === "missing" ? t("launcher.block.noFolder") : row.missing === "file" ? t("launcher.block.notAFolder") : t("launcher.block.notGit")}
+          <div className="task-launcher-block" data-kind={row.kind} data-missing={row.missing} key={key}>
+            {row.missing === "missing" ? t("launcher.block.noFolder") : t("launcher.block.notAFolder")}
           </div>
         );
       case "no-commits":
@@ -1484,7 +1492,7 @@ export function TaskLauncher({
         ? t("launcher.whereChipExisting", { branch: where.branch || "—" })
         : t("launcher.whereChipCurrent", { branch: currentBranch || "HEAD" });
   // The task runs in the project folder itself: said, in the danger colour.
-  const unisolated = !!choice && where.kind === "current-checkout";
+  const unisolated = !!choice && where.kind === "current-checkout" && !plainFolder;
 
   /** A pick in an open chip menu closes it (see pickDone); the same control in + options leaves things be. */
   const pickedInMenu = () => {
@@ -1934,8 +1942,8 @@ export function TaskLauncher({
               onChange={(e) => update({ extraArgs: e.target.value })}
             />
           )}
-          {menuChip("project", repoPath.trim() ? baseName(repoPath) : t("launcher.projectNone"), { danger: !!repoPath.trim() && gitRoot === null })}
-          {menuChip("where", whereChipText, { danger: unisolated })}
+          {menuChip("project", repoPath.trim() ? baseName(repoPath) : t("launcher.projectNone"), { danger: !!repoPath.trim() && gitRoot === null && !plainFolder })}
+          {!plainFolder && menuChip("where", whereChipText, { danger: unisolated })}
           {!isCustom &&
             menuChip("approval", approvalLabel(choice.agentId, choice.approvalModeId), {
               danger,
@@ -1979,6 +1987,11 @@ export function TaskLauncher({
       {unisolated && (
         <div className="task-launcher-danger-warning task-launcher-unisolated" role="note">
           {t("launcher.unisolatedNote", { branch: currentBranch || "HEAD" })}
+        </div>
+      )}
+      {choice && plainFolder && (
+        <div className="task-launcher-muted task-launcher-plain-folder" role="note">
+          {t("folder.notGitHint")}
         </div>
       )}
 
@@ -2075,13 +2088,13 @@ export function TaskLauncher({
                       ? t("launcher.block.noFolder")
                       : folder && !folder.isDir
                         ? t("launcher.block.notAFolder")
-                        : t("launcher.block.notGit")
+                        : t("folder.notGitHint")
                     : null}
                 </div>
               )}
             </>
           )}
-          {menu === "where" && whereBlock}
+          {menu === "where" && !plainFolder && whereBlock}
           {menu === "approval" && approvalBlock}
           {menu === "model" && agentCaps && (
             <>
@@ -2174,10 +2187,13 @@ export function TaskLauncher({
 
       {choice && expanded && (
         <div className="task-launcher-options">
-          <div className="task-launcher-opt-row">
-            <span className="task-launcher-opt-label">{t("launcher.whereLabel")}</span>
-            {whereBlock}
-          </div>
+          {/* Not a git repository: no worktree or branch to choose (the hint above says so). */}
+          {!plainFolder && (
+            <div className="task-launcher-opt-row">
+              <span className="task-launcher-opt-label">{t("launcher.whereLabel")}</span>
+              {whereBlock}
+            </div>
+          )}
           {!isCustom && (
             <div className="task-launcher-opt-row">
               <span className="task-launcher-opt-label">{t("launcher.approvalLabel")}</span>
@@ -2307,7 +2323,7 @@ export function TaskLauncher({
                 {choice.alsoOn ? t("launcher.alsoOn", { agent: agentName(choice.alsoOn.agentId) }) : t("launcher.alsoAdd")}
               </Chip>
               {choice.alsoOn && alsoSelects(choice.alsoOn)}
-              {choice.alsoOn && <span className="task-launcher-muted">{t("launcher.alsoNote", { branch: plannedAgents[1]?.branch ?? "" })}</span>}
+              {choice.alsoOn && <span className="task-launcher-muted">{plainFolder ? t("launcher.alsoNoteFolder") : t("launcher.alsoNote", { branch: plannedAgents[1]?.branch ?? "" })}</span>}
             </div>
           )}
         </div>

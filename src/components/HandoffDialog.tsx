@@ -74,6 +74,11 @@ export function HandoffDialog({ session, initialKind, onClose }: HandoffDialogPr
     };
   }, [session.id]);
 
+  // Opened on Duplicate in a session with no git project: Continue is what it can do.
+  useEffect(() => {
+    if (files !== null && branch === null) setKind((k) => (k === "duplicate" ? "continue" : k));
+  }, [files, branch]);
+
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape" && !busy) {
@@ -166,12 +171,16 @@ export function HandoffDialog({ session, initialKind, onClose }: HandoffDialogPr
             label={t("handoff.title")}
             value={kind}
             onChange={setKind}
-            options={(["continue", "duplicate"] as const).map((k) => ({
-              value: k,
-              label: t(k === "continue" ? "handoff.continue" : "handoff.duplicate"),
-              description: t(k === "continue" ? "handoff.continueHint" : "handoff.duplicateHint"),
-              disabled: busy,
-            }))}
+            options={(["continue", "duplicate"] as const).map((k) => {
+              // No git project in the session (a plain folder): nothing to duplicate from.
+              const noBranch = k === "duplicate" && files !== null && branch === null;
+              return {
+                value: k,
+                label: t(k === "continue" ? "handoff.continue" : "handoff.duplicate"),
+                description: noBranch ? t("handoff.error.noBranch") : t(k === "continue" ? "handoff.continueHint" : "handoff.duplicateHint"),
+                disabled: busy || noBranch,
+              };
+            })}
           />
 
           <div className="handoff-section-label">{t("handoff.agent")}</div>

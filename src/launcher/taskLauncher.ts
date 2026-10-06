@@ -7,7 +7,8 @@
 //
 //   - the branch and the session label a task gets;
 //   - which blocking rows stop Launch (agent signed out or missing, branch
-//     exists, not a git repository, low disk);
+//     exists, no folder at the path, low disk). A folder that is not a git
+//     repository never blocks: the agent works directly in it;
 //   - the first feature.md of a Full-track task (ADR 004 §6);
 //   - the per-session record of what was launched (the `task_launches`
 //     setting), kept for the features that come later (Done-When, Land).
@@ -213,8 +214,11 @@ export type BlockingRow =
    */
   | { kind: "signed-out"; agentId: string; accountId?: string }
   | { kind: "no-repo" }
-  /** `missing`: nothing at that path; `file`: a file, not a folder. */
-  | { kind: "not-git"; path: string; missing?: "missing" | "file" }
+  /**
+   * Nothing to work in at the path: `missing`, nothing there; `file`, a file,
+   * not a folder. (A folder that is not a git repository is fine.)
+   */
+  | { kind: "not-git"; path: string; missing: "missing" | "file" }
   /** The repository has no commit yet: a new worktree has nothing to start from. */
   | { kind: "no-commits" }
   /**
@@ -271,8 +275,10 @@ export function blockingRows(input: LaunchCheckInput): BlockingRow[] {
   const repo = input.repoPath.trim();
   if (!repo) rows.push({ kind: "no-repo" });
   else if (input.gitRoot === null) {
+    // A plain folder (or one holding several repositories) is a place to
+    // work too: no worktree, no branch, the agent works in it directly.
     const missing = input.folder && !input.folder.exists ? "missing" : input.folder && !input.folder.isDir ? "file" : undefined;
-    rows.push(missing ? { kind: "not-git", path: repo, missing } : { kind: "not-git", path: repo });
+    if (missing) rows.push({ kind: "not-git", path: repo, missing });
   } else if (input.gitRoot && input.folder && !input.folder.hasCommits && input.agents.length > 0) {
     // (The agents given here are the ones that create a branch.)
     rows.push({ kind: "no-commits" });
@@ -308,9 +314,24 @@ export function blockingRows(input: LaunchCheckInput): BlockingRow[] {
   return rows;
 }
 
-/** Launch is possible with a task, a checked repository and no blocking row. */
-export function canLaunch(task: string, gitRoot: string | null | undefined, rows: readonly BlockingRow[]): boolean {
-  return task.trim().length > 0 && !!gitRoot && rows.length === 0;
+/**
+ * Where a launch runs: the repository's main checkout, or the folder itself
+ * when it is not in a git repository. undefined while the path is still
+ * being checked; null when there is no folder there.
+ */
+export function launchRoot(
+  gitRoot: string | null | undefined,
+  folder: { exists: boolean; isDir: boolean } | null | undefined,
+  resolved: string,
+): string | null | undefined {
+  if (gitRoot) return gitRoot;
+  if (gitRoot === undefined) return undefined;
+  return folder && folder.exists && folder.isDir && resolved.trim() ? resolved.trim() : null;
+}
+
+/** Launch is possible with a task, a checked folder (git or not) and no blocking row. */
+export function canLaunch(task: string, root: string | null | undefined, rows: readonly BlockingRow[]): boolean {
+  return task.trim().length > 0 && !!root && rows.length === 0;
 }
 
 /** "12.3 GB", in decimal units like the disk guard's "10 GB". */

@@ -339,7 +339,7 @@ try {
   assert(s.count === "Step 2 of 3", `screen 2 of 3 is "${s.title}"`);
   await typeInto(bridge, ".setup-repo-input", plain);
   await bridge.waitFor("the not-a-repository note", `return e2e.first(".setup-repo-state")?.getAttribute("data-git") === "false";`, { timeoutMs: 20_000 });
-  assert(await bridge.eval(`return e2e.first(".setup-continue").disabled;`), "a folder that is not a repository cannot be picked");
+  assert(!(await bridge.eval(`return e2e.first(".setup-continue").disabled;`)), "a folder that is not a repository can be picked too (the agent works in it directly)");
   await typeInto(bridge, ".setup-repo-input", repo);
   await bridge.waitFor("the repository check", `return e2e.first(".setup-repo-state")?.getAttribute("data-git") === "true";`, { timeoutMs: 20_000 });
   await bridge.click(".setup-continue");

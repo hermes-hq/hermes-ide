@@ -1861,6 +1861,9 @@ features:
       QA-launcher-12:
         text: "Presets: names are unique whatever their case, an empty offer name keeps the offer, typed Claude model ids launch, and the preview says what the launch passes"
         scenarios: [QA-launcher-preset-names.mjs, QA-launcher-offer-empty-name.mjs, QA-launcher-typed-model.mjs, QA-launcher-preview.mjs]
+      QA-launcher-13:
+        text: "A session opens in any folder from ⌘N and the New Session wizard: a plain folder or a parent of several repositories starts the agent in that folder with no worktree, its first prompt and context file say the agent may make a worktree or branch itself, and the git panels show their plain empty state"
+        scenarios: [QA-launcher-any-folder.mjs]
   REAL-HOD:
     name: "The prompt library with the real Claude Code and Codex CLIs"
     # Local only, like REAL above: needs the signed-in CLIs and costs a tiny
