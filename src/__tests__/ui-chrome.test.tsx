@@ -158,6 +158,25 @@ describe("the activity bar", () => {
     expect(counters[0]).toHaveTextContent("4");
     expect(counters[1]).toHaveClass("h-counter--attention");
   });
+
+  it("names every button by its label alone; the tooltip copy is hidden from screen readers", () => {
+    render(
+      <ActivityBar
+        side="left"
+        topAction={{ icon, label: "New session (⌘N)", onClick: () => {} }}
+        pinnedTabs={[{ id: "sessions", label: "Sessions (⌘B)", icon, badge: 1 }]}
+        tabs={[{ id: "plugin", label: "Pixel Office", icon }]}
+        onReorder={() => {}}
+        activeTabId="sessions"
+        onTabClick={() => {}}
+        bottomActions={[{ icon, label: "Settings", onClick: () => {} }]}
+      />,
+    );
+    const names = screen.getAllByRole("button").map((b) => b.getAttribute("aria-label"));
+    expect(names).toEqual(["New session (⌘N)", "Sessions (⌘B)", "Pixel Office", "Settings"]);
+    expect(screen.getByRole("button", { name: "Sessions (⌘B)" })).toBeInTheDocument();
+    for (const label of document.querySelectorAll(".activity-bar-label")) expect(label).toHaveAttribute("aria-hidden", "true");
+  });
 });
 
 describe("the command palette", () => {
