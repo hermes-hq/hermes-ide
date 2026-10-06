@@ -462,6 +462,31 @@ pub fn sample_of(
     )
 }
 
+/// The helper's children and the agent's tree with each process's CPU total
+/// (`pid name cpu_ms`), for the debug trace of [`run`].
+pub fn tree_figures(procs: &[Proc], session_id: &str) -> String {
+    let Some(helper) = procs.iter().find(|p| is_launch_of(&p.cmd, session_id)) else {
+        return "no helper".to_string();
+    };
+    let children: Vec<&Proc> = procs
+        .iter()
+        .filter(|p| p.parent == Some(helper.pid))
+        .collect();
+    let Some(agent) = children.iter().max_by_key(|p| p.pid) else {
+        return format!("helper {}, no agent", helper.pid);
+    };
+    let tree: Vec<String> = std::iter::once(*agent)
+        .chain(descendants(procs, agent.pid))
+        .map(|p| format!("{} {} {}ms", p.pid, p.name, p.cpu_ms))
+        .collect();
+    format!(
+        "helper {} ({} children), tree: {}",
+        helper.pid,
+        children.len(),
+        tree.join(", ")
+    )
+}
+
 /// Whether `shell`, a descendant of `agent`, is a command the agent runs: a
 /// shell that started after the agent's own startup, and not below a
 /// package runner (see the module docs).
@@ -675,7 +700,9 @@ fn run() {
             }
             continue;
         }
+        let read_started = Instant::now();
         let procs = read_processes(&mut sys);
+        let read_ms = read_started.elapsed().as_millis();
         let now_ms = crate::turn_ledger::now_ms();
         let mut out: Vec<(AppHandle, String, SessionEvent)> = Vec::new();
         let mut settle: Vec<(AppHandle, Arc<StdMutex<Session>>)> = Vec::new();
@@ -686,6 +713,17 @@ fn run() {
                 w.last = Instant::now();
                 let (sample, total) = sample_of(&procs, sid, w.cpu_total, interval);
                 w.cpu_total = Some(total);
+                // Per-sample figures, for diagnosing a status (RUST_LOG=
+                // hermes_ide_lib::pty::os_activity=debug; off by default).
+                if log::log_enabled!(log::Level::Debug) {
+                    log::debug!(
+                        "[OSL] {sid}: at {now_ms} cpu {} ms over {} ms, command {:?}, read {read_ms} ms; {}",
+                        sample.cpu_ms,
+                        sample.interval_ms,
+                        sample.tool,
+                        tree_figures(&procs, sid)
+                    );
+                }
                 if sample.helper_alive {
                     w.seen_helper = true;
                     w.gone_ticks = 0;
@@ -716,15 +754,6 @@ fn run() {
                     continue;
                 }
                 let verdict = w.judge.observe(&sample);
-                // Per-sample figures, for diagnosing a status (RUST_LOG=
-                // hermes_ide_lib::pty::os_activity=debug; off by default).
-                log::debug!(
-                    "[OSL] {sid}: at {now_ms} cpu {} ms over {} ms, command {:?}, verdict {:?}",
-                    sample.cpu_ms,
-                    sample.interval_ms,
-                    sample.tool,
-                    verdict
-                );
                 if let Some(verdict) = &verdict {
                     out.push((w.app.clone(), sid.clone(), verdict_event(verdict, now_ms)));
                 }
@@ -972,6 +1001,22 @@ mod tests {
         assert!(other.helper_alive && !other.agent_alive);
         let (none, _) = sample_of(&procs, "s-3", None, 500);
         assert!(!none.helper_alive);
+    }
+
+    #[test]
+    fn the_trace_lists_the_agents_tree_with_each_processs_cpu() {
+        let procs = vec![
+            p(11, 1, "hi", &["/app/hi", "run", "s-1"], 1),
+            p(12, 11, "claude", &["claude"], 1000),
+            p(13, 12, "node", &["node", "spin.js"], 300),
+            p(20, 1, "hi", &["/app/hi", "run", "s-2"], 1),
+        ];
+        assert_eq!(
+            tree_figures(&procs, "s-1"),
+            "helper 11 (1 children), tree: 12 claude 1000ms, 13 node 300ms"
+        );
+        assert_eq!(tree_figures(&procs, "s-2"), "helper 20, no agent");
+        assert_eq!(tree_figures(&procs, "s-3"), "no helper");
     }
 
     #[test]

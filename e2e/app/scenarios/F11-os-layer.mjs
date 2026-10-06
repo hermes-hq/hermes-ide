@@ -359,7 +359,12 @@ try {
     const { strip: after, ms: afterMs } = await waitForStrip(bridge, b, "no longer working", (s) => s.kind !== "working", { timeoutMs: TOOL_MS + 5_000 });
     assert(after.confidence !== "exact", `once the command ended the strip leaves working ("${after.kind} · ${after.sourceText}", ${afterMs + workingMs} ms after the key)`);
     await bridge.typeInTerminal(b, "b");
-    const { strip: cpu } = await waitForStrip(bridge, b, "working from CPU use", (s) => s.kind === "working" && s.source === "os", { timeoutMs: 4_000 });
+    let cpu;
+    try {
+      ({ strip: cpu } = await waitForStrip(bridge, b, "working from CPU use", (s) => s.kind === "working" && s.source === "os", { timeoutMs: 4_000 }));
+    } finally {
+      log(`  per-sample figures: ${osSamples(b).join(" | ")}`);
+    }
     assert(/CPU/.test(cpu.detail), `CPU use shows as working too ("${cpu.detail}")`);
     const all = await osEvents(bridge, b, tB);
     assert(all.every((e) => e.confidence === "guessed"), `every OS-layer report is a guess (${all.length} reports)`);
@@ -423,6 +428,7 @@ try {
         return window.__HERMES_E2E__.terminalIds().map((id) => ({ id, tail: (window.__HERMES_E2E__.readTerminal(id) || []).slice(-8), events: window.__HERMES_E2E__.sessionEventSnapshot(id).events.slice(-10) }));
       `);
       log(`  what the app had: ${JSON.stringify(dump)}`);
+      for (const { id } of dump) log(`  the OS layer's last looks at ${id}: ${osSamples(id, 12).join(" | ") || "none"}`);
     }
   } catch (inner) {
     log(`  (could not capture failure evidence: ${inner.message})`);
