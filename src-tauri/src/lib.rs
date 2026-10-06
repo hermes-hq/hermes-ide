@@ -592,6 +592,12 @@ pub fn run_console_interrupt_helper() -> Option<i32> {
 
 pub fn run() {
     env_logger::init();
+    // Before any terminal starts: shells and agents inherit this limit, and
+    // an app opened from the Dock gets only 256 open files.
+    #[cfg(unix)]
+    if let Some((old, new)) = hermes_pty_host::fdlimit::raise_open_files_limit() {
+        log::info!("[startup] open-files limit raised from {old} to {new}");
+    }
     install_crash_handler();
     fleet::let_terminals_receive_ctrl_c();
 

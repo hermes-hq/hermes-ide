@@ -1699,6 +1699,50 @@ pub fn refused_launch_event(message: &str) -> crate::contract::SessionEvent {
     }
 }
 
+/// Why an agent cannot start in `cwd`, in words for the person, or None.
+///
+/// A program asks for its working folder's path as it starts, which needs
+/// permission to pass through that folder and every folder above it. Without
+/// it the shell shows "." as the folder name, and agent CLIs stop at once:
+/// Claude Code says "An unknown error occurred, possibly due to low max file
+/// descriptors", which points at the wrong thing. macOS privacy protection
+/// (Files and Folders) refuses even listing the folder.
+#[cfg(unix)]
+pub fn unreadable_folder_message(cwd: &Path) -> Option<String> {
+    if cwd.as_os_str().is_empty() {
+        return None;
+    }
+    let blocked = match std::fs::metadata(cwd.join(".")) {
+        Err(e) => e.kind() == std::io::ErrorKind::PermissionDenied,
+        // Plain permissions that hide only the listing do not stop a program
+        // (EACCES); privacy protection does (EPERM).
+        Ok(_) => {
+            matches!(std::fs::read_dir(cwd), Err(e) if e.raw_os_error() == Some(libc::EPERM))
+        }
+    };
+    if !blocked {
+        return None;
+    }
+    let fix = if cfg!(target_os = "macos") {
+        "allow HERMES-IDE in System Settings › Privacy & Security › Files and Folders (or Full Disk Access), or check the folder's permissions"
+    } else {
+        "check the permissions of the folder and the folders above it"
+    };
+    Some(format!(
+        "Hermes cannot open this session's folder ({}), so the agent was not started. To fix it, {fix}, then start the session again.",
+        cwd.display()
+    ))
+}
+
+#[cfg(not(unix))]
+pub fn unreadable_folder_message(_cwd: &Path) -> Option<String> {
+    None
+}
+
+/// Said when the person had started typing in the shell before the agent's
+/// launch line was due: typing it then would run the two together.
+pub const TYPING_SKIPPED_MESSAGE: &str = "You started typing before the agent started, so Hermes did not type its launch command. Run the agent yourself, or start a new session.";
+
 /// A launcher task (F15) the typed vendor command cannot carry: the helper
 /// never applied to this launch (the flag is off, or the agent has no
 /// recipe), so without this the task would be lost silently. Only for
@@ -3062,6 +3106,50 @@ pub(crate) mod tests {
                     assert_eq!(source.as_deref(), Some("hermes"));
                 }
                 other => panic!("expected a status event, got {other:?}"),
+            }
+        }
+
+        #[cfg(unix)]
+        #[test]
+        fn a_folder_a_program_cannot_stand_in_stops_the_launch_with_the_fix() {
+            use std::os::unix::fs::PermissionsExt;
+            if unsafe { libc::geteuid() } == 0 {
+                return; // root passes through any folder
+            }
+            let tmp = tempfile::tempdir().unwrap();
+            let parent = tmp.path().join("locked");
+            let project = parent.join("project");
+            std::fs::create_dir_all(&project).unwrap();
+            let set = |p: &Path, mode| {
+                std::fs::set_permissions(p, std::fs::Permissions::from_mode(mode)).unwrap()
+            };
+
+            assert_eq!(unreadable_folder_message(&project), None, "an open folder");
+            assert_eq!(unreadable_folder_message(Path::new("")), None);
+            assert_eq!(
+                unreadable_folder_message(&tmp.path().join("gone")),
+                None,
+                "a missing folder is reported elsewhere"
+            );
+            // A folder that can be entered but not listed: programs start there.
+            set(&project, 0o300);
+            assert_eq!(unreadable_folder_message(&project), None);
+            // The folder itself cannot be entered.
+            set(&project, 0o000);
+            let msg = unreadable_folder_message(&project).expect("blocked");
+            set(&project, 0o755);
+            // A folder above it cannot be passed through (the shell shows ".").
+            set(&parent, 0o000);
+            let above = unreadable_folder_message(&project);
+            set(&parent, 0o755);
+            let above = above.expect("blocked from above");
+
+            for m in [&msg, &above] {
+                assert!(m.contains(&project.display().to_string()), "{m}");
+                assert!(m.contains("the agent was not started"), "{m}");
+                if cfg!(target_os = "macos") {
+                    assert!(m.contains("Privacy & Security › Files and Folders"), "{m}");
+                }
             }
         }
 

@@ -49,6 +49,9 @@ fn main() {
             std::process::exit(2);
         }
     };
+    // Room for the shells and agents it starts: launchd gives a soft limit
+    // of 256 open files, which some agent CLIs cannot start under.
+    hermes_pty_host::fdlimit::raise_open_files_limit();
     // Own session: the app's terminal or death must never take the host
     // with it. Fails only when this process already leads a group, which is
     // harmless.

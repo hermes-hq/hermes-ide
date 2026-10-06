@@ -543,6 +543,22 @@ features:
       FIX-overlay-focus-2:
         text: "Opening the inbox, the command palette or the task launcher closes whichever of the others is open; the launcher keeps what was typed"
         scenarios: [FIX-overlay-focus.mjs]
+  FIX-open-files-limit:
+    # A bug fix (2.1.0 on a Mac: Claude Code stopped at once with "possibly
+    # due to low max file descriptors"). Negative control (run by hand): a
+    # build of main before the fix ends in RESULT: FAIL (soft limit 256).
+    name: "Agents start even when the system's open-files limit is low"
+    status: shipped
+    criteria:
+      FIX-open-files-limit-1:
+        text: "An app opened with a soft limit of 256 open files starts its agents with at least 1024, and none of the app's own open files reach them"
+        scenarios: ["FIX-open-files-limit.mjs@darwin,linux"]
+      FIX-open-files-limit-2:
+        text: "A session whose folder its shell cannot open starts no agent and says why, naming the folder and the fix (on macOS, Privacy & Security › Files and Folders)"
+        scenarios: ["FIX-open-files-limit.mjs@darwin,linux"]
+      FIX-open-files-limit-3:
+        text: "When the person starts typing in a session's shell before its agent starts, Hermes types nothing into their line and says so"
+        scenarios: ["FIX-open-files-limit.mjs@darwin,linux"]
   FIX-launcher-draft:
     # A bug fix, not new 2.0 work (the maintainer's test of 2.0). Negative
     # control (run by hand): a build of main before the fix ends in

@@ -205,6 +205,8 @@ pub struct OutputAnalyzer {
     // Auto-launch / auto-inject tracking
     pub shell_ready: bool,
     pub pending_ai_launch: bool,
+    /// Text the person has on the shell's command line (see `typed_line`).
+    pub typed_line: crate::pty::typed_line::TypedLine,
     pub pending_context_inject: bool,
     pub context_injected: bool,
     prompt_count_after_agent: u32,
@@ -424,6 +426,7 @@ impl OutputAnalyzer {
             last_output_at: None,
             shell_ready: false,
             pending_ai_launch: false,
+            typed_line: Default::default(),
             pending_context_inject: false,
             context_injected: false,
             prompt_count_after_agent: 0,

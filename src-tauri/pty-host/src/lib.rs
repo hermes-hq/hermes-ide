@@ -14,6 +14,7 @@
 //! `server` is the host process itself and `client` the app-side connection;
 //! both are Unix-only for now (macOS and Linux; Windows ConPTY is a follow-up).
 
+pub mod fdlimit;
 pub mod protocol;
 pub mod ring;
 

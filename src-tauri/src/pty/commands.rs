@@ -741,6 +741,10 @@ fn type_agent_launch(
     if gone {
         return;
     }
+    if let Some(reason) = launch_blocked(session, analyzer) {
+        block_agent_launch(app, session, &reason);
+        return;
+    }
     let Some(launch) = resolve_agent_launch(app, session) else {
         return;
     };
@@ -774,6 +778,45 @@ fn type_agent_launch(
     if let Some(watch) = launch.watch {
         crate::pty::launch::watch_signals(app.clone(), Arc::clone(session), watch);
     }
+}
+
+/// Why an agent session's launch line must not be typed now, or None: the
+/// person has text on the command line (it would run into theirs), or the
+/// session's folder cannot be entered (the agent would fail at once with a
+/// misleading error).
+fn launch_blocked(
+    session: &Arc<StdMutex<Session>>,
+    analyzer: &Arc<StdMutex<OutputAnalyzer>>,
+) -> Option<String> {
+    let (cwd, local) = {
+        let s = session.lock().ok()?;
+        s.ai_provider.as_ref()?;
+        (s.working_directory.clone(), s.ssh_info.is_none())
+    };
+    if analyzer.lock().is_ok_and(|a| a.typed_line.pending()) {
+        return Some(crate::pty::launch::TYPING_SKIPPED_MESSAGE.to_string());
+    }
+    if local {
+        return crate::pty::launch::unreadable_folder_message(std::path::Path::new(&cwd));
+    }
+    None
+}
+
+/// Start nothing and say why: on the session (its status) and as a notice.
+fn block_agent_launch(app: &AppHandle, session: &Arc<StdMutex<Session>>, reason: &str) {
+    let Ok(s) = session.lock() else {
+        return;
+    };
+    log::warn!("[LAUNCH] {}: agent not started — {reason}", s.id);
+    crate::contract::emit_session_event(
+        app,
+        &s.id,
+        crate::pty::launch::refused_launch_event(reason),
+    );
+    let _ = app.emit(
+        "agent-launch-blocked",
+        serde_json::json!({ "sessionId": s.id, "message": reason }),
+    );
 }
 
 /// Resolve the launch line once the shell is ready: through the bundled `hi`
@@ -1766,7 +1809,14 @@ pub fn create_session(
                                 .lock()
                                 .ok()
                                 .is_some_and(|s| s.ssh_info.is_some());
-                            if a.pending_context_inject && !a.context_injected && !is_ssh_session {
+                            if a.pending_context_inject && a.typed_line.pending() {
+                                // Never into a line the person is writing: the
+                                // next prompt tries again.
+                                a.pending_context_inject = false;
+                            } else if a.pending_context_inject
+                                && !a.context_injected
+                                && !is_ssh_session
+                            {
                                 a.pending_context_inject = false;
                                 let mut write_ok = false;
                                 if let Ok(mut w) = writer_for_reader.lock() {
@@ -2022,6 +2072,9 @@ pub fn create_session(
             .store(true, std::sync::atomic::Ordering::SeqCst);
     }
     if !opened.input.is_empty() {
+        if let Ok(mut a) = pty_session.analyzer.lock() {
+            a.typed_line.feed(&opened.input);
+        }
         if let Ok(mut w) = pty_session.writer.lock() {
             if w.write_all(&opened.input).and_then(|_| w.flush()).is_err() {
                 log::warn!(
@@ -2151,6 +2204,7 @@ pub fn write_to_session(
 
     if let Ok(mut a) = session.analyzer.lock() {
         a.mark_input_sent();
+        a.typed_line.feed(&bytes);
     }
 
     // CHAOS-05: a big paste takes as long as the program needs to read it.

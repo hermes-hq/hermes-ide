@@ -431,6 +431,19 @@ function AppContent() {
     return () => { cancelled = true; unlisten?.(); };
   }, []);
 
+  // ── An agent launch Hermes held back (folder it cannot open, person typing) ──
+  useEffect(() => {
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+    listen<{ sessionId: string; message: string }>("agent-launch-blocked", (event) => {
+      if (cancelled) return;
+      toastStoreRef.current.addToast({ message: event.payload.message, type: "warning", duration: 30000 });
+    }).then((u) => {
+      if (cancelled) { u(); } else { unlisten = u; }
+    });
+    return () => { cancelled = true; unlisten?.(); };
+  }, []);
+
   // ── A launcher task the agent's launch could not carry (F15) ──
   useEffect(() => {
     let cancelled = false;

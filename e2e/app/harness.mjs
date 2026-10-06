@@ -616,6 +616,9 @@ export async function launchApp({
   // Another test-app executable to start, e.g. an installed test AppImage
   // (F25). Its build stamp is checked against a build.json next to it, if any.
   binary = appBinaryPath(),
+  // macOS/Linux: start the app with this soft open-files limit, as launchd
+  // gives an app opened from the Dock (256).
+  openFilesSoftLimit,
 } = {}) {
   if (!existsSync(binary)) {
     throw new Error(`test app not built: ${binary} is missing — run \`node e2e/app/build.mjs\` first`);
@@ -641,7 +644,11 @@ export async function launchApp({
 
   const appLog = join(runDir, "app.log");
   const fd = openSync(appLog, "w");
-  const child = spawn(binary, [], {
+  const [program, args] =
+    openFilesSoftLimit && platform() !== "win32"
+      ? ["/bin/sh", ["-c", `ulimit -Sn ${Number(openFilesSoftLimit)} && exec "$0"`, binary]]
+      : [binary, []];
+  const child = spawn(program, args, {
     cwd: runDir,
     env: {
       ...inheritedEnv(),
