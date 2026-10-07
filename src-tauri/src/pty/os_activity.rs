@@ -517,8 +517,24 @@ fn is_command_shell(procs: &[Proc], agent: &Proc, shell: &Proc) -> bool {
     true
 }
 
+/// A process started this recently has its command line read again on
+/// every look (see `read_processes`).
+const CMD_REREAD_S: u64 = 10;
+
+/// Whether a process that started at `start_s` (seconds since the epoch, 0
+/// when unknown) is young enough to have its command line read again.
+fn rereads_cmd(start_s: u64, now_s: u64) -> bool {
+    start_s != 0 && start_s.saturating_add(CMD_REREAD_S) >= now_s
+}
+
 /// Read the process table: names and parents for everything, command lines
 /// once per process, CPU time for every process (cheap: one call each).
+///
+/// The helper is a child the shell forks and then execs into `hi run`: same
+/// process id, same start time. A process first seen between the fork and
+/// the exec would keep the shell's command line for good (sysinfo reads it
+/// once; on macOS it does not even notice the exec), and the helper would
+/// never be recognised. So a young process has its command line read again.
 fn read_processes(sys: &mut sysinfo::System) -> Vec<Proc> {
     use sysinfo::{ProcessRefreshKind, ProcessesToUpdate, UpdateKind};
     sys.refresh_processes_specifics(
@@ -528,6 +544,23 @@ fn read_processes(sys: &mut sysinfo::System) -> Vec<Proc> {
             .with_cpu()
             .with_cmd(UpdateKind::OnlyIfNotSet),
     );
+    let now_s = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let young: Vec<sysinfo::Pid> = sys
+        .processes()
+        .iter()
+        .filter(|(_, p)| rereads_cmd(p.start_time(), now_s))
+        .map(|(pid, _)| *pid)
+        .collect();
+    if !young.is_empty() {
+        sys.refresh_processes_specifics(
+            ProcessesToUpdate::Some(&young),
+            false,
+            ProcessRefreshKind::nothing().with_cmd(UpdateKind::Always),
+        );
+    }
     sys.processes()
         .iter()
         .map(|(pid, p)| Proc {
@@ -1245,5 +1278,88 @@ mod tests {
         let _ = child.wait();
         assert!(saw_agent, "the helper's child was not found");
         assert!(saw_tool, "the command under the agent was not found");
+    }
+
+    #[test]
+    fn only_a_young_process_has_its_command_line_read_again() {
+        let now = 1_000_000;
+        assert!(rereads_cmd(now, now));
+        assert!(rereads_cmd(now - CMD_REREAD_S, now));
+        assert!(!rereads_cmd(now - CMD_REREAD_S - 1, now));
+        // An unknown start time is not taken for a young process.
+        assert!(!rereads_cmd(0, now));
+        // A clock that went back a little still counts it as young.
+        assert!(rereads_cmd(now + 2, now));
+    }
+
+    /// Polls `read_processes` until `done` holds for the table, or the
+    /// deadline passes; returns whether it held.
+    #[cfg(unix)]
+    fn look_until(
+        sys: &mut sysinfo::System,
+        within: Duration,
+        mut done: impl FnMut(&[Proc]) -> bool,
+    ) -> bool {
+        let deadline = Instant::now() + within;
+        loop {
+            if done(&read_processes(sys)) {
+                return true;
+            }
+            if Instant::now() >= deadline {
+                return false;
+            }
+            std::thread::sleep(Duration::from_millis(50));
+        }
+    }
+
+    /// The shell forks, and the child becomes `hi run <session>` only when
+    /// it execs (same process id, same start time). A look between the two
+    /// used to keep the shell's command line for that process for good, so
+    /// the helper was never recognised and the agent never read as started.
+    #[cfg(unix)]
+    #[test]
+    fn a_helper_first_seen_before_its_exec_is_recognised_after_it() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let hi = dir.path().join("hi");
+        let go = dir.path().join("go");
+        let started = dir.path().join("started");
+        std::fs::write(
+            &hi,
+            format!("#!/bin/sh\n: > '{}'\nsleep 10\n", started.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&hi, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let sid = format!("os-exec-test-{}", std::process::id());
+        // Stands in for the shell's child: it waits for the go-ahead, then
+        // execs into the helper.
+        let script = format!(
+            "while [ ! -f '{}' ]; do sleep 0.05; done; exec '{}' run {}",
+            go.display(),
+            hi.display(),
+            sid
+        );
+        let mut child = std::process::Command::new("/bin/sh")
+            .args(["-c", &script])
+            .spawn()
+            .unwrap();
+        let pid = child.id();
+        let mut sys = sysinfo::System::new();
+        // Seen before the exec, with the shell's command line.
+        let seen = look_until(&mut sys, Duration::from_secs(10), |procs| {
+            procs.iter().any(|p| p.pid == pid && !p.cmd.is_empty())
+        });
+        let before = sample_of(&read_processes(&mut sys), &sid, None, 500).0;
+        std::fs::write(&go, "").unwrap();
+        let execd = look_until(&mut sys, Duration::from_secs(10), |_| started.exists());
+        let found = look_until(&mut sys, Duration::from_secs(5), |procs| {
+            sample_of(procs, &sid, None, 500).0.helper_alive
+        });
+        let _ = child.kill();
+        let _ = child.wait();
+        assert!(seen, "the process was not seen before its exec");
+        assert!(!before.helper_alive, "taken for the helper before its exec");
+        assert!(execd, "the helper did not start");
+        assert!(found, "the helper was not recognised after its exec");
     }
 }
