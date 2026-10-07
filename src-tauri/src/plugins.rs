@@ -440,6 +440,82 @@ pub async fn plugin_post_json(
         .map_err(|e| format!("Failed to read response: {}", e))
 }
 
+#[derive(Debug, Serialize)]
+pub struct PluginHttpResponse {
+    pub status: u16,
+    /// Response headers as a flat map: an explicit choice, not an oversight.
+    /// Repeated headers (e.g. multiple `Set-Cookie`) collapse to whichever
+    /// value iterates last, and a header value that isn't valid UTF-8/ASCII
+    /// comes back as `""` (see `.to_str().unwrap_or("")` below) rather than
+    /// erroring the whole request. Fine for the plugins this exists for
+    /// today; revisit with a multi-map if a plugin ever needs every value.
+    pub headers: std::collections::HashMap<String, String>,
+    pub body: String,
+}
+
+/// Send an HTTP request with an arbitrary method and return the full
+/// response (status, headers, body) — a superset of `plugin_fetch_url` /
+/// `plugin_post_json`, which are GET/POST-only and only ever return the
+/// body text. Kept those two in place for plugins already built against
+/// them; new plugins (e.g. a general-purpose HTTP client) need PUT/PATCH/
+/// DELETE and response status/headers, which those can't provide.
+/// Used by plugins with the "network" permission.
+#[tauri::command]
+pub async fn plugin_http_request(
+    method: String,
+    url: String,
+    headers: Option<std::collections::HashMap<String, String>>,
+    body: Option<String>,
+    plugin_id: String,
+    state: State<'_, AppState>,
+) -> Result<PluginHttpResponse, String> {
+    {
+        let db = state.db.lock().map_err(|e| e.to_string())?;
+        if !db.has_plugin_permission(&plugin_id, "network")? {
+            return Err(format!(
+                "Plugin \"{}\" does not have \"network\" permission",
+                plugin_id
+            ));
+        }
+    }
+    let http_method = method
+        .parse::<reqwest::Method>()
+        .map_err(|e| format!("Invalid HTTP method \"{}\": {}", method, e))?;
+
+    let client = reqwest::Client::new();
+    let mut req = client.request(http_method, &url);
+    if let Some(hdrs) = headers {
+        for (k, v) in hdrs {
+            req = req.header(&k, &v);
+        }
+    }
+    if let Some(b) = body {
+        req = req.body(b);
+    }
+
+    let response = req
+        .send()
+        .await
+        .map_err(|e| format!("Request failed: {}", e))?;
+
+    let status = response.status().as_u16();
+    let response_headers = response
+        .headers()
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
+        .collect();
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("Failed to read response body: {}", e))?;
+
+    Ok(PluginHttpResponse {
+        status,
+        headers: response_headers,
+        body,
+    })
+}
+
 /// Execute a shell command and return its output.
 /// Used by plugins with the "shell.exec" permission. Token-bound.
 #[tauri::command]

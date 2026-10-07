@@ -366,6 +366,15 @@ interface HermesPluginAPI {
     /** Fetch a URL and return the response body as text.
      *  Requests are proxied through the Rust backend to bypass CSP. */
     fetch(url: string): Promise<string>;
+    /** Send an HTTP request with any method (GET/POST/PUT/PATCH/DELETE/...)
+     *  and inspect the full response — status code, headers, and body.
+     *  Use this over `fetch`/`postJson` whenever a plugin needs more than
+     *  a GET/POST-with-text-response round trip. */
+    request(
+      method: string,
+      url: string,
+      options?: { headers?: Record<string, string>; body?: string }
+    ): Promise<{ status: number; headers: Record<string, string>; body: string }>;
   };
 
   // ─── Shell (requires "network" permission) ────────────────────
