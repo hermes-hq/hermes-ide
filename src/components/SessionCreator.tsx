@@ -39,7 +39,7 @@ import {
 } from "../utils/sessionModePref";
 import { listSshSavedHosts, upsertSshSavedHost, type SshSavedHost } from "../api/ssh";
 import type { PermissionMode, SessionMode, TmuxSessionEntry } from "../types/session";
-import { isGitRepo as checkIsGitRepo, gitListBranchesForProject } from "../api/git";
+import { isGitRepo as checkIsGitRepo, gitEnclosingRepo, gitListBranchesForProject } from "../api/git";
 import { LANG_COLORS } from "../utils/langColors";
 import { SessionBranchSelector, type BranchDraft } from "./SessionBranchSelector";
 import { isFeatureFlagEnabled } from "../featureFlags";
@@ -227,6 +227,9 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   const [gitProjectIds, setGitProjectIds] = useState<string[]>([]);
   /** Git projects with no commits yet (no branch to cut a task's branch from). */
   const [unbornProjectIds, setUnbornProjectIds] = useState<string[]>([]);
+  /** Non-git projects that are a subfolder of a git repository: that
+   *  repository's top level. Started directly in the folder (no worktree). */
+  const [enclosingRepos, setEnclosingRepos] = useState<Record<string, string>>({});
   const [checkingGit, setCheckingGit] = useState(false);
   // The selection the git check last answered for (see gitCheckPending).
   const [gitCheckedFor, setGitCheckedFor] = useState<readonly string[] | null>(null);
@@ -540,8 +543,21 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             ),
           )
         ).filter((id): id is string => id !== null);
+        const enclosing: Record<string, string> = {};
+        await Promise.all(
+          results
+            .filter((r) => !r.isGit)
+            .map((r) =>
+              gitEnclosingRepo(r.projectId)
+                .then((root) => {
+                  if (root) enclosing[r.projectId] = root;
+                })
+                .catch(() => {}),
+            ),
+        );
         if (cancelled) return;
         setUnbornProjectIds(unborn);
+        setEnclosingRepos(enclosing);
         setGitProjectIds(gitIds);
         setGitCheckedFor(selectedProjectIds);
         setBranchSelections((prev) => {
@@ -566,12 +582,17 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   // worktree).
   const gitCheckPending =
     checkingGit || (selectedProjectIds.length > 0 && gitCheckedFor !== selectedProjectIds);
-  /** Names of the chosen folders that are not git repositories (once checked). */
+  /** The chosen folders that are not git repositories (once checked), said
+   *  as a subfolder of a repository when they are one. */
   const nonGitSelected = gitCheckPending
     ? []
     : selectedProjectIds
         .filter((id) => !gitProjectIds.includes(id))
-        .map((id) => allProjects.find((r) => r.id === id)?.name || id);
+        .map((id) => {
+          const name = allProjects.find((r) => r.id === id)?.name || id;
+          const repo = enclosingRepos[id];
+          return repo ? t("folder.insideGitNamed", { name, repo }) : t("folder.notGitNamed", { name });
+        });
   /** Names of the chosen repositories with no commits yet. */
   const unbornSelected = selectedProjectIds
     .filter((id) => unbornProjectIds.includes(id))
@@ -1173,8 +1194,8 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
             </div>
             {nonGitSelected.length > 0 && (
               <div className="session-creator-nongit" role="note">
-                {nonGitSelected.map((name) => (
-                  <div key={name} className="session-creator-nongit-row">{t("folder.notGitNamed", { name })}</div>
+                {nonGitSelected.map((hint) => (
+                  <div key={hint} className="session-creator-nongit-row">{hint}</div>
                 ))}
               </div>
             )}
@@ -1219,7 +1240,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
                       <div key={projectId} className="session-creator-branch-project">
                         <div className="session-creator-branch-project-header">
                           <span className="session-creator-branch-project-name">{projectName}</span>
-                          <span className="session-creator-branch-nonGit">{t("session.notGitRepo")}</span>
+                          <span className="session-creator-branch-nonGit">{enclosingRepos[projectId] ? t("session.insideGitRepo") : t("session.notGitRepo")}</span>
                         </div>
                       </div>
                     );
