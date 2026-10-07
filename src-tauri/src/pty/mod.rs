@@ -232,6 +232,10 @@ impl PtyManager {
             None => return (false, Some("Session not found in PTY manager".to_string())),
         };
 
+        // Read before the session lock: the reader thread holds the analyzer
+        // while it takes the session.
+        let typing = pty.analyzer.lock().is_ok_and(|a| a.typed_line.pending());
+
         let mut session_guard = match pty.session.lock() {
             Ok(g) => g,
             Err(e) => return (false, Some(format!("Session lock failed: {}", e))),
@@ -259,6 +263,16 @@ impl PtyManager {
                 false,
                 Some("Agent busy — nudge deferred until idle".to_string()),
             );
+        }
+
+        // Never into a line the person is writing (see `typed_line`): the
+        // next time the agent waits, it is tried again.
+        if typing {
+            session_guard.pending_nudge = Some(PendingNudge {
+                version,
+                file_path: file_path.to_string(),
+            });
+            return (false, Some("Text on the line — nudge deferred".to_string()));
         }
 
         Self::write_nudge(pty, &mut session_guard, version, file_path)
@@ -308,10 +322,16 @@ impl PtyManager {
 
     /// Deliver a pending nudge using a standalone writer reference
     /// (for use inside the reader thread which doesn't have PtySession).
+    /// `typing`: the person has text on the line (`typed_line`); the nudge
+    /// then stays pending for the next time the agent waits.
     pub(crate) fn deliver_pending_nudge_with_writer(
         writer: &Arc<StdMutex<Box<dyn Write + Send>>>,
         session: &mut Session,
+        typing: bool,
     ) {
+        if typing {
+            return;
+        }
         if let Some(nudge) = session.pending_nudge.take() {
             if session.last_nudged_version >= nudge.version {
                 return;
@@ -524,6 +544,123 @@ mod tests {
         fn hosted(&self) -> bool {
             false
         }
+    }
+
+    // ── context nudge ──
+
+    /// A writer whose bytes the test can read back.
+    #[derive(Clone, Default)]
+    struct Typed(std::sync::Arc<std::sync::Mutex<Vec<u8>>>);
+
+    impl std::io::Write for Typed {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            self.0.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+
+    impl Typed {
+        fn text(&self) -> String {
+            String::from_utf8_lossy(&self.0.lock().unwrap()).into_owned()
+        }
+    }
+
+    fn waiting_claude() -> crate::pty::models::Session {
+        let mut s = crate::pty::launch::tests::test_session();
+        s.phase = SessionPhase::NeedsInput;
+        s.detected_agent = Some(crate::pty::models::AgentInfo {
+            name: "claude".into(),
+            provider: "anthropic".into(),
+            model: None,
+            detected_at: String::new(),
+            confidence: 1.0,
+        });
+        s
+    }
+
+    #[test]
+    fn a_context_nudge_waits_while_the_person_has_text_on_the_line() {
+        use std::sync::{Arc, Mutex};
+        let typed = Typed::default();
+        let mut analyzer = OutputAnalyzer::new();
+        analyzer.typed_line.feed(b"fix the bu");
+        let mut mgr = PtyManager::new();
+        let session = Arc::new(Mutex::new(waiting_claude()));
+        let analyzer = Arc::new(Mutex::new(analyzer));
+        mgr.sessions.insert(
+            "s1".to_string(),
+            super::PtySession {
+                transport: Box::new(CountingPty(Arc::default())),
+                writer: Arc::new(Mutex::new(
+                    Box::new(typed.clone()) as Box<dyn std::io::Write + Send>
+                )),
+                session: Arc::clone(&session),
+                analyzer: Arc::clone(&analyzer),
+                shell_integration: super::shell_integration::ShellIntegration::None,
+                hermes_suggestions: false,
+                size: (24, 80),
+                sized: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            },
+        );
+        // The agent waits, but the person is writing: nothing is typed, the
+        // nudge is kept for the next time the agent waits.
+        let (sent, _) = mgr.send_versioned_nudge("s1", 3, "/ctx.md");
+        assert!(!sent);
+        assert_eq!(typed.text(), "");
+        assert_eq!(
+            session
+                .lock()
+                .unwrap()
+                .pending_nudge
+                .as_ref()
+                .map(|n| n.version),
+            Some(3)
+        );
+
+        // Delivered at the next prompt only once the line is empty.
+        let writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> =
+            Arc::new(Mutex::new(Box::new(typed.clone())));
+        PtyManager::deliver_pending_nudge_with_writer(&writer, &mut session.lock().unwrap(), true);
+        assert_eq!(typed.text(), "");
+        assert!(session.lock().unwrap().pending_nudge.is_some());
+
+        analyzer.lock().unwrap().typed_line.feed(b"g\r");
+        PtyManager::deliver_pending_nudge_with_writer(&writer, &mut session.lock().unwrap(), false);
+        assert!(
+            typed.text().starts_with("Read the file at /ctx.md"),
+            "{}",
+            typed.text()
+        );
+        let s = session.lock().unwrap();
+        assert!(s.pending_nudge.is_none());
+        assert_eq!(s.last_nudged_version, 3);
+    }
+
+    #[test]
+    fn a_context_nudge_is_typed_at_once_into_an_empty_line() {
+        use std::sync::{Arc, Mutex};
+        let typed = Typed::default();
+        let mut mgr = PtyManager::new();
+        mgr.sessions.insert(
+            "s1".to_string(),
+            super::PtySession {
+                transport: Box::new(CountingPty(Arc::default())),
+                writer: Arc::new(Mutex::new(
+                    Box::new(typed.clone()) as Box<dyn std::io::Write + Send>
+                )),
+                session: Arc::new(Mutex::new(waiting_claude())),
+                analyzer: Arc::new(Mutex::new(OutputAnalyzer::new())),
+                shell_integration: super::shell_integration::ShellIntegration::None,
+                hermes_suggestions: false,
+                size: (24, 80),
+                sized: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            },
+        );
+        assert_eq!(mgr.send_versioned_nudge("s1", 1, "/ctx.md"), (true, None));
+        assert!(typed.text().starts_with("Read the file at /ctx.md"));
     }
 
     #[test]

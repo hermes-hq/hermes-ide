@@ -1772,6 +1772,7 @@ pub fn create_session(
                                             super::PtyManager::deliver_pending_nudge_with_writer(
                                                 &writer_for_reader,
                                                 &mut s,
+                                                a.typed_line.pending(),
                                             );
                                         }
                                     }
