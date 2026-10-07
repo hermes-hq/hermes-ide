@@ -2120,6 +2120,7 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "git_author_email",
     "git_auto_stage",
     "git_show_untracked",
+    "worktree_base_path",
     // Turn ledger kill switch (F20): "off" stops every snapshot.
     "turn_ledger",
     // AI agent defaults
@@ -2187,6 +2188,9 @@ const VALID_SETTING_KEYS: &[&str] = &[
 pub fn set_setting(state: State<'_, AppState>, key: String, value: String) -> Result<(), String> {
     if !VALID_SETTING_KEYS.contains(&key.as_str()) {
         return Err(format!("Unknown setting key: {}", key));
+    }
+    if key == "worktree_base_path" && !value.trim().is_empty() {
+        crate::git::worktree::validate_custom_worktree_base(&value, None)?;
     }
     // A save that started before a session was closed must not bring it back.
     let value = if key == crate::saved_workspace::SETTING_KEY {
@@ -3279,6 +3283,8 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "saved_workspace",
     // Default CWD — absolute path, won't exist on another machine
     "default_cwd",
+    // Worktree base path — absolute path, machine-specific
+    "worktree_base_path",
     // Onboarding / What's New — per-install lifecycle
     "onboarding_completed",
     "last_seen_version",

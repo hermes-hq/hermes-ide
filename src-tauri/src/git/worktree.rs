@@ -234,9 +234,23 @@ pub fn repo_path_hash(repo_path: &str) -> String {
 // ─── Public API ─────────────────────────────────────────────────────
 
 /// Returns the top-level directory for all Hermes worktrees.
-/// Path: `{app_data_dir}/hermes-worktrees/`
+/// If an instance worktree base was set at startup (e.g. from `worktree_base_path` setting),
+/// that path is used; otherwise defaults to `{app_data_dir}/hermes-worktrees/`.
 pub fn worktrees_base_dir(app_data_dir: &Path) -> PathBuf {
-    app_data_dir.join(HERMES_WORKTREE_MARKER)
+    INSTANCE_WORKTREES_BASE
+        .get()
+        .cloned()
+        .unwrap_or_else(|| app_data_dir.join(HERMES_WORKTREE_MARKER))
+}
+
+/// Computes the worktree base directory for a custom base path.
+/// Always ensures the path ends with `hermes-worktrees`.
+pub fn custom_worktrees_base_dir(custom_base: &Path) -> PathBuf {
+    if custom_base.ends_with(HERMES_WORKTREE_MARKER) {
+        custom_base.to_path_buf()
+    } else {
+        custom_base.join(HERMES_WORKTREE_MARKER)
+    }
 }
 
 /// Returns the base directory for Hermes worktrees for a specific repo.
@@ -1377,7 +1391,80 @@ static INSTANCE_WORKTREES_BASE: std::sync::OnceLock<PathBuf> = std::sync::OnceLo
 
 /// Record this instance's worktrees folder; later calls are ignored.
 pub fn set_instance_worktrees_base(app_data_dir: &Path) {
-    let _ = INSTANCE_WORKTREES_BASE.set(worktrees_base_dir(app_data_dir));
+    let _ = INSTANCE_WORKTREES_BASE.set(app_data_dir.join(HERMES_WORKTREE_MARKER));
+}
+
+/// Record this instance's worktrees folder from a pre-determined base directory; later calls are ignored.
+pub fn set_instance_worktrees_base_from_dir(base: &Path) {
+    let _ = INSTANCE_WORKTREES_BASE.set(base.to_path_buf());
+}
+
+/// Validate a candidate custom worktree base path.
+/// Verifies that:
+/// 1. The path is non-empty.
+/// 2. The path exists and is a directory.
+/// 3. The directory is writable.
+/// 4. The path is not the repository root itself, inside the repository, or an ancestor of the repository.
+pub fn validate_custom_worktree_base(
+    path_str: &str,
+    repo_path: Option<&str>,
+) -> Result<PathBuf, String> {
+    let trimmed = path_str.trim();
+    if trimmed.is_empty() {
+        return Err("Worktree base path cannot be empty".to_string());
+    }
+
+    let path = PathBuf::from(trimmed);
+    if !path.exists() {
+        return Err(format!("Worktree base path does not exist: '{}'", trimmed));
+    }
+
+    if !path.is_dir() {
+        return Err(format!("Worktree base path is not a directory: '{}'", trimmed));
+    }
+
+    // Check writability by attempting to write and remove a temporary file
+    let test_file = path.join(format!(".hermes_write_test_{}", uuid::Uuid::new_v4()));
+    match fs::write(&test_file, "test") {
+        Ok(_) => {
+            let _ = fs::remove_file(&test_file);
+        }
+        Err(e) => {
+            return Err(format!(
+                "Worktree base path is not writable: '{}' ({})",
+                trimmed, e
+            ));
+        }
+    }
+
+    // Check that custom base is not inside or equal to the repository itself
+    if let Some(repo) = repo_path {
+        let repo_canon = fs::canonicalize(repo).ok();
+        let path_canon = fs::canonicalize(&path).ok();
+
+        if let (Some(rc), Some(pc)) = (repo_canon, path_canon) {
+            if pc == rc {
+                return Err(format!(
+                    "Worktree base path cannot be the repository root directory: '{}'",
+                    trimmed
+                ));
+            }
+            if pc.starts_with(&rc) {
+                return Err(format!(
+                    "Worktree base path cannot be inside the repository directory: '{}'",
+                    trimmed
+                ));
+            }
+            if rc.starts_with(&pc) {
+                return Err(format!(
+                    "Worktree base path cannot be an ancestor of the repository directory: '{}'",
+                    trimmed
+                ));
+            }
+        }
+    }
+
+    Ok(path)
 }
 
 /// Whether `path` is a worktree THIS Hermes instance made: under its own
@@ -3576,5 +3663,53 @@ mod tests {
             describe_add_failure("x", "error: something else"),
             "Could not make a worktree for x: something else"
         );
+    }
+
+    #[test]
+    fn test_custom_worktrees_base_dir() {
+        let base1 = Path::new("/custom/storage");
+        assert_eq!(
+            custom_worktrees_base_dir(base1),
+            PathBuf::from("/custom/storage/hermes-worktrees")
+        );
+
+        let base2 = Path::new("/custom/storage/hermes-worktrees");
+        assert_eq!(
+            custom_worktrees_base_dir(base2),
+            PathBuf::from("/custom/storage/hermes-worktrees")
+        );
+    }
+
+    #[test]
+    fn test_validate_custom_worktree_base() {
+        let temp = tempfile::tempdir().unwrap();
+        let valid_path = temp.path().to_str().unwrap();
+
+        // Valid directory
+        let res = validate_custom_worktree_base(valid_path, None);
+        assert!(res.is_ok());
+
+        // Empty string
+        assert!(validate_custom_worktree_base("", None).is_err());
+        assert!(validate_custom_worktree_base("   ", None).is_err());
+
+        // Non-existent directory
+        let nonexistent = temp.path().join("does_not_exist");
+        assert!(validate_custom_worktree_base(nonexistent.to_str().unwrap(), None).is_err());
+
+        // File instead of directory
+        let file_path = temp.path().join("file.txt");
+        fs::write(&file_path, "hello").unwrap();
+        assert!(validate_custom_worktree_base(file_path.to_str().unwrap(), None).is_err());
+
+        // Subdirectory of repo is rejected
+        let repo_temp = tempfile::tempdir().unwrap();
+        let repo_path = repo_temp.path().to_str().unwrap();
+        let inside = repo_temp.path().join("subdir");
+        fs::create_dir_all(&inside).unwrap();
+        assert!(validate_custom_worktree_base(inside.to_str().unwrap(), Some(repo_path)).is_err());
+
+        // Repo itself is rejected
+        assert!(validate_custom_worktree_base(repo_path, Some(repo_path)).is_err());
     }
 }

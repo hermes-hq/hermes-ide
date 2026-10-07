@@ -207,6 +207,16 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
     return setSetting(key, value).catch(console.error);
   }, [settings]);
 
+  // The backend validates the worktree base (must exist, be a writable
+  // directory), so surface its error inline instead of only logging it.
+  const [worktreeBaseError, setWorktreeBaseError] = useState<string | null>(null);
+  const updateWorktreeBasePath = useCallback((value: string) => {
+    setSettings((prev) => ({ ...prev, worktree_base_path: value }));
+    setSetting("worktree_base_path", value)
+      .then(() => setWorktreeBaseError(null))
+      .catch((e) => setWorktreeBaseError(String(e)));
+  }, []);
+
   const applyWindowSize = useCallback((widthStr: string, heightStr: string, immediate = false) => {
     if (applyTimer.current) clearTimeout(applyTimer.current);
     const delay = immediate ? 0 : 400;
@@ -836,6 +846,35 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     onChange={(e) => updateSetting("git_author_email", e.target.value)}
                     onContextMenu={textContextMenu}
                   />
+                </div>
+
+                <div className="settings-group" data-setting="worktree_base_path">
+                  <label className="settings-label" htmlFor="settings-worktree-base-path">{t("settings.worktreeBasePath")}</label>
+                  <div className="settings-input-with-btn">
+                    <Input
+                      id="settings-worktree-base-path"
+                      placeholder={t("settings.worktreeBasePathPlaceholder")}
+                      value={settings.worktree_base_path || ""}
+                      onChange={(e) => updateWorktreeBasePath(e.target.value)}
+                      onContextMenu={textContextMenu}
+                      error={worktreeBaseError ?? undefined}
+                    />
+                    <Button
+                      onClick={async () => {
+                        const selected = await open({
+                          directory: true,
+                          multiple: false,
+                          title: t("settings.worktreeBasePathDialogTitle"),
+                        });
+                        if (selected && typeof selected === "string") {
+                          updateWorktreeBasePath(selected);
+                        }
+                      }}
+                    >
+                      {t("common.browse")}
+                    </Button>
+                  </div>
+                  <span className="settings-hint-inline">{t("settings.worktreeBasePathHint")}</span>
                 </div>
 
                 <div className="settings-group" data-setting="git_auto_stage">

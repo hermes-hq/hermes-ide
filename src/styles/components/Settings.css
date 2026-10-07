@@ -157,6 +157,17 @@
   color: var(--danger);
 }
 
+.settings-input-with-btn {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+}
+.settings-input-with-btn > .h-input,
+.settings-input-with-btn > .h-field {
+  flex: 1;
+  min-width: 0;
+}
+
 .settings-size-row {
   display: flex;
   align-items: center;

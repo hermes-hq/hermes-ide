@@ -43,12 +43,12 @@ impl WorktreeWatcher {
     }
 }
 
-/// Start watching `{base_dir}/hermes-worktrees/` recursively.
+/// Start watching the instance's `hermes-worktrees/` directory recursively.
 ///
 /// Returns `None` if the directory does not exist or the watcher fails to
 /// initialise.  Errors are logged but never cause a panic.
 pub fn start_watching(app: AppHandle, base_dir: PathBuf) -> Option<WorktreeWatcher> {
-    let worktrees_dir = base_dir.join(super::worktree::HERMES_WORKTREE_MARKER);
+    let worktrees_dir = super::worktree::worktrees_base_dir(&base_dir);
 
     // Only start if the directory already exists (it may not exist for brand-new users)
     if !worktrees_dir.is_dir() {
