@@ -25,7 +25,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { invoke, launcherState, newTerminals, openLauncher, pressAppShortcut, setRepo, typeInto, waitLaunchEnabled, waitLauncherClosed } from "../launcher-steps.mjs";
-import { menuAction, runLauncherQa, sleep } from "../qa-launcher-steps.mjs";
+import { menuAction, runLauncherQa } from "../qa-launcher-steps.mjs";
 
 const GUIDANCE = "This folder is not a single git repository. If you need to change code inside a git repository in it, you may create a worktree or branch there yourself when it makes sense.";
 const HINT = "Not a git repository: the agent works directly in this folder.";
@@ -70,6 +70,12 @@ await runLauncherQa("QA-launcher-any-folder", async ({ bridge, fx, log, check, a
   await setRepo(bridge, plain);
   await typeInto(bridge, ".task-launcher-task", "Tidy the ideas file");
   await bridge.waitFor("the plain-folder hint", `return !!e2e.first(".task-launcher-plain-folder");`, { timeoutMs: 20_000 });
+  // The preview line is filled in after the agent's command line comes back
+  // from the app, a moment after the hint shows (CI Linux once read it in
+  // between: "in worktree hermes/… from HEAD"). Wait for it to say the folder.
+  await bridge
+    .waitFor("the preview to place the agent in the folder", `return /\\(no worktree\\)$/.test(e2e.norm(e2e.first(".task-launcher-command")?.textContent ?? ""));`, { timeoutMs: 20_000 })
+    .catch((e) => log(`  ${e.message}`));
   let st = await launcherState(bridge);
   const hint = await bridge.eval(`return e2e.norm(e2e.first(".task-launcher-plain-folder")?.innerText ?? "");`);
   log(`  launcher: project=${st.project} where=${JSON.stringify(st.where)} blocks=${JSON.stringify(st.blocks)} preview=${JSON.stringify(st.preview)} hint=${JSON.stringify(hint)}`);
@@ -167,7 +173,6 @@ await runLauncherQa("QA-launcher-any-folder", async ({ bridge, fx, log, check, a
   await bridge.screenshot(join(evidenceDir, "04-review-desk.png"));
   check(desk.error === null, "the Review Desk shows no error");
   check(!!desk.empty, `it shows the plain no-repository state ("${desk.empty}")`);
-  await sleep(500);
   const toasts = await bridge.eval(`return e2e.all(".toast").map((x) => e2e.norm(x.innerText));`);
   log(`  toasts: ${JSON.stringify(toasts)}`);
   check(!toasts.some((t) => /worktree|not a git|fatal/i.test(t)), "no worktree or git error is raised");
