@@ -163,7 +163,27 @@ impl vte::Perform for SnapshotScreen {
             },
             'D' => self.col = self.col.saturating_sub(n),
             'C' => self.col = (self.col + n).min(SnapshotLines::MAX_LINE),
-            'G' => self.col = n - 1,
+            'G' => self.col = (n - 1).min(SnapshotLines::MAX_LINE),
+            // Cursor position (row;col). Windows' console host redraws a
+            // line being edited (PowerShell's, with its grey suggestion) by
+            // moving to an absolute position on the same row. Only the
+            // column is kept: a line ends at a newline here, not at a row.
+            'H' | 'f' => {
+                let col = params
+                    .iter()
+                    .nth(1)
+                    .and_then(|p| p.first().copied())
+                    .unwrap_or(0) as usize;
+                self.col = (col.max(1) - 1).min(SnapshotLines::MAX_LINE);
+            }
+            // Erase characters from the cursor, which does not move (how the
+            // console host wipes a suggestion that no longer applies).
+            'X' => {
+                let end = (self.col + n).min(self.line.len());
+                for c in self.line.iter_mut().take(end).skip(self.col) {
+                    *c = ' ';
+                }
+            }
             _ => {}
         }
     }
@@ -1082,6 +1102,64 @@ mod tests {
         assert_eq!(snapshot_of(&[b"abc\x1b[Gx"]), "xbc\n", "no column is 1");
         // Back past the start stops at the start.
         assert_eq!(snapshot_of(&[b"ab\x1b[9Dx"]), "xb\n");
+    }
+
+    #[test]
+    fn the_snapshot_follows_an_absolute_cursor_position_on_the_line() {
+        assert_eq!(snapshot_of(&[b"abcdef\x1b[1;3Hx"]), "abxdef\n");
+        assert_eq!(snapshot_of(&[b"abc\x1b[Hx"]), "xbc\n", "no position is 1;1");
+        assert_eq!(
+            snapshot_of(&[b"abc\x1b[5;2fx"]),
+            "axc\n",
+            "f is the same as H"
+        );
+    }
+
+    #[test]
+    fn the_snapshot_erases_characters_without_moving_the_cursor() {
+        assert_eq!(snapshot_of(&[b"abcdef\x1b[3D\x1b[2Xx"]), "abcx f\n");
+        assert_eq!(
+            snapshot_of(&[b"abc\x1b[2D\x1b[Xx"]),
+            "axc\n",
+            "no count is 1"
+        );
+        assert_eq!(
+            snapshot_of(&[b"ab\x1b[9X"]),
+            "ab\n",
+            "past the end is a no-op"
+        );
+    }
+
+    /// What Windows' console host sends while PowerShell redraws a line as
+    /// it is typed, with a grey suggestion from the history after the
+    /// cursor (the CI failure of QA-host-restored-scrollback on Windows).
+    #[test]
+    fn the_snapshot_keeps_a_powershell_line_typed_with_suggestions_on_one_line() {
+        let prompt: &[u8] = b"PS C:\\> ";
+        let mut reads: Vec<Vec<u8>> = vec![prompt.to_vec()];
+        let typed = "echo restore-me-please";
+        let suggestion = "echo right-after-reload";
+        for i in 1..=typed.len() {
+            let so_far = &typed[..i];
+            let mut r = b"\x1b[?25l\x1b[1;9H".to_vec();
+            r.extend_from_slice(so_far.as_bytes());
+            if suggestion.starts_with(so_far) {
+                r.extend_from_slice(b"\x1b[90m");
+                r.extend_from_slice(&suggestion.as_bytes()[i..]);
+                r.extend_from_slice(b"\x1b[m");
+            } else {
+                r.extend_from_slice(format!("\x1b[{}X", suggestion.len()).as_bytes());
+            }
+            r.extend_from_slice(format!("\x1b[1;{}H\x1b[?25h", 9 + i).as_bytes());
+            reads.push(r);
+        }
+        reads.push(b"\r\nrestore-me-please\r\n".to_vec());
+        reads.push(prompt.to_vec());
+        let refs: Vec<&[u8]> = reads.iter().map(|r| r.as_slice()).collect();
+        assert_eq!(
+            snapshot_of(&refs),
+            "PS C:\\> echo restore-me-please\nrestore-me-please\nPS C:\\>\n"
+        );
     }
 
     #[test]
