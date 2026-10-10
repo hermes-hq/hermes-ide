@@ -151,7 +151,7 @@ mod tests {
     fn a_safe_name_keeps_only_the_last_component_and_legal_characters() {
         assert_eq!(safe_file_name("shot.png"), "shot.png");
         assert_eq!(safe_file_name("../../etc/passwd"), "passwd");
-        assert_eq!(safe_file_name("C:\\Users\\x\\a.txt"), "a.txt");
+        assert_eq!(safe_file_name("C:\\Users\\test\\a.txt"), "a.txt");
         assert_eq!(safe_file_name("a:b*c?.png"), "a_b_c_.png");
         assert_eq!(safe_file_name(".hidden"), "hidden");
         assert_eq!(safe_file_name("..."), "attachment");
