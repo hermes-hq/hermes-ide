@@ -13,7 +13,8 @@ interface EmptyStateProps {
 }
 
 function timeAgo(dateStr: string, t: (key: string, values?: Record<string, string | number>) => string): string {
-  const d = new Date(dateStr);
+  // SQLite's datetime('now') is UTC with no zone mark; Date would read it as local time.
+  const d = new Date(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(dateStr) ? `${dateStr.replace(" ", "T")}Z` : dateStr);
   const now = new Date();
   const diffMin = Math.floor((now.getTime() - d.getTime()) / 60000);
   if (diffMin < 1) return t("time.justNow");
