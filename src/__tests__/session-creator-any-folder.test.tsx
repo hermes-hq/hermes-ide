@@ -4,7 +4,9 @@
  * repository (a plain folder, or a parent folder holding several
  * repositories) gets a plain hint, no branch step and no worktree; in a mixed
  * selection the git project keeps its branch step and the plain folder is
- * named as worked in directly.
+ * named as worked in directly. A subfolder of a git repository is named as
+ * inside that repository (as the agent's context sees it) and is still worked
+ * in directly: worktrees are made for a repository's top level only.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
 import { render, cleanup, fireEvent, screen, act, waitFor } from "@testing-library/react";
@@ -20,9 +22,11 @@ vi.mock("@tauri-apps/api/core", () => ({
 				{ id: "p-notes", name: "notes", path: "/fixture-home/notes", languages: [], frameworks: [], path_exists: true },
 				{ id: "p-code", name: "code", path: "/fixture-home/code", languages: [], frameworks: [], path_exists: true },
 				{ id: "p-app", name: "app", path: "/fixture-home/app", languages: [], frameworks: [], path_exists: true },
+				{ id: "p-web", name: "web", path: "/fixture-home/app/web", languages: [], frameworks: [], path_exists: true },
 			];
 		}
 		if (cmd === "git_is_git_repo") return GIT.has(String(args?.projectId));
+		if (cmd === "git_enclosing_repo") return args?.projectId === "p-web" ? "/fixture-home/app" : null;
 		if (cmd === "git_list_branches_for_project") return [{ name: "main", is_remote: false, is_head: true }];
 		if (cmd === "git_list_worktrees") return [];
 		return undefined;
@@ -105,5 +109,28 @@ describe("SessionCreator: any folder, git or not", () => {
 		const opts = onCreate.mock.calls[0][0];
 		expect(opts.projectIds).toEqual(["p-notes", "p-app"]);
 		expect(opts.branchSelections).toBeUndefined();
+	});
+
+	it("a subfolder of a git repository: named as inside it, no branch step, started directly in the subfolder", async () => {
+		const onCreate = await openWizard();
+		await pickFolders("web");
+		expect(hints()).toEqual([
+			"web: inside the git repository /fixture-home/app. The agent works directly in this folder, without a worktree of its own.",
+		]);
+		fireEvent.click(nextButton());
+		expect(document.querySelector(".session-creator-branch-multi")).toBeNull();
+		await confirm();
+		await waitFor(() => expect(onCreate).toHaveBeenCalledTimes(1));
+		const opts = onCreate.mock.calls[0][0];
+		expect(opts).toMatchObject({ projectIds: ["p-web"], workingDirectory: "/fixture-home/app/web" });
+		expect(opts.branchSelections).toBeUndefined();
+	});
+
+	it("next to a git project, the subfolder's row in the branch step says it is inside a repository", async () => {
+		await openWizard();
+		await pickFolders("web", "app");
+		fireEvent.click(nextButton());
+		await waitFor(() => expect(document.querySelector(".session-creator-branch-multi")).not.toBeNull());
+		expect(document.querySelector(".session-creator-branch-nonGit")).toHaveTextContent("Inside a git repository, no worktree");
 	});
 });

@@ -998,6 +998,7 @@ pub fn run() {
             git::git_list_branches_for_projects,
             git::git_fetch_remote_branches,
             git::git_is_git_repo,
+            git::git_enclosing_repo,
             git::git_worktree_has_changes,
             git::git_stash_worktree,
             git::git_attach_worktree,

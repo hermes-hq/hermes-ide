@@ -3838,6 +3838,48 @@ pub fn git_is_git_repo(state: State<'_, AppState>, project_id: String) -> Result
     Ok(Repository::open(&project.path).is_ok())
 }
 
+/// The top level of the git repository a project folder sits inside, when
+/// the folder is not that top level itself (a subfolder of a checkout).
+/// The agent's context finds the repository the same way
+/// (`Repository::discover`), so such a project counts as git there. Worktrees
+/// are made for a repository's top level only, so it is still started
+/// directly in its folder.
+pub(crate) fn enclosing_repo_root(path: &Path) -> Option<String> {
+    // Only a folder is looked up: git would otherwise find the repository
+    // around a path that does not exist.
+    if !path.is_dir() || Repository::open(path).is_ok() {
+        return None;
+    }
+    let repo = Repository::discover(path).ok()?;
+    let root = repo.workdir()?.to_string_lossy().to_string();
+    let trimmed = root.trim_end_matches(['/', '\\']);
+    Some(if trimmed.is_empty() {
+        root
+    } else {
+        trimmed.to_string()
+    })
+}
+
+/// See `enclosing_repo_root`: None for a repository's top level and for a
+/// folder outside any repository.
+#[tauri::command]
+pub fn git_enclosing_repo(
+    state: State<'_, AppState>,
+    project_id: String,
+) -> Result<Option<String>, String> {
+    let db = state
+        .db
+        .lock()
+        .map_err(|e| format!("DB lock error: {}", e))?;
+    let project = db
+        .get_project(&project_id)
+        .map_err(|e| format!("Failed to look up project: {}", e))?
+        .ok_or_else(|| format!("Project '{}' not found", project_id))?;
+    drop(db);
+
+    Ok(enclosing_repo_root(Path::new(&project.path)))
+}
+
 // ─── Worktree Dirty Detection & Stash ───────────────────────────────
 
 #[derive(Debug, Clone, serde::Serialize)]
@@ -4576,6 +4618,40 @@ mod tests {
     fn test_db() -> Database {
         let tmp = NamedTempFile::new().unwrap();
         Database::new(tmp.path()).expect("Failed to create test database")
+    }
+
+    #[test]
+    fn a_subfolder_of_a_repository_is_inside_it_and_the_top_level_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().join("app");
+        std::fs::create_dir_all(root.join("web").join("src")).unwrap();
+        Repository::init(&root).unwrap();
+        let top = std::fs::canonicalize(&root).unwrap();
+        let inside = |p: &Path| enclosing_repo_root(p).map(|r| std::fs::canonicalize(r).unwrap());
+        // A subfolder, at any depth: inside the repository at the top level.
+        assert_eq!(inside(&root.join("web")), Some(top.clone()));
+        assert_eq!(inside(&root.join("web").join("src")), Some(top));
+        // The top level itself is a repository (worktrees), not inside one.
+        assert_eq!(enclosing_repo_root(&root), None);
+        // A plain folder, and a path that is not there.
+        let plain = dir.path().join("notes");
+        std::fs::create_dir_all(&plain).unwrap();
+        assert_eq!(enclosing_repo_root(&plain), None);
+        assert_eq!(enclosing_repo_root(&root.join("gone")), None);
+        // Agrees with the agent's context: a subfolder is not a "not git" folder.
+        assert!(crate::project::attunement::not_git_folder(&root.join("web")).is_none());
+        // Why such a project is started directly: worktrees are made from a
+        // repository's top level, and a subfolder is not one.
+        let data = dir.path().join("data");
+        let made = worktree::create_worktree(
+            &data,
+            &root.join("web").to_string_lossy(),
+            "s1",
+            "hermes/t",
+            true,
+            None,
+        );
+        assert!(made.is_err());
     }
 
     #[test]
