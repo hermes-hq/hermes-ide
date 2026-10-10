@@ -2339,8 +2339,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
 
       // No dirty worktrees — proceed with standard close flow
-      const mode = stateRef.current.sessions[id]?.mode;
-      if (skipCloseConfirmRef.current || !(await closeNeedsConfirm(mode, () => isShellForeground(id)))) {
+      if (skipCloseConfirmRef.current || !(await closeNeedsConfirm(stateRef.current.sessions[id], () => isShellForeground(id)))) {
         closeSession(id);
       } else {
         dispatch({ type: "REQUEST_CLOSE_SESSION", id });

@@ -42,7 +42,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
 
   log("step 3: a shell running a command still asks");
   const busy = await newTerminal(bridge, "Busy shell");
-  await bridge.typeInTerminal(busy, process.platform === "win32" ? "Start-Sleep -Seconds 600\r" : "sleep 600\n");
+  await bridge.typeInTerminal(busy, process.platform === "win32" ? "ping -n 600 127.0.0.1 > $null\r" : "sleep 600\n");
   await bridge.waitFor("the command to be running", `return !(await window.__TAURI_INTERNALS__.invoke("is_shell_foreground", { sessionId: ${JSON.stringify(busy)} }));`, { timeoutMs: 15_000 });
   await clickClose("Busy shell");
   await bridge.waitFor("the close confirmation", `return !!e2e.first(".close-dialog");`, { timeoutMs: 10_000 }).catch(() => {});

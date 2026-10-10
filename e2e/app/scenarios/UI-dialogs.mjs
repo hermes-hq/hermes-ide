@@ -424,9 +424,10 @@ try {
   const sessionId = await bridge.eval(`return await window.__HERMES_E2E__.newTerminal({ label: "Dialogs demo", cwd: ${JSON.stringify(projectDir)} });`, { timeoutMs: 30_000 });
   assert(!!sessionId, `a terminal session was created (${sessionId})`);
   await bridge.waitFor("the session row", `return e2e.all(".session-item").length === 1;`, { timeoutMs: 20_000 });
-  // A shell idle at its prompt closes without asking: run something first.
+  // A shell idle at its prompt closes without asking: run a program first (on
+  // Windows an external one: a PowerShell cmdlet runs inside the shell itself).
   await bridge.waitFor("the terminal's prompt", `return (window.__HERMES_E2E__.readTerminal(${JSON.stringify(sessionId)}) || []).some((l) => l.trim().length > 0);`, { timeoutMs: 30_000 });
-  await bridge.typeInTerminal(sessionId, process.platform === "win32" ? "Start-Sleep -Seconds 600\r" : "sleep 600\n");
+  await bridge.typeInTerminal(sessionId, process.platform === "win32" ? "ping -n 600 127.0.0.1 > $null\r" : "sleep 600\n");
   await bridge.waitFor("the program to be running", `return !(await window.__TAURI_INTERNALS__.invoke("is_shell_foreground", { sessionId: ${JSON.stringify(sessionId)} }));`, { timeoutMs: 15_000 });
   const openClose = async () => {
     await bridge.clickWhenReady(`

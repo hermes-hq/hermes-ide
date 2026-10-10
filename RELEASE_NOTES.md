@@ -2,6 +2,6 @@
 
 ## Fixes
 
-- Closing a terminal that is just sitting at its prompt no longer asks whether to stop a running program. It still asks while a command is running.
+- Closing a plain terminal that is just sitting at its prompt no longer asks whether to stop a running program. It still asks while a command or an agent is running in it.
 - A session you close now appears in the start screen's recent sessions right away, instead of after a restart.
 - On Windows, a reopened PowerShell session's history no longer shows a typed command repeated over and over, or mixed with the grey suggestion PowerShell displays while you type.
