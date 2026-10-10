@@ -3,7 +3,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { listen, UnlistenFn } from "@tauri-apps/api/event";
-import { open as shellOpen } from "@tauri-apps/plugin-shell";
+import { openTerminalLink, terminalLinkHandler } from "./links";
 import { isMac, PLATFORM } from "../utils/platform";
 import { isAppChordInTerminal } from "../utils/keymap";
 import { invoke } from "@tauri-apps/api/core";
@@ -156,13 +156,12 @@ export async function createTerminal(
     allowTransparency: false,
     scrollback,
     convertEol: false,
+    linkHandler: terminalLinkHandler,
   });
 
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
-  terminal.loadAddon(new WebLinksAddon((_event, uri) => {
-    shellOpen(uri).catch(console.warn);
-  }));
+  terminal.loadAddon(new WebLinksAddon((_event, uri) => openTerminalLink(uri)));
 
   // Wire input → PTY (with intelligence interception)
   //
