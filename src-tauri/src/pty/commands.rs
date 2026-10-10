@@ -1234,6 +1234,7 @@ pub fn create_session(
             && project_ids.as_ref().is_some_and(|ids| !ids.is_empty()),
         last_nudged_version: 0,
         pending_nudge: None,
+        pending_projects_nudge: false,
         agent_launch,
         ssh_info: ssh_host.as_ref().map(|host| SshConnectionInfo {
             host: host.clone(),
@@ -1642,6 +1643,7 @@ pub fn create_session(
     let sized = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let sized_for_reader = Arc::clone(&sized);
     let sized_for_silence = Arc::clone(&sized);
+    let shell_pid = transport.pid();
 
     thread::spawn(move || {
         // Wrap the reader loop in catch_unwind so that a panic inside the
@@ -1846,6 +1848,10 @@ pub fn create_session(
                             if a.pending_context_inject && a.typed_line.pending() {
                                 // Never into a line the person is writing: the
                                 // next prompt tries again.
+                                a.pending_context_inject = false;
+                            } else if a.pending_context_inject && shell_holds_prompt(shell_pid) {
+                                // The agent has exited, or a command only printed its
+                                // name (`claude --version`): the shell would run it.
                                 a.pending_context_inject = false;
                             } else if a.pending_context_inject
                                 && !a.context_injected
@@ -2431,6 +2437,21 @@ fn probe_foreground(
     Ok((shell_pid, from_master))
 }
 
+/// Whether the shell itself is at its prompt, with no agent in front of it.
+/// Unix only: the Windows check scans the whole process table, too slow for
+/// the reader thread.
+pub(crate) fn shell_holds_prompt(shell_pid: Option<u32>) -> bool {
+    #[cfg(unix)]
+    {
+        shell_pid.is_some_and(shell_at_prompt_by_process_table)
+    }
+    #[cfg(not(unix))]
+    {
+        let _ = shell_pid;
+        false
+    }
+}
+
 /// Whether the shell is at its prompt, from the process table (steps 2 and 3
 /// above). Slow on Windows; never call it holding the PTY manager lock.
 pub(crate) fn shell_at_prompt_by_process_table(shell_pid: u32) -> bool {
@@ -2579,36 +2600,9 @@ pub fn nudge_project_context(
         return Ok(false);
     }
 
+    // Only once an agent is detected, and never into the person's line.
     let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    let pty = match mgr.sessions.get(&session_id) {
-        Some(p) => p,
-        None => return Ok(false),
-    };
-
-    // Only nudge if an AI agent has been detected in this session
-    let has_agent = pty
-        .session
-        .lock()
-        .map_err(|e| format!("Session lock failed: {}", e))?
-        .detected_agent
-        .is_some();
-
-    if !has_agent {
-        return Ok(false);
-    }
-
-    // Send a minimal one-liner telling the agent to read the context file
-    let msg =
-        "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
-    let mut w = pty
-        .writer
-        .lock()
-        .map_err(|e| format!("Writer lock failed: {}", e))?;
-    w.write_all(msg.as_bytes())
-        .map_err(|e| format!("Write failed: {}", e))?;
-    w.flush().map_err(|e| format!("Flush failed: {}", e))?;
-
-    Ok(true)
+    mgr.send_projects_nudge(&session_id)
 }
 
 #[tauri::command]
@@ -5420,6 +5414,27 @@ mod foreground_tests {
             std::thread::sleep(Duration::from_millis(50));
         }
         false
+    }
+
+    /// macOS answers from the shell's children (Linux reads the terminal's
+    /// foreground group, which a test process without a terminal lacks).
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn the_context_inject_is_held_while_the_shell_is_at_its_prompt() {
+        let mut lone = lone_process();
+        let at_prompt = super::shell_holds_prompt(Some(lone.id()));
+        let _ = lone.kill();
+        let _ = lone.wait();
+        assert!(
+            at_prompt,
+            "a shell with nothing in front of it holds its prompt"
+        );
+        let mut shell = parent_with_child();
+        let running = eventually(|| !super::shell_holds_prompt(Some(shell.id())));
+        let _ = shell.kill();
+        let _ = shell.wait();
+        assert!(running, "a shell running a program does not");
+        assert!(!super::shell_holds_prompt(None));
     }
 
     /// The process-table scan hosted terminals rely on (the session host

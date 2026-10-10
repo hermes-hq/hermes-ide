@@ -315,6 +315,10 @@ pub struct Session {
     /// Delivered when the session phase transitions to NeedsInput.
     #[serde(skip)]
     pub pending_nudge: Option<PendingNudge>,
+    /// The attached projects changed while the person had text on the line:
+    /// the projects nudge goes out the next time the agent waits.
+    #[serde(skip)]
+    pub pending_projects_nudge: bool,
     /// The model, effort and account the agent was started with (2.0 launch
     /// contract), and the account's profile environment. Saved with the
     /// session, so a restore resumes in the same profile.
