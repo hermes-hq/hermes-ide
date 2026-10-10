@@ -1815,6 +1815,9 @@ features:
       QA-HOST-12:
         text: "Quitting with Stop ends every program the session host runs for the app, also one a crash left unlisted"
         scenarios: ["QA-host-ghost-stopped-on-quit.mjs@darwin,linux"]
+      QA-HOST-13:
+        text: "A click on a link in the terminal opens it in the browser, both a plain URL and an OSC 8 hyperlink (how Claude Code prints links)"
+        scenarios: [QA-terminal-links.mjs]
   QA-launcher:
     # Bug fixes from the QA pass over the task launcher, its accounts,
     # presets and queue, the first-run welcome and the overlays (not new
