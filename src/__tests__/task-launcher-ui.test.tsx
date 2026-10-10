@@ -51,6 +51,8 @@ vi.mock("@tauri-apps/api/core", () => ({
     }
     if (cmd === "git_disk_status") return h.disk;
     if (cmd === "get_projects_ordered") return h.projects;
+    if (cmd === "save_launch_attachment") return `/fixture-data/attachments/1-a/${String(args.name)}`;
+    if (cmd === "read_image_for_attachment") return [137, 80, 78, 71];
     const answer = h.cap.handle(cmd, args ?? {});
     if (answer) return answer.value;
     throw new Error(`command ${cmd} not found`);
@@ -1123,5 +1125,75 @@ describe("TaskLauncher: a start from the Library", () => {
     expect(onLaunch.mock.calls[0][0].library?.persona?.text).toBe("You review changes.");
     // Used up: the next sheet opens without it.
     expect(peekLauncherSeed()).toBeNull();
+  });
+});
+
+describe("TaskLauncher: attachments", () => {
+  beforeEach(() => {
+    vi.stubGlobal("URL", Object.assign(URL, { createObjectURL: () => "blob:preview", revokeObjectURL: () => {} }));
+  });
+  const chips = () => Array.from(document.querySelectorAll(".task-launcher-attachment-body")).map((el) => (el as HTMLElement).dataset.path);
+
+  it("a pasted screenshot is saved, shown as a chip with its preview, and launched with the task", async () => {
+    const { onLaunch } = await open();
+    await typeTask("Match this mockup");
+    const file = new File([new Uint8Array([1, 2, 3])], "image.png", { type: "image/png" });
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { files: [file], getData: () => "" } });
+    await act(async () => {
+      task().dispatchEvent(paste);
+    });
+    await settle();
+    expect(paste.defaultPrevented).toBe(true);
+    expect(task()).toHaveValue("Match this mockup");
+    expect(chips()).toEqual(["/fixture-data/attachments/1-a/pasted-image-1.png"]);
+    expect(document.querySelector(".task-launcher-attachment-thumb")).toHaveAttribute("src", "blob:preview");
+    await launchWithEnter();
+    expect(onLaunch.mock.calls[0][0].attachments).toEqual([
+      { path: "/fixture-data/attachments/1-a/pasted-image-1.png", name: "pasted-image-1.png", image: true },
+    ]);
+  });
+
+  it("a paste of text stays a paste of text", async () => {
+    await open();
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { files: [], getData: () => "hello" } });
+    await act(async () => {
+      task().dispatchEvent(paste);
+    });
+    expect(paste.defaultPrevented).toBe(false);
+    expect(chips()).toEqual([]);
+  });
+
+  it("Attach… adds the picked files where they are; × removes one; a launch without any sends none", async () => {
+    const dialog = await import("@tauri-apps/plugin-dialog");
+    vi.mocked(dialog.open).mockResolvedValueOnce(["/fixture-home/specs/login.md", "/fixture-home/shots/broken.jpg"] as never);
+    const { onLaunch } = await open();
+    await typeTask("Fix the login page");
+    fireEvent.click(document.querySelector(".task-launcher-attach") as HTMLElement);
+    await settle();
+    expect(chips()).toEqual(["/fixture-home/specs/login.md", "/fixture-home/shots/broken.jpg"]);
+    fireEvent.click(screen.getByRole("button", { name: "Remove login.md" }));
+    expect(chips()).toEqual(["/fixture-home/shots/broken.jpg"]);
+    await launchWithEnter();
+    expect(onLaunch.mock.calls[0][0].attachments).toEqual([{ path: "/fixture-home/shots/broken.jpg", name: "broken.jpg", image: true }]);
+  });
+
+  it("no attachments: the request has none", async () => {
+    const { onLaunch } = await open();
+    await typeTask("Fix it");
+    await launchWithEnter();
+    expect(onLaunch.mock.calls[0][0].attachments).toBeUndefined();
+  });
+
+  it("the attachments come back with the draft after a close", async () => {
+    const dialog = await import("@tauri-apps/plugin-dialog");
+    vi.mocked(dialog.open).mockResolvedValueOnce(["/fixture-home/specs/login.md"] as never);
+    const first = await open();
+    fireEvent.click(document.querySelector(".task-launcher-attach") as HTMLElement);
+    await settle();
+    first.ui.unmount();
+    await open();
+    expect(chips()).toEqual(["/fixture-home/specs/login.md"]);
   });
 });

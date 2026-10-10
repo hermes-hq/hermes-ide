@@ -58,6 +58,9 @@ import { personaDelivery, systemPromptFlag, type LibraryLaunchPersona, type Libr
 import { useLibraryMessages } from "../library/messages";
 import { worksTarget } from "../library/targets";
 import { lazyView } from "../utils/lazyView";
+import { LaunchAttachments, useFileDrop, useLaunchAttachmentInput } from "./LaunchAttachments";
+import { FILE_DROP_TARGET } from "../utils/fileDropTarget";
+import { attachmentFromPath, type LaunchAttachment } from "../launcher/attachments";
 import { useModalTabTrap } from "../hooks/useFocusTrap";
 import {
   TASK_LAUNCHES_KEY,
@@ -117,6 +120,8 @@ export interface TaskLaunchRequest {
    * start of its first prompt; see src/library/delivery.ts).
    */
   library?: { prompt?: LibraryLaunchPick | null; persona?: LibraryLaunchPersona | null };
+  /** Files and images attached to the task: their paths follow it in the first prompt. */
+  attachments?: LaunchAttachment[];
 }
 
 /** true: started; "queued": waits for a free slot (running-agents cap); false: failed. */
@@ -248,6 +253,9 @@ export function TaskLauncher({
   const [task, setTask] = useState(librarySeed?.task ?? initialTask ?? "");
   const [libPrompt, setLibPrompt] = useState<LibraryLaunchPick | null>(librarySeed?.prompt ?? null);
   const [libPersona, setLibPersona] = useState<LibraryLaunchPersona | null>(librarySeed?.persona ?? null);
+  // Files and images attached to the task (pasted, dropped or picked).
+  const [attachments, setAttachments] = useState<LaunchAttachment[]>([]);
+  const attach = useLaunchAttachmentInput(setAttachments);
   const [libPickerOpen, setLibPickerOpen] = useState(false);
   // ⌘J can arrive twice for one press (the menu key and the field's own keydown): one toggle per press.
   const lastPromptsToggle = useRef(0);
@@ -337,6 +345,7 @@ export function TaskLauncher({
   const [projectsLoaded, setProjectsLoaded] = useState(!!defaultRepo);
   const taskRef = useRef<HTMLTextAreaElement>(null);
   const sheetRef = useRef<HTMLDivElement>(null);
+  const dragOver = useFileDrop(sheetRef, (paths) => attach.add(paths.map(attachmentFromPath)));
   // The modal overlay (the sheet and its backdrop): Tab stays inside it.
   const sheetWrapRef = useRef<HTMLDivElement>(null);
   const chipRefs = useRef<Partial<Record<Exclude<Menu, null>, HTMLButtonElement | null>>>({});
@@ -519,6 +528,7 @@ export function TaskLauncher({
       setChecks(draft.checks);
       setChecksEdited(draft.checksEdited);
       setExpanded(draft.expanded);
+      if (draft.attachments) setAttachments(draft.attachments);
       if (draft.viewMode) viewFromDraft.current = { agentId: draft.choice.agentId, mode: draft.viewMode };
       // The draft's choice is the person's own: a project switch only offers that project's usual.
       userTouched.current = true;
@@ -973,8 +983,8 @@ export function TaskLauncher({
   const draftNow = useRef<() => void>(() => {});
   draftNow.current = () => {
     if (inline || forgetDraft.current || !choice) return;
-    if (!isDraftWorthKeeping({ task, touched: userTouched.current, expanded, branchEdited, checksEdited, restored })) return;
-    saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode });
+    if (!isDraftWorthKeeping({ task, touched: userTouched.current || attachments.length > 0, expanded, branchEdited, checksEdited, restored })) return;
+    saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode, ...(attachments.length > 0 ? { attachments } : {}) });
   };
   useEffect(() => () => draftNow.current(), []);
 
@@ -1020,6 +1030,7 @@ export function TaskLauncher({
           choice: plannedAgents[0].choice,
           ...(next || inline ? { staysOpen: true } : {}),
           ...(libPrompt || libPersona ? { library: { prompt: libPrompt, persona: libPersona } } : {}),
+          ...(attachments.length > 0 ? { attachments } : {}),
         });
       } catch (err) {
         console.error("[TaskLauncher] launch failed:", err);
@@ -1061,6 +1072,7 @@ export function TaskLauncher({
         // What was typed while the launch ran is the next task: only the launched text is cleared.
         if (latestTask.current.trim() === trimmed) {
           setTask((cur) => (cur.trim() === trimmed ? "" : cur));
+          setAttachments([]);
           setBranchEdited(false);
         }
         // The branch it made is taken now: the next one is named past it.
@@ -1070,7 +1082,7 @@ export function TaskLauncher({
       }
       onClose?.({ keepDraft: false });
     },
-    [canGo, effective, root, plannedAgents, modePrefs, task, onLaunch, checks, backend, presets, inline, onClose, defaultPresetName, focusTask, setBranchEdited, libPrompt, libPersona],
+    [canGo, effective, root, plannedAgents, modePrefs, task, onLaunch, checks, backend, presets, inline, onClose, defaultPresetName, focusTask, setBranchEdited, libPrompt, libPersona, attachments],
   );
 
   /**
@@ -1704,7 +1716,7 @@ export function TaskLauncher({
   );
 
   const body = (
-    <div className={`task-launcher${inline ? " task-launcher-inline" : ""}`} ref={sheetRef} onKeyDown={onSheetKey} data-ready={ready && choice ? "true" : "false"}>
+    <div className={`task-launcher${inline ? " task-launcher-inline" : ""}`} ref={sheetRef} onKeyDown={onSheetKey} data-ready={ready && choice ? "true" : "false"} {...{ [FILE_DROP_TARGET]: "" }}>
       {!inline && (
         <div className="task-launcher-header">
           <span className="task-launcher-title">{t("launcher.title")}</span>
@@ -1882,6 +1894,7 @@ export function TaskLauncher({
           setTask(e.target.value);
           if (!e.target.value.trim()) setLibPrompt(null);
         }}
+        onPaste={attach.onPaste}
         onKeyDown={(e) => {
           // ⌘J / Ctrl+J: the Library, filtered to the agents of this launch.
           if (isActionMod(e) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "j" && libraryReady) {
@@ -1889,6 +1902,14 @@ export function TaskLauncher({
             togglePrompts();
           }
         }}
+      />
+
+      <LaunchAttachments
+        attachments={attachments}
+        onRemove={(path) => setAttachments((cur) => cur.filter((a) => a.path !== path))}
+        onPick={() => void attach.pick()}
+        error={attach.error}
+        dragOver={dragOver}
       />
 
       {libraryReady && (

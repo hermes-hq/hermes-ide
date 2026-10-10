@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import "../styles/components/FileExplorer.css";
+import { isOverFileDropTarget } from "../utils/fileDropTarget";
 import { useSession } from "../state/SessionContext";
 import { getSessionProjects } from "../api/projects";
 import { openFileInEditor, sshListDirectory } from "../api/git";
@@ -596,6 +597,8 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
         const y = event.payload.position.y / dpr;
         const rect = scrollRef.current.getBoundingClientRect();
         if (x < rect.left || x > rect.right || y < rect.top || y > rect.bottom) return;
+        // Dropped on the task launcher over the panel: the launcher takes it.
+        if (isOverFileDropTarget(x, y)) return;
 
         const targetDir = sshHandleRef.current?.rootPath || "/";
         const paths = event.payload.paths;

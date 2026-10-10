@@ -1545,6 +1545,10 @@ features:
         # e2e/app/scenarios/REAL-launcher-claude.mjs, local only like the others.
         text: "From ⌘N with a model and an effort chosen on the chips, claude runs as hi run -> claude with exactly one --model and one --effort of those values and the task as its first prompt"
         scenarios: ["REAL-launcher-claude.mjs@darwin,linux"]
+      REAL-4b:
+        # e2e/app/scenarios/REAL-launcher-attachments.mjs, local only like the others.
+        text: "From ⌘N with a pasted image and a dropped text file, the real claude gets both paths after the task and answers with the image's color and the file's code word"
+        scenarios: ["REAL-launcher-attachments.mjs@darwin,linux"]
       REAL-5:
         # e2e/app/scenarios/REAL-track-claude.mjs, local only like the others.
         text: "Track as a feature with the real claude (haiku): it writes questions.md, runs hi phase done and stops with the code untouched; approving moves it to research and it starts research"
@@ -1867,6 +1871,9 @@ features:
       QA-launcher-13:
         text: "A session opens in any folder from ⌘N and the New Session wizard: a plain folder or a parent of several repositories starts the agent in that folder with no worktree, its first prompt and context file say the agent may make a worktree or branch itself, and the git panels show their plain empty state"
         scenarios: [QA-launcher-any-folder.mjs]
+      QA-launcher-14:
+        text: "Files and images attached in the task launcher reach the agent: a pasted screenshot is saved and shown as a chip, a dropped file is named where it is (and no terminal behind the launcher gets its path), and the first prompt lists both paths after the task"
+        scenarios: [QA-launcher-attachments.mjs]
   REAL-HOD:
     name: "The prompt library with the real Claude Code and Codex CLIs"
     # Local only, like REAL above: needs the signed-in CLIs and costs a tiny

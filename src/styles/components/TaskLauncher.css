@@ -116,6 +116,39 @@
 
 .task-launcher-task { width: 100%; resize: none; }
 
+/* Attachments under the task: "Attach…", a chip per file, the drop hint */
+
+.task-launcher-attachments {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  margin-top: var(--space-2);
+  border-radius: var(--radius-md);
+}
+.task-launcher-attachments[data-drag-over="true"] {
+  outline: var(--control-border-width) dashed var(--border-light);
+  outline-offset: var(--space-1);
+}
+.task-launcher-attachment-body {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  max-width: calc(var(--space-6) * 8);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.task-launcher-attachment-thumb {
+  width: var(--space-4);
+  height: var(--space-4);
+  object-fit: cover;
+  border-radius: var(--radius-sm);
+  flex: none;
+}
+.task-launcher-attach-drop { font-size: var(--text-xs); color: var(--text-2); }
+.task-launcher-attach-error { font-size: var(--text-xs); color: var(--danger-fg); }
+
 /* Chips and their menus */
 
 .task-launcher-chips {
