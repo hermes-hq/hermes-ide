@@ -5741,6 +5741,7 @@ pub(crate) mod tests {
             has_initial_context: false,
             last_nudged_version: 0,
             pending_nudge: None,
+            pending_projects_nudge: false,
             agent_launch: Default::default(),
             ssh_info: None,
             mode: SessionMode::Terminal,

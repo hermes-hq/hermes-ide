@@ -384,6 +384,14 @@ export async function isGitRepo(
   return invoke<boolean>("git_is_git_repo", { projectId });
 }
 
+/** The top level of the git repository a project folder sits inside, when
+ *  the folder is a subfolder of it; null otherwise. */
+export async function gitEnclosingRepo(
+  projectId: string,
+): Promise<string | null> {
+  return (await invoke<string | null>("git_enclosing_repo", { projectId })) ?? null;
+}
+
 export async function worktreeHasChanges(
   sessionId: string,
   projectId: string,

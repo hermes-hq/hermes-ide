@@ -1,11 +1,10 @@
-# Hermes IDE 2.1.2
-
-## New
-
-- Open a session in any folder, git or not: a plain folder, a parent folder that holds several projects, or a mix. A folder that is not a git repository opens directly, with no worktree, and the agent is told it may create a worktree or branch itself if it needs to change code in a repository inside it.
+# Hermes IDE 2.1.3
 
 ## Fixes
 
-- Hovering an icon in the left bar now shows a clean label beside it, instead of text drawn over the sidebar.
-- On Windows, an agent's activity is no longer mixed up with unrelated system processes, so its status (working, running a command, idle) is reported correctly.
-- In a session whose folder is not a git repository but contains git projects, the Review Desk now explains this instead of saying there is no repository.
+- Reopening a closed session shows its earlier history above the new prompt, not below it.
+- Hermes no longer types its "read the project context" reminder into a message you've started writing, or into the shell after an agent has exited; it waits until the agent is ready.
+- When you open a folder inside a git repository, the New Session wizard now names that repository instead of calling the folder "not a git repository". The session still opens directly in the folder.
+- On macOS, an agent could sometimes stay marked as starting after it was already up. It now shows as started.
+- The start screen's recent sessions show when they were really closed, instead of hours off in some time zones.
+- Updated the app's libraries to their latest versions.

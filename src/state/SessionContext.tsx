@@ -57,7 +57,7 @@ import { runWorktreeRecipes, type CreatedWorktree } from "./worktreeRecipes";
 const BranchConflictDialog = lazyView("BranchConflictDialog", () => import("../components/BranchConflictDialog").then((m) => m.BranchConflictDialog));
 import type { SessionWorktree, WorktreeChanges } from "../types/git";
 import { getSettings, getSetting, setSetting } from "../api/settings";
-import { createTerminal, destroy as destroyTerminal, writeScrollback, releaseOutput, estimateInitialDimensions } from "../terminal/TerminalPool";
+import { createTerminal, destroy as destroyTerminal, releaseOutput, estimateInitialDimensions } from "../terminal/TerminalPool";
 import { applyTheme, applyAgentTimelineStyle } from "../utils/themeManager";
 import { restoreWindowState } from "../utils/windowState";
 import { initNotifications, notifyLongRunningDone } from "../utils/notifications";
@@ -2120,7 +2120,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       // For agent-mode sessions there is no PTY, but we still pre-create the
       // (empty) TerminalPool entry to keep the lifecycle uniform — destroying
       // it later is a no-op if the session was agent-only.
-      await createTerminal(preSessionId, opts?.color || "");
+      // Restoring a closed session: what its new shell prints is held until
+      // the restored scrollback is in (same as the workspace restore).
+      await createTerminal(preSessionId, opts?.color || "", { holdOutput: !!opts?.restoreFromId });
 
       // Estimate terminal dimensions from window size and font settings so the
       // PTY starts at the correct size.  This eliminates the SIGWINCH race where
@@ -2218,16 +2220,16 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           });
       }
 
-      // Restore scrollback from previous session if available
+      // Restore scrollback from previous session if available: the history
+      // first, then what the new shell has printed so far.
       if (opts?.restoreFromId) {
+        let snapshot: string | null = null;
         try {
-          const snapshot = await getSessionSnapshot(opts.restoreFromId);
-          if (snapshot) {
-            writeScrollback(session.id, snapshot);
-          }
+          snapshot = await getSessionSnapshot(opts.restoreFromId);
         } catch {
           console.warn("[SessionContext] Failed to restore scrollback");
         }
+        releaseOutput(session.id, snapshot || null);
       }
 
       if (opts?.description) {

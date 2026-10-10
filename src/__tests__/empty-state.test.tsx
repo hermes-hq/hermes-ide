@@ -80,6 +80,30 @@ describe("EmptyState — workshop-atelier hero (v1.1 redesign)", () => {
     expect(html).toContain("Context panel");
   });
 
+  it("reads a closed time saved by SQLite (UTC, no zone mark) as UTC", () => {
+    const tz = process.env.TZ;
+    process.env.TZ = "Europe/Berlin";
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-10-08T10:15:00Z"));
+    try {
+      const html = renderEmpty([
+        {
+          id: "s1",
+          label: "just closed",
+          color: "#000",
+          working_directory: "/Users/me/project",
+          closed_at: "2026-10-08 10:12:00",
+        } as never,
+      ]);
+      // Read as local (UTC+2) time it was "2h ago".
+      expect(html).toMatch(/es-recent-time">3\D/);
+    } finally {
+      vi.useRealTimers();
+      if (tz === undefined) delete process.env.TZ;
+      else process.env.TZ = tz;
+    }
+  });
+
   it("renders the marginalia logbook numbers when recent sessions exist", () => {
     const html = renderEmpty([
       {
