@@ -360,17 +360,14 @@ describe("Invariant 5: updateInputBuffer handles paste/IME (multi-char data)", (
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("Invariant 6: Links open via Tauri shell (not blocked window.open)", () => {
-  it("imports open from @tauri-apps/plugin-shell", () => {
-    expect(SRC).toContain('from "@tauri-apps/plugin-shell"');
+  it("plain URLs and OSC 8 hyperlinks both go through the terminal link opener", () => {
+    expect(SRC).toContain('from "./links"');
+    expect(SRC).toMatch(/linkHandler: terminalLinkHandler/);
   });
 
   it("WebLinksAddon has custom handler (no default constructor)", () => {
     expect(SRC).not.toMatch(/new WebLinksAddon\(\)/);
-    expect(SRC).toMatch(/new WebLinksAddon\(\(_event, uri\)/);
-  });
-
-  it("handler calls shellOpen(uri)", () => {
-    expect(SRC).toMatch(/shellOpen\(uri\)/);
+    expect(SRC).toMatch(/new WebLinksAddon\(\(_event, uri\) => openTerminalLink\(uri\)\)/);
   });
 });
 

@@ -9,6 +9,7 @@
  */
 import { pool, getFocusedSessionId, isWebglAvailable, webglSessionIds, focusTerminal } from "../terminal/pool";
 import { createTerminal } from "../terminal/TerminalPool";
+import { setTerminalLinkOpener } from "../terminal/links";
 import { armCrash } from "../components/CrashProbe";
 import { loadedViews } from "../utils/lazyView";
 import { getI18nSnapshot } from "../i18n/registry";
@@ -201,6 +202,31 @@ const hooks = {
       /** Canvases the terminal's renderer put on its screen (WebGL only). */
       canvases: entry.container.querySelectorAll(".xterm-screen canvas").length,
     };
+  },
+  /** Write straight to a terminal's screen, as if a program printed it
+   *  (no shell involved, so the same bytes on every platform). */
+  writeToView: (sessionId: string, data: string): Promise<boolean> =>
+    new Promise((resolve) => {
+      const entry = pool.get(sessionId);
+      if (!entry) return resolve(false);
+      entry.terminal.write(data, () => resolve(true));
+    }),
+  /** From now on, record the links a click in a terminal would open instead
+   *  of opening them; returns the list, which fills as links are clicked. */
+  captureTerminalLinks: (): string[] => {
+    const opened: string[] = [];
+    setTerminalLinkOpener((uri) => opened.push(uri));
+    return opened;
+  },
+  /** The page point at the centre of a terminal cell (0-based, viewport). */
+  cellPoint: (sessionId: string, col: number, row: number): { x: number; y: number } | null => {
+    const entry = pool.get(sessionId);
+    const screen = entry?.container.querySelector(".xterm-screen");
+    if (!entry || !screen) return null;
+    const r = screen.getBoundingClientRect();
+    const w = r.width / entry.terminal.cols;
+    const h = r.height / entry.terminal.rows;
+    return { x: r.left + (col + 0.5) * w, y: r.top + (row + 0.5) * h };
   },
   /** F24: sessions whose terminal holds a WebGL context, and whether this
    *  web view can create one at all. */
