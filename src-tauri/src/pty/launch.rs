@@ -519,12 +519,18 @@ pub fn settings_set_status_line(files: &[PathBuf]) -> bool {
 }
 
 /// The settings files where a user may have set Claude's status line: their
-/// own (`$CLAUDE_CONFIG_DIR` or `~/.claude`) and the project's.
-fn claude_settings_files(cwd: &str) -> Vec<PathBuf> {
+/// own (the account's profile the launch sets, else `$CLAUDE_CONFIG_DIR` or
+/// `~/.claude`) and the project's.
+fn claude_settings_files(cwd: &str, profile_env: Option<(&str, &str)>) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
+    let config_dir = profile_env
+        .filter(|(name, value)| *name == "CLAUDE_CONFIG_DIR" && !value.is_empty())
+        .map(|(_, value)| PathBuf::from(value))
+        .or_else(|| {
+            std::env::var_os("CLAUDE_CONFIG_DIR")
+                .filter(|d| !d.is_empty())
+                .map(PathBuf::from)
+        })
         .or_else(|| crate::platform::home_dir().map(|h| h.join(".claude")));
     if let Some(dir) = config_dir {
         files.push(dir.join("settings.json"));
@@ -1576,6 +1582,11 @@ pub(crate) fn prepare_helper_launch(
     let new_session_id = uuid::Uuid::new_v4().to_string();
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let stream_secret = uuid::Uuid::new_v4().simple().to_string();
+    let profile_env = s
+        .agent_launch
+        .profile_env
+        .as_ref()
+        .map(|p| (p.name.as_str(), p.value.as_str()));
     let Some(plan) = plan_launch(&LaunchInput {
         session_id: &s.id,
         provider: &provider,
@@ -1593,7 +1604,7 @@ pub(crate) fn prepare_helper_launch(
         resume_id: s.vendor_session_id.as_deref(),
         seed_prompt: s.seed_prompt.as_deref(),
         user_status_line: limits_via_status_line(agent)
-            && settings_set_status_line(&claude_settings_files(&s.working_directory)),
+            && settings_set_status_line(&claude_settings_files(&s.working_directory, profile_env)),
         hi: &hi,
         session_dir: &session_dir,
         new_session_id: &new_session_id,
@@ -1602,11 +1613,7 @@ pub(crate) fn prepare_helper_launch(
         stream_secret: &stream_secret,
         model_id: s.agent_launch.model_id.as_deref(),
         effort: s.agent_launch.effort.as_deref(),
-        profile_env: s
-            .agent_launch
-            .profile_env
-            .as_ref()
-            .map(|p| (p.name.as_str(), p.value.as_str())),
+        profile_env,
         login: s.agent_launch.login,
         clear_screen: s.agent_launch.relaunch,
         hook_trust,
@@ -5179,6 +5186,28 @@ pub(crate) mod tests {
             broken.clone()
         ]));
         assert!(settings_set_status_line(&[none, plain, with]));
+    }
+
+    /// A second Claude account: its own profile's settings are the user's,
+    /// not the default `~/.claude` ones.
+    #[test]
+    fn an_account_profile_is_where_claude_user_settings_are_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().join(".claude-work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(
+            work.join("settings.json"),
+            r#"{"statusLine":{"type":"command","command":"mine"}}"#,
+        )
+        .unwrap();
+        let cwd = tmp.path().join("project").to_string_lossy().to_string();
+        let work_str = work.to_string_lossy().to_string();
+        let files = claude_settings_files(&cwd, Some(("CLAUDE_CONFIG_DIR", &work_str)));
+        assert_eq!(files[0], work.join("settings.json"));
+        assert!(settings_set_status_line(&files));
+        // Another agent's profile variable is not Claude's.
+        let other = claude_settings_files(&cwd, Some(("CODEX_HOME", &work_str)));
+        assert_ne!(other[0], work.join("settings.json"));
     }
 
     #[test]
