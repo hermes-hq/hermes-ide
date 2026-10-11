@@ -11,9 +11,11 @@ use crate::pty::patterns::*;
 /// (an echoed keystroke is a chunk of its own), so a line ends only at a
 /// newline, and a carriage return, a backspace or a cursor move goes back
 /// over what the line already has (a shell redrawing its prompt, a
-/// progress bar) instead of starting a new line. A cursor move up goes
-/// back over lines already written (an inline TUI such as Claude Code
-/// erasing its last frame to draw the next one). A full-screen program's
+/// progress bar) instead of starting a new line. Erasing a whole line and
+/// moving up goes back over the line above (an inline TUI such as Claude
+/// Code erasing its last frame to draw the next one); a bare move up does
+/// not, since without the terminal's width a shell moving up inside its own
+/// wrapped command line looks the same. A full-screen program's
 /// screen (the alternate screen) is not history and is left out.
 struct SnapshotLines {
     parser: vte::Parser,
@@ -35,6 +37,8 @@ struct SnapshotScreen {
     line: Vec<char>,
     /// Lines under the cursor after a move up, the nearest last.
     below: Vec<Vec<char>>,
+    /// The last thing written was "erase the whole line" (ESC[2K).
+    erased: bool,
     col: usize,
     alternate: bool,
 }
@@ -133,6 +137,7 @@ impl SnapshotScreen {
 
 impl vte::Perform for SnapshotScreen {
     fn print(&mut self, c: char) {
+        self.erased = false;
         if !self.alternate {
             self.put(c);
         }
@@ -142,6 +147,7 @@ impl vte::Perform for SnapshotScreen {
         if self.alternate {
             return;
         }
+        self.erased = false;
         match byte {
             b'\n' => {
                 if self.below.is_empty() {
@@ -190,6 +196,7 @@ impl vte::Perform for SnapshotScreen {
             return;
         }
         let n = (first as usize).max(1);
+        let erased = std::mem::take(&mut self.erased);
         match action {
             // Erase in line: from the cursor (0), to it (1), all of it (2).
             'K' => match first {
@@ -199,12 +206,16 @@ impl vte::Perform for SnapshotScreen {
                         *c = ' ';
                     }
                 }
-                _ => self.line.clear(),
+                _ => {
+                    self.line.clear();
+                    self.erased = first == 2;
+                }
             },
-            // Cursor up (A) and to the start of a previous line (F), down
-            // (B) and to the start of a next line (E).
+            // Cursor up (A) and to the start of a previous line (F), one
+            // row per whole-line erase before it (Ink's eraseLines: ESC[2K
+            // ESC[1A, repeated); down (B) and to the start of a next line (E).
             'A' | 'F' => {
-                for _ in 0..n {
+                if erased {
                     self.up();
                 }
                 if action == 'F' {
@@ -1265,22 +1276,47 @@ mod tests {
     }
 
     #[test]
-    fn the_snapshot_moves_up_and_down_over_lines_already_written() {
-        // Up two rows, one line changed in place, back down two rows: the
-        // line below is still there.
+    fn the_snapshot_moves_up_after_a_whole_line_erase_and_back_down() {
+        // Erase, up one row, that line rewritten, back down: the line below
+        // is still there.
         assert_eq!(
-            snapshot_of(&[b"one\r\ntwo\r\nthree\r\n\x1b[2ATWO\x1b[2B\rfour\r\n"]),
-            "one\nTWO\nthree\nfour\n"
+            snapshot_of(&[b"one\r\ntwo\r\nthree\x1b[2K\x1b[1A\rTWO\x1b[1B\rfour\r\n"]),
+            "one\nTWO\nfour\n"
         );
         // Previous line (F) goes to its start; next line (E) too.
-        assert_eq!(snapshot_of(&[b"abc\r\ndef\x1b[Fx\x1b[Ey"]), "xbc\nyef\n");
+        assert_eq!(
+            snapshot_of(&[b"abc\r\ndef\x1b[2K\x1b[Fx\x1b[Ey"]),
+            "xbc\ny\n"
+        );
         // Erase below (J) drops the rows under the cursor.
         assert_eq!(
-            snapshot_of(&[b"one\r\ntwo\r\nthree\r\x1b[2A\x1b[2C\x1b[J"]),
+            snapshot_of(&[b"one\r\ntwo\r\nthree\x1b[2K\x1b[A\x1b[2K\x1b[A\r\x1b[2C\x1b[J"]),
             "on\n"
         );
-        // Up past the first line stays on it.
-        assert_eq!(snapshot_of(&[b"abc\r\ndef\r\x1b[5Ax"]), "xbc\ndef\n");
+        // One row per erase, and up past the first line stays on it.
+        assert_eq!(snapshot_of(&[b"abc\r\ndef\x1b[2K\x1b[5A\rx"]), "xbc\n");
+        assert_eq!(snapshot_of(&[b"abc\x1b[2K\x1b[A\rx"]), "x\n");
+    }
+
+    /// A shell moving up inside its own wrapped command line (readline or
+    /// ZLE recalling a long command in a narrow pane) sends a bare cursor
+    /// up. The snapshot has no width, so it must not take the line above,
+    /// which is real output, back to be written over.
+    #[test]
+    fn a_bare_move_up_keeps_the_output_above() {
+        let long = format!("$ echo {}", "x".repeat(50));
+        let reads: Vec<Vec<u8>> = vec![
+            b"$ echo second-output\r\nsecond-output\r\n".to_vec(),
+            long.into_bytes(),
+            b"\x1b[A\r\x1b[K$ echo done\x1b[J\r\ndone\r\n".to_vec(),
+        ];
+        let refs: Vec<&[u8]> = reads.iter().map(|r| r.as_slice()).collect();
+        let text = snapshot_of(&refs);
+        assert!(
+            text.starts_with("$ echo second-output\nsecond-output\n"),
+            "{text:?}"
+        );
+        assert!(text.ends_with("$ echo done\ndone\n"), "{text:?}");
     }
 
     #[test]
