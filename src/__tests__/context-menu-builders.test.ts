@@ -271,29 +271,25 @@ describe("buildStashMenuItems", () => {
 // ─── File Explorer Menu ─────────────────────────────────────────────
 
 describe("buildFileExplorerMenuItems", () => {
-  it("includes New File/Folder for directories", () => {
+  it("offers Copy Path for directories, and no New File/Folder", () => {
     const items = buildFileExplorerMenuItems({ name: "src", is_dir: true, path: "/src" });
-    expect(findItem(items, "file-explorer.new-file")).toBeDefined();
-    expect(findItem(items, "file-explorer.new-folder")).toBeDefined();
-  });
-
-  it("omits New File/Folder for files", () => {
-    const items = buildFileExplorerMenuItems({ name: "foo.ts", is_dir: false, path: "/src/foo.ts" });
+    expect(findItem(items, "file-explorer.copy-path")).toBeDefined();
     expect(findItem(items, "file-explorer.new-file")).toBeUndefined();
     expect(findItem(items, "file-explorer.new-folder")).toBeUndefined();
   });
 
-  it("always includes Open in Terminal", () => {
+  it("offers Open in Editor and Copy Path for files", () => {
     const items = buildFileExplorerMenuItems({ name: "foo.ts", is_dir: false, path: "/src/foo.ts" });
-    expect(findItem(items, "file-explorer.open-terminal")).toBeDefined();
+    expect(findItem(items, "file-explorer.open-in-editor")).toBeDefined();
+    expect(findItem(items, "file-explorer.copy-path")).toBeDefined();
   });
 
-  it("includes Rename, Delete, Copy Path, Reveal", () => {
+  it("omits Open in Terminal, Rename, Delete and Reveal, which did nothing", () => {
     const items = buildFileExplorerMenuItems({ name: "foo.ts", is_dir: false, path: "/src/foo.ts" });
-    expect(findItem(items, "file-explorer.rename")).toBeDefined();
-    expect(findItem(items, "file-explorer.delete")).toBeDefined();
-    expect(findItem(items, "file-explorer.copy-path")).toBeDefined();
-    expect(findItem(items, "file-explorer.reveal")).toBeDefined();
+    expect(findItem(items, "file-explorer.open-terminal")).toBeUndefined();
+    expect(findItem(items, "file-explorer.rename")).toBeUndefined();
+    expect(findItem(items, "file-explorer.delete")).toBeUndefined();
+    expect(findItem(items, "file-explorer.reveal")).toBeUndefined();
   });
 });
 

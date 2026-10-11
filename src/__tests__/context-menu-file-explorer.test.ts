@@ -31,28 +31,23 @@ function findItem(items: { id: string }[], id: string) {
 
 // ─── File vs Folder Variants ────────────────────────────────────────
 
+// Listed once but never carried out by FileExplorerPanel: choosing them
+// closed the menu and did nothing.
+const UNIMPLEMENTED = [
+  "file-explorer.new-file",
+  "file-explorer.new-folder",
+  "file-explorer.open-terminal",
+  "file-explorer.rename",
+  "file-explorer.delete",
+  "file-explorer.reveal",
+];
+
 describe("file explorer — file items", () => {
   const file = { name: "index.ts", is_dir: false, path: "/src/index.ts" };
 
-  it("no New File or New Folder for files", () => {
+  it("includes Open in Editor", () => {
     const items = buildFileExplorerMenuItems(file);
-    expect(findItem(items, "file-explorer.new-file")).toBeUndefined();
-    expect(findItem(items, "file-explorer.new-folder")).toBeUndefined();
-  });
-
-  it("includes Open in Terminal", () => {
-    const items = buildFileExplorerMenuItems(file);
-    expect(findItem(items, "file-explorer.open-terminal")).toBeDefined();
-  });
-
-  it("includes Rename", () => {
-    const items = buildFileExplorerMenuItems(file);
-    expect(findItem(items, "file-explorer.rename")).toBeDefined();
-  });
-
-  it("includes Delete", () => {
-    const items = buildFileExplorerMenuItems(file);
-    expect(findItem(items, "file-explorer.delete")).toBeDefined();
+    expect(findItem(items, "file-explorer.open-in-editor")).toBeDefined();
   });
 
   it("includes Copy Path", () => {
@@ -60,40 +55,35 @@ describe("file explorer — file items", () => {
     expect(findItem(items, "file-explorer.copy-path")).toBeDefined();
   });
 
-  it("includes Reveal in Finder", () => {
+  it("offers no action that does nothing", () => {
     const items = buildFileExplorerMenuItems(file);
-    expect(findItem(items, "file-explorer.reveal")).toBeDefined();
+    for (const id of UNIMPLEMENTED) expect(findItem(items, id)).toBeUndefined();
   });
 });
 
 describe("file explorer — folder items", () => {
   const folder = { name: "src", is_dir: true, path: "/src" };
 
-  it("includes New File for folders", () => {
+  it("includes Copy Path but not Open in Editor", () => {
     const items = buildFileExplorerMenuItems(folder);
-    expect(findItem(items, "file-explorer.new-file")).toBeDefined();
-  });
-
-  it("includes New Folder for folders", () => {
-    const items = buildFileExplorerMenuItems(folder);
-    expect(findItem(items, "file-explorer.new-folder")).toBeDefined();
-  });
-
-  it("New File and New Folder are before separator", () => {
-    const items = buildFileExplorerMenuItems(folder);
-    const newFileIdx = items.findIndex((i) => i.id === "file-explorer.new-file");
-    const newFolderIdx = items.findIndex((i) => i.id === "file-explorer.new-folder");
-    const firstSepIdx = items.findIndex((i) => i.is_separator);
-    expect(newFileIdx).toBeLessThan(firstSepIdx);
-    expect(newFolderIdx).toBeLessThan(firstSepIdx);
-  });
-
-  it("still includes Rename, Delete, Copy Path, Reveal", () => {
-    const items = buildFileExplorerMenuItems(folder);
-    expect(findItem(items, "file-explorer.rename")).toBeDefined();
-    expect(findItem(items, "file-explorer.delete")).toBeDefined();
     expect(findItem(items, "file-explorer.copy-path")).toBeDefined();
-    expect(findItem(items, "file-explorer.reveal")).toBeDefined();
+    expect(findItem(items, "file-explorer.open-in-editor")).toBeUndefined();
+  });
+
+  it("offers no action that does nothing", () => {
+    const items = buildFileExplorerMenuItems(folder);
+    for (const id of UNIMPLEMENTED) expect(findItem(items, id)).toBeUndefined();
+  });
+});
+
+describe("file explorer — every offered item is handled", () => {
+  it("FileExplorerPanel has a case for each item id", () => {
+    const panel = readSrc("components/FileExplorerPanel.tsx");
+    const ids = [
+      ...buildFileExplorerMenuItems({ name: "a.ts", is_dir: false, path: "/a.ts" }),
+      ...buildFileExplorerMenuItems({ name: "src", is_dir: true, path: "/src" }),
+    ].filter((i) => !i.is_separator).map((i) => i.id);
+    for (const id of ids) expect(panel).toContain(`case "${id}":`);
   });
 });
 

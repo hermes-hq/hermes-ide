@@ -491,9 +491,6 @@ export function FileExplorerPanel({ visible }: FileExplorerPanelProps) {
       case "file-explorer.copy-path":
         navigator.clipboard.writeText(entry.path).catch(console.error);
         break;
-      case "file-explorer.open-terminal":
-        // Open terminal at the entry's directory
-        break;
       case "file-explorer.open-in-editor": {
         const projectId = contextProjectRef.current;
         const sessionId = state.activeSessionId;

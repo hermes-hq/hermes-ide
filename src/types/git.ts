@@ -72,6 +72,8 @@ export interface FileContent {
   is_binary: boolean;
   size: number;
   mtime: number;
+  /** Not UTF-8 text: shown with replacement characters, never saved back. */
+  read_only?: boolean;
 }
 
 // ─── SSH File Types ──────────────────────────────────────────────────

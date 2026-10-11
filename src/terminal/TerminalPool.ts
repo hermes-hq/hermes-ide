@@ -26,6 +26,7 @@ import {
 
 import { THEMES, FONT_FAMILIES } from "./themes";
 import { parseFontSize } from "./terminalKeys";
+import { quoteDroppedPath } from "../utils/fileDropTarget";
 import {
   pool,
   setCurrentSettings,
@@ -753,13 +754,13 @@ export function writeTextToTerminal(sessionId: string, text: string): void {
 }
 
 /** Insert file paths into the terminal as typed text (e.g. from OS file drop).
- *  Paths with spaces are quoted. Multiple paths are space-separated. */
+ *  Paths are quoted for the shell (quoteDroppedPath). Multiple paths are space-separated. */
 export function insertFilePaths(sessionId: string, paths: string[]): void {
   const entry = pool.get(sessionId);
   if (!entry || paths.length === 0) return;
 
   const formatted = paths
-    .map((p) => (p.includes(" ") ? `"${p}"` : p))
+    .map(quoteDroppedPath)
     .join(" ");
 
   // Append a trailing space so the user can keep typing / drop more files

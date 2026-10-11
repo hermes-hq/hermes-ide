@@ -1,6 +1,6 @@
 import "../styles/components/SplitPane.css";
 import { Suspense, useEffect, useRef, useState, useCallback } from "react";
-import { isOverFileDropTarget } from "../utils/fileDropTarget";
+import { isOverFileDropTarget, quoteDroppedPath } from "../utils/fileDropTarget";
 import { lazyView } from "../utils/lazyView";
 import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
@@ -209,8 +209,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
                 console.warn("[SplitPane] Failed to copy image to clipboard:", err);
               });
               // Write path directly to terminal — bypasses WebView paste confirmation
-              const quoted = firstImage.includes(" ") ? `"${firstImage}"` : firstImage;
-              writeTextToTerminal(sessionId, quoted + " ");
+              writeTextToTerminal(sessionId, quoteDroppedPath(firstImage) + " ");
             }
 
             // Insert remaining image paths (if multiple images) and all non-image paths

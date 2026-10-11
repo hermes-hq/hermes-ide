@@ -1,6 +1,6 @@
 import "../styles/components/EditorPane.css";
 import { useEffect, useRef, useState } from "react";
-import { EditorState, Compartment, Transaction } from "@codemirror/state";
+import { EditorState, Compartment, Transaction, Annotation } from "@codemirror/state";
 import { EditorView, keymap, lineNumbers, highlightActiveLineGutter, highlightSpecialChars, dropCursor, highlightActiveLine } from "@codemirror/view";
 import {
   history, defaultKeymap, historyKeymap,
@@ -46,6 +46,20 @@ interface EditorPaneProps {
   indentConfig?: IndentConfig;
   minimap?: boolean;
 }
+
+/**
+ * The line break a file uses ("\r\n", "\r" or "\n"). The editor keeps lines
+ * without their breaks and joins them with "\n", so the text handed back is
+ * re-joined with this one: a CRLF file must not be rewritten as LF.
+ */
+export function detectLineBreak(text: string): string {
+  if (text.includes("\r\n")) return "\r\n";
+  if (text.includes("\r")) return "\r";
+  return "\n";
+}
+
+/** Marks the doc replace that loads new `content`: it is not an edit to report back. */
+const externalSync = Annotation.define<boolean>();
 
 const baseTheme = EditorView.theme({
   "&": {
@@ -233,6 +247,7 @@ export function EditorPane({ content, language, onContentChange, onSave, onCurso
   // without triggering a re-creation of the EditorView in the useEffect
   // below that depends on `language`. `null` = no override, follow the UI.
   const fontSizePxRef = useRef<number | null>(null);
+  const lineBreakRef = useRef(detectLineBreak(content));
 
   // Keep callback refs up to date
   onContentChangeRef.current = onContentChange;
@@ -352,8 +367,9 @@ export function EditorPane({ content, language, onContentChange, onSave, onCurso
         themeCompartment.current.of(createSyntaxHighlighting()),
         baseTheme,
         EditorView.updateListener.of((update) => {
-          if (update.docChanged) {
-            onContentChangeRef.current(update.state.doc.toString());
+          if (update.docChanged && !update.transactions.some((tr) => tr.annotation(externalSync))) {
+            const doc = update.state.doc;
+            onContentChangeRef.current(doc.sliceString(0, doc.length, lineBreakRef.current));
           }
           if (update.selectionSet || update.docChanged) {
             const state = update.state;
@@ -404,15 +420,17 @@ export function EditorPane({ content, language, onContentChange, onSave, onCurso
     const view = viewRef.current;
     if (!view) return;
 
+    // The doc holds "\n" breaks, whatever the file uses.
     const currentDoc = view.state.doc.toString();
-    if (currentDoc !== content) {
+    if (currentDoc !== content.replace(/\r\n?/g, "\n")) {
+      lineBreakRef.current = detectLineBreak(content);
       view.dispatch({
         changes: {
           from: 0,
           to: view.state.doc.length,
           insert: content,
         },
-        annotations: Transaction.addToHistory.of(false),
+        annotations: [Transaction.addToHistory.of(false), externalSync.of(true)],
       });
     }
   }, [content]);

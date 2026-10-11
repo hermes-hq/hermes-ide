@@ -191,6 +191,9 @@ pub struct FileContent {
     pub is_binary: bool,
     pub size: u64,
     pub mtime: u64,
+    /// Not valid UTF-8: `content` shows the rest with replacement characters,
+    /// so saving it would destroy the original bytes. Preview only.
+    pub read_only: bool,
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -1026,6 +1029,15 @@ pub fn git_open_file(
     crate::platform::open_file(&full_path.to_string_lossy())
 }
 
+/// File bytes as text, and whether it is read-only: bytes that are not UTF-8
+/// (a Latin-1 file) decode lossily and must never be saved back.
+fn decode_file_text(bytes: Vec<u8>) -> (String, bool) {
+    match String::from_utf8(bytes) {
+        Ok(text) => (text, false),
+        Err(e) => (String::from_utf8_lossy(e.as_bytes()).into_owned(), true),
+    }
+}
+
 #[tauri::command]
 pub fn read_file_content(
     state: State<'_, AppState>,
@@ -1104,6 +1116,7 @@ pub fn read_file_content(
             is_binary: false,
             size,
             mtime,
+            read_only: false,
         });
     }
 
@@ -1114,10 +1127,10 @@ pub fn read_file_content(
     let check_len = bytes.len().min(8192);
     let is_binary = bytes[..check_len].contains(&0);
 
-    let content = if is_binary {
-        String::new()
+    let (content, read_only) = if is_binary {
+        (String::new(), false)
     } else {
-        String::from_utf8_lossy(&bytes).to_string()
+        decode_file_text(bytes)
     };
 
     Ok(FileContent {
@@ -1127,7 +1140,21 @@ pub fn read_file_content(
         is_binary,
         size,
         mtime,
+        read_only,
     })
+}
+
+/// Refused-save error for a file that changed on disk (an agent edited it)
+/// since the editor loaded it; the frontend matches this exact text.
+pub const FILE_CHANGED_ON_DISK: &str = "FILE_CHANGED_ON_DISK";
+
+/// Err(FILE_CHANGED_ON_DISK) unless the file still holds exactly `expected`,
+/// the text the editor loaded. A deleted file counts as changed.
+fn check_unchanged_on_disk(path: &Path, expected: &str) -> Result<(), String> {
+    match std::fs::read(path) {
+        Ok(bytes) if bytes == expected.as_bytes() => Ok(()),
+        _ => Err(FILE_CHANGED_ON_DISK.to_string()),
+    }
 }
 
 #[tauri::command]
@@ -1137,6 +1164,7 @@ pub fn write_file_content(
     project_id: String,
     file_path: String,
     content: String,
+    expected_content: Option<String>,
 ) -> Result<u64, String> {
     let db = state
         .db
@@ -1146,6 +1174,9 @@ pub fn write_file_content(
     drop(db);
 
     let full_path = safe_join(&project_path, &file_path)?;
+    if let Some(expected) = expected_content {
+        check_unchanged_on_disk(&full_path, &expected)?;
+    }
     std::fs::write(&full_path, content.as_bytes())
         .map_err(|e| format!("Failed to write file: {}", e))?;
 
@@ -4622,6 +4653,37 @@ mod tests {
     fn test_db() -> Database {
         let tmp = NamedTempFile::new().unwrap();
         Database::new(tmp.path()).expect("Failed to create test database")
+    }
+
+    #[test]
+    fn a_save_is_refused_when_the_file_changed_on_disk_since_it_was_loaded() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("a.rs");
+        std::fs::write(&path, "fn a() {}\r\n").unwrap();
+        assert_eq!(check_unchanged_on_disk(&path, "fn a() {}\r\n"), Ok(()));
+        // An agent edits the file while it is open.
+        std::fs::write(&path, "fn a() {}\r\nfn agent_added() {}\r\n").unwrap();
+        assert_eq!(
+            check_unchanged_on_disk(&path, "fn a() {}\r\n"),
+            Err(FILE_CHANGED_ON_DISK.to_string())
+        );
+        std::fs::remove_file(&path).unwrap();
+        assert_eq!(
+            check_unchanged_on_disk(&path, "fn a() {}\r\n"),
+            Err(FILE_CHANGED_ON_DISK.to_string())
+        );
+    }
+
+    #[test]
+    fn a_non_utf8_file_is_read_only_and_a_utf8_one_is_editable() {
+        assert_eq!(
+            decode_file_text("café = 1\n".as_bytes().to_vec()),
+            ("café = 1\n".to_string(), false)
+        );
+        // Latin-1 "café": the é byte is not UTF-8.
+        let (text, read_only) = decode_file_text(b"caf\xe9 = 1\n".to_vec());
+        assert!(read_only);
+        assert_eq!(text, "caf\u{FFFD} = 1\n");
     }
 
     #[test]
