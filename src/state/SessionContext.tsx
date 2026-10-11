@@ -1867,6 +1867,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 if (saved.agent_model) claudeModels.current.set(newSession.id, saved.agent_model);
                 if (saved.agent_permission_mode) claudePermissionModes.current.set(newSession.id, saved.agent_permission_mode);
                 if (saved.agent_effort) claudeEfforts.current.set(newSession.id, saved.agent_effort);
+                // The conversation too: a start that fails must not lose it
+                // for Retry or the next save.
+                if (saved.claude_session_uuid) claudeUuids.current.set(newSession.id, saved.claude_session_uuid);
                 const restoredDirs = saved.agent_add_dirs ?? newSession.workspace_paths;
                 claudeAddDirs.current.set(newSession.id, [...restoredDirs]);
                 // Claude resumes with the context but streams only what comes
