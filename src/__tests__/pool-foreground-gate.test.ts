@@ -12,6 +12,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@xterm/xterm", () => ({
 	Terminal: class {
+		unicode = { activeVersion: "6" };
 		buffer = { active: { type: "normal", cursorX: 0, cursorY: 0, viewportY: 0, baseY: 0, length: 0 } };
 		rows = 24;
 		options = {};
@@ -146,6 +147,12 @@ describe("a new terminal", () => {
 		h.isShellForeground.mockResolvedValueOnce(true);
 		await refreshShellForeground(S);
 		expect(shellOwnsTerminal(entry)).toBe(true);
+	});
+
+	it("counts emoji as two columns, as the shell and agent TUIs do", async () => {
+		await createTerminal(S, "#fff", () => {});
+		const terminal = pool.get(S)!.terminal as unknown as { unicode: { activeVersion: string } };
+		expect(terminal.unicode.activeVersion).toBe("11");
 	});
 });
 

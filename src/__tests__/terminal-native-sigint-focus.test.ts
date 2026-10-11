@@ -13,6 +13,7 @@ const h = vi.hoisted(() => ({
 
 vi.mock("@xterm/xterm", () => ({
 	Terminal: class {
+		unicode = { activeVersion: "6" };
 		buffer = { active: { type: "normal", cursorX: 0, cursorY: 0, viewportY: 0, baseY: 0, length: 0 } };
 		rows = 24;
 		cols = 80;

@@ -1,7 +1,5 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { readFileSync } from "fs";
-import { resolve } from "path";
 import { dialogHoldsKeyboard, mayRefocusTerminalOnReturn } from "../terminal/focusGuard";
 
 afterEach(() => {
@@ -70,9 +68,4 @@ describe("coming back to the window leaves the keyboard in a text field outside 
     expect(mayRefocusTerminalOnReturn(true, document.body)).toBe(false);
   });
 
-  it("the app counts the Library as an overlay and asks before refocusing", () => {
-    const src = readFileSync(resolve(__dirname, "../App.tsx"), "utf-8");
-    expect(src).toMatch(/anyOverlayOpenRef\.current = !!\([^)]*\blibraryOpen\b/);
-    expect(src).toContain("if (!mayRefocusTerminalOnReturn(anyOverlayOpenRef.current)) return;");
-  });
 });

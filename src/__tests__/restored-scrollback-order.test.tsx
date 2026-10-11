@@ -80,6 +80,7 @@ vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: vi.fn(() => ({})) }
 vi.mock("@tauri-apps/plugin-shell", () => ({ open: vi.fn() }));
 vi.mock("@xterm/xterm", () => ({
   Terminal: class {
+    unicode = { activeVersion: "6" };
     rows = 24;
     cols = 80;
     options = {};

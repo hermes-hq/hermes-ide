@@ -1,51 +1,56 @@
-# Hermes IDE 2.2.3
+# Hermes IDE 2.2.4
 
 ## Fixes
 
-### Agent view
-
-- Closing, converting or restarting an Agent view session while Claude is working now stops that work, instead of leaving it running in the background.
-- When Claude asks for several approvals at once, each prompt now appears in turn, so a turn no longer hangs on a prompt you never saw.
-- Pressing Stop no longer shows a "Claude couldn't continue" error or marks the session as failed.
-- If you press Stop while Claude is waiting for your approval, the approval prompt now goes away and the session no longer shows that it needs approval.
-- Stopping a reply no longer adds a message you never typed to the conversation or throws off the turn numbers.
-- The first message to a new or restarted session now starts about three seconds sooner.
-- On Windows, permission rules and MCP server settings now load and save correctly when Hermes is opened from the Start menu.
-- Adding a permission rule now offers only the places it can be saved, and the new rule shows in the list right away.
-- Saving permission rules or MCP servers no longer breaks Claude settings files linked from a dotfiles folder, and keeps their file permissions.
-
-### Editor and files
-
-- The file editor no longer saves over changes an agent made to the open file. It tells you the file changed and lets you reload it or keep your version.
-- Opening a file with Windows line endings no longer rewrites it, and edits keep its original line endings.
-- Files that aren't UTF-8 text now open read-only, so saving can no longer corrupt their accented characters.
-- On Windows and Linux, Alt+Up/Down in the file editor moves the line without also switching to another pane.
-- The File Explorer right-click menu no longer shows actions that did nothing.
-
 ### Terminal
 
-- Dropping a file whose name has brackets, quotes or $ into a terminal now inserts its exact path.
-
-### Status and attention
-
-- Pressing Esc to interrupt an agent now lets the computer sleep again and frees the agent's place in the task queue.
-- A spend-limit or gate-approval alert now leaves the attention inbox and badge once you raise the limit or approve the gate yourself.
-- An agent left idle for a minute no longer shows as waiting for your answer after it has finished.
-- The inbox shortcut in a session's status bar now opens the attention inbox, and Windows and Linux show the correct shortcut, Ctrl+Shift+I.
+- Pasting a few lines while a long command is running no longer freezes the whole window until that command ends, and Ctrl+C still stops the command.
+- Pasting a large snippet while a command is running no longer freezes that terminal, other terminals, or the opening of new ones when sessions are kept running in the background.
+- Emoji now take two columns, as the shell and agents expect, so the cursor no longer drifts on lines that contain them.
+- zsh users who keep their config under ~/.config/zsh now get their prompt, aliases, PATH and plugins in Hermes terminals.
+- On Linux, terminals no longer fall back to plain ASCII: accented file names and locale-aware tools work without "Setting locale failed" warnings.
+- Switching to another app and back no longer moves your typing into the terminal while you are in the Library search, renaming a session, writing a commit message or searching.
 
 ### Git and review
 
-- Merging a task locally a second time from the same branch no longer reports a false conflict or lists changes that already landed.
-- Opening the Review Desk on a large project no longer freezes the app while the changes load.
-- Files with accented or non-Latin names now show their real names in the Review Desk and in review notes sent to the agent.
-- Review Desk line counts now include lines that begin with dashes or plus signs, such as Markdown separators or SQL comments.
+- Switching branches from the Git panel now brings in that branch's files, instead of leaving the previous branch's files behind as staged changes.
+- A push the server refuses, such as to a protected branch, is now reported as a failure with the server's reason, not as "Pushed".
+- The stash list now refreshes when stashes change outside the panel, so Drop and Pop act on the stash you clicked.
+- Pushing, committing with slow hooks, stashing and starting an isolated task no longer freeze the whole window while they run.
+- On Windows, Git actions no longer flash a console window or steal focus from the terminal.
+- Pull now refuses with a clear message when no branch is checked out, instead of moving the checked-out commit.
+- Feature files and worktree settings saved with a byte order mark, common with some Windows editors, can now be approved, skipped and checked.
 
-### Sessions and settings
+### Spend and limits
 
-- Opening Hermes a second time on the same data now explains that it is already running, instead of opening the same sessions twice.
-- Cancelling the quit dialog while an agent is working no longer stops your layout, notes and renames from being saved on a later quit.
-- Choosing a folder that is already in your project list now selects that project instead of doing nothing.
-- A maximized window now reopens maximized, and fullscreen no longer replaces the saved window size.
-- Importing settings now adds to your own prompts instead of replacing them.
-- Unpinning an entry in the Library now sticks, instead of the entry coming back pinned every time the Library opens.
-- Installing a plugin with a broken id is now refused, and no longer removes your other installed plugins.
+- In Agent view, session spend no longer climbs faster than real spend with every prompt, so spend caps trip at the right amount.
+- A spend cap now actually stops an Agent view session when it is reached, instead of only reporting it.
+- Estimated spend for terminal Claude sessions now includes the work of sub-agents.
+- After Hermes restarts or you resume an older conversation, estimated spend no longer starts at a partial figure from earlier work.
+- The Cost Dashboard now shows the real total and the daily and per-provider breakdowns instead of $0.00.
+
+### New tasks and the queue
+
+- Tasks waiting in the queue when you reopen Hermes now wait for your restored agents and your running-agents limit, instead of all starting at once.
+- Launching a task on two agents at once now respects the running-agents limit.
+- Two queued tasks with similar names now get separate branches, so the second one no longer stops on a branch-in-use prompt.
+- A queued task that fails to start now stays in the queue, marked, so you can retry or remove it instead of losing what you typed.
+- Feature-tracked tasks written in scripts like Chinese, Japanese, Russian or Hindi each get their own planning files.
+- Checks no longer run or count as failures while a Feature Track is still planning or waiting for your review.
+- When a turn ends while checks are still running, its changes are now checked once the earlier run finishes.
+
+### Worktrees and agents
+
+- Worktree setup no longer hangs, or keeps the new session from opening, when a setup step starts a server in the background.
+- Per-worktree ports now skip a port that a running dev server already uses.
+- Worktree setup steps now run correctly for people whose login shell is fish.
+- Starting Antigravity in a worktree no longer hides your own project hooks file from git, and no longer changes a hooks file your repository tracks.
+- Codex installed through npm no longer asks you to review Hermes's hooks at every start when Hermes is opened from the Dock, and keeps your own notify program.
+- On a second Claude account, Hermes now respects the status line you set for that account.
+- Agent view's terminal for slash commands no longer shows broken symbols on large screens.
+
+### App
+
+- View > Toggle Fullscreen and F11 now work on Windows and Linux.
+- Checking for plugin updates from the command palette now reports a found update or a failed check correctly.
+- Switching sessions with Cmd/Ctrl+1–9 now works on French and Belgian AZERTY keyboards.

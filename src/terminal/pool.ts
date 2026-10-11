@@ -123,6 +123,11 @@ export function estimateInitialDimensions(): { rows: number; cols: number } {
 
 // ─── Terminal Lifecycle ──────────────────────────────────────────────
 
+let unicode11Module: Promise<typeof import("@xterm/addon-unicode11")> | null = null;
+function loadUnicode11() {
+  return (unicode11Module ??= import("@xterm/addon-unicode11"));
+}
+
 export async function createTerminal(
   sessionId: string,
   color: string,
@@ -169,10 +174,18 @@ export async function createTerminal(
     scrollback,
     convertEol: false,
     linkHandler: terminalLinkHandler,
+    // terminal.unicode (the width tables below) is a proposed API.
+    allowProposedApi: true,
   });
 
   const fitAddon = new FitAddon();
   terminal.loadAddon(fitAddon);
+  // Unicode 11 widths: emoji take two columns, as the shell and agent TUIs
+  // count them; with xterm's default (Unicode 6) the cursor drifts.
+  // (Loaded with the first terminal, not at startup: its tables are 25 KB.)
+  const { Unicode11Addon } = await loadUnicode11();
+  terminal.loadAddon(new Unicode11Addon());
+  terminal.unicode.activeVersion = "11";
   terminal.loadAddon(new WebLinksAddon((_event, uri) => openTerminalLink(uri)));
 
   // Wire input → PTY (with intelligence interception)
