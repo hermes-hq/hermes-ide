@@ -560,9 +560,9 @@ impl PortBook {
     }
 }
 
-fn port_is_free(port: u16) -> bool {
-    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
-}
+// Nothing listens on the port on 127.0.0.1 or ::1. Binding 127.0.0.1
+// alone misses a server on ::, ::1 or 0.0.0.0 on macOS and Windows.
+use super::fast_setup::port_is_free;
 
 lazy_static::lazy_static! {
     static ref PORTS: Mutex<PortBook> = Mutex::new(PortBook::default());
@@ -1564,6 +1564,19 @@ mod tests {
             started.elapsed().as_secs() < 30,
             "the command was killed, not waited for"
         );
+    }
+
+    #[test]
+    fn a_port_a_server_holds_on_ipv6_loopback_is_not_handed_out() {
+        // Dev servers often listen on :: or ::1, where binding 127.0.0.1
+        // alone does not see them.
+        let Ok(server) = std::net::TcpListener::bind(("::1", 0)) else {
+            eprintln!("no IPv6 loopback on this machine: nothing to check");
+            return;
+        };
+        let port = server.local_addr().unwrap().port();
+        assert!(!port_is_free(port), "a server on [::1]:{port} holds it");
+        drop(server);
     }
 
     #[cfg(unix)]
