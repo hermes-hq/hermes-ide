@@ -117,6 +117,10 @@ fn app_accel(action: &str) -> Result<String, Box<dyn std::error::Error>> {
 /// The app menu's Quit item.
 pub const QUIT_ID: &str = "hermes.quit";
 
+/// View > Toggle Fullscreen on Windows and Linux (macOS has the predefined item).
+/// The builder spells it out: the shortcuts generator reads literal ids.
+const FULLSCREEN_ID: &str = "view.fullscreen";
+
 /// Label and accelerator the predefined Quit item has on each platform:
 /// Cmd+Q on macOS only; on Windows and Linux no chord (Ctrl+Q belongs to the
 /// terminal).
@@ -405,19 +409,40 @@ pub fn dispatch_menu_action(app: &AppHandle, id: String) {
         return;
     }
 
-    if id == QUIT_ID {
-        crate::quit_flush::quit(app);
-        return;
+    match native_action(&id) {
+        Some(NativeAction::Quit) => crate::quit_flush::quit(app),
+        // Ctrl+C menu accelerator → emit dedicated SIGINT event.
+        // The frontend sends \x03 to the active terminal's PTY.
+        Some(NativeAction::Interrupt) => {
+            let _ = app.emit("native-sigint", ());
+        }
+        Some(NativeAction::ToggleFullscreen) => {
+            if let Some(window) = app.get_webview_window("main") {
+                let fullscreen = window.is_fullscreen().unwrap_or(false);
+                let _ = window.set_fullscreen(!fullscreen);
+            }
+        }
+        None => {
+            let _ = app.emit("menu-action", MenuActionPayload { action: id });
+        }
     }
+}
 
-    // Ctrl+C menu accelerator → emit dedicated SIGINT event.
-    // The frontend sends \x03 to the active terminal's PTY.
-    if id == "edit.send-interrupt" {
-        let _ = app.emit("native-sigint", ());
-        return;
+/// Menu items the backend handles itself instead of passing them to the frontend.
+#[derive(Debug, PartialEq)]
+enum NativeAction {
+    Quit,
+    Interrupt,
+    ToggleFullscreen,
+}
+
+fn native_action(id: &str) -> Option<NativeAction> {
+    match id {
+        QUIT_ID => Some(NativeAction::Quit),
+        "edit.send-interrupt" => Some(NativeAction::Interrupt),
+        FULLSCREEN_ID => Some(NativeAction::ToggleFullscreen),
+        _ => None,
     }
-
-    let _ = app.emit("menu-action", MenuActionPayload { action: id });
 }
 
 // ─── Show Context Menu (Tauri Command) ──────────────────────────────
@@ -762,6 +787,20 @@ mod tests {
     fn unknown_action_has_no_chord() {
         assert!(accelerator_for("view.nope", false).is_none());
         assert!(app_accel("view.nope").is_err());
+    }
+
+    #[test]
+    fn toggle_fullscreen_is_handled_natively() {
+        assert_eq!(
+            native_action(FULLSCREEN_ID),
+            Some(NativeAction::ToggleFullscreen)
+        );
+        assert_eq!(native_action(QUIT_ID), Some(NativeAction::Quit));
+        assert_eq!(
+            native_action("edit.send-interrupt"),
+            Some(NativeAction::Interrupt)
+        );
+        assert_eq!(native_action("view.git-panel"), None);
     }
 
     #[test]

@@ -6,6 +6,8 @@ export const jaPack: LanguagePack = {
   nativeLabel: "日本語",
   messages: {
     "app.plugins": "プラグイン",
+    "app.pluginsUpToDate": "すべてのプラグインは最新です",
+    "app.pluginUpdateCheckFailed": "プラグインの更新を確認できませんでした。接続を確認して、もう一度お試しください。",
     "app.app": "アプリ",
     "app.settings": "設定",
     "app.context": "コンテキスト",

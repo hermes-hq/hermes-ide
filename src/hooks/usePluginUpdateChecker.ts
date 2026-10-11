@@ -35,8 +35,11 @@ export interface PluginUpdateState {
   autoUpdated: boolean;
 }
 
+/** How a check ended: how many updates it found, or that it failed. */
+export type PluginCheckOutcome = { failed: false; updates: number } | { failed: true };
+
 export interface PluginUpdateActions {
-  checkNow: () => Promise<void>;
+  checkNow: () => Promise<PluginCheckOutcome>;
   dismissAll: () => void;
   ignoreVersion: (pluginId: string, version: string) => Promise<void>;
   updatePlugin: (plugin: PluginUpdateInfo) => Promise<void>;
@@ -135,7 +138,8 @@ export function usePluginUpdateChecker(
   runtime?: PluginRuntime,
 ): PluginUpdater {
   const [state, setState] = useState<PluginUpdateState>(INITIAL_STATE);
-  const checkingRef = useRef(false);
+  // The check under way: a second caller waits for its outcome instead of starting another.
+  const checkingRef = useRef<Promise<PluginCheckOutcome> | null>(null);
 
   const hotLoadPlugins = useCallback(async () => {
     if (!runtime) return;
@@ -144,9 +148,7 @@ export function usePluginUpdateChecker(
     await runtime.activateStartupPlugins();
   }, [runtime]);
 
-  const doCheck = useCallback(async () => {
-    if (checkingRef.current) return;
-    checkingRef.current = true;
+  const runCheck = useCallback(async (): Promise<PluginCheckOutcome> => {
     setState((s) => ({ ...s, checking: true }));
 
     try {
@@ -249,13 +251,20 @@ export function usePluginUpdateChecker(
           autoUpdated: false,
         });
       }
+      return { failed: false, updates: updates.length };
     } catch {
       // Silent failure — registry unreachable, etc.
       setState((s) => ({ ...s, checking: false }));
-    } finally {
-      checkingRef.current = false;
+      return { failed: true };
     }
   }, [hotLoadPlugins]);
+
+  const doCheck = useCallback((): Promise<PluginCheckOutcome> => {
+    if (!checkingRef.current) {
+      checkingRef.current = runCheck().finally(() => { checkingRef.current = null; });
+    }
+    return checkingRef.current;
+  }, [runCheck]);
 
   // Background check on mount
   useEffect(() => {
@@ -281,9 +290,7 @@ export function usePluginUpdateChecker(
     };
   }, [doCheck]);
 
-  const checkNow = useCallback(async () => {
-    await doCheck();
-  }, [doCheck]);
+  const checkNow = useCallback(() => doCheck(), [doCheck]);
 
   const dismissAll = useCallback(() => {
     setState((s) => ({ ...s, dismissed: true }));

@@ -25,7 +25,7 @@ import { loadAllLanguagePacks } from "../i18n/packs";
 import { ptBRPack } from "../i18n/packs/pt-BR";
 import { ShortcutsPanel } from "../components/ShortcutsPanel";
 import { GENERATED_SHORTCUT_GROUPS } from "../generated/shortcuts";
-import { APP_SHORTCUTS, matchAppShortcut, matchesAccelerator, visibleShortcutGroups } from "../utils/shortcuts";
+import { APP_SHORTCUTS, matchAppShortcut, matchesAccelerator, shortcutDigit, visibleShortcutGroups } from "../utils/shortcuts";
 import { fmt } from "../utils/platform";
 
 const ALL = GENERATED_SHORTCUT_GROUPS.flatMap((g) => g.shortcuts);
@@ -201,6 +201,17 @@ describe("matchAppShortcut", () => {
     expect(matchAppShortcut(key("P", { meta: true }), true)).toBeNull();
     expect(matchAppShortcut(key("ArrowRight", { meta: true }), true)).toBeNull();
     expect(matchAppShortcut(key("B", { meta: true, alt: true, shift: true }), true)).toBeNull();
+  });
+
+  it("switches sessions from the digit row on AZERTY, where it types & é \" ' ( - è _ ç", () => {
+    const azerty = (k: string, n: number, mods: Parameters<typeof key>[1]) => ({ ...key(k, mods), code: `Digit${n}` });
+    expect(matchAppShortcut(azerty("&", 1, { meta: true }), true)).toBe("app.switch-session");
+    expect(matchAppShortcut(azerty("ç", 9, { ctrl: true }), false)).toBe("app.switch-session");
+    expect(shortcutDigit(azerty("&", 1, { meta: true }))).toBe(1);
+    expect(shortcutDigit(azerty("ç", 9, { ctrl: true }))).toBe(9);
+    expect(shortcutDigit(key("4", { meta: true }))).toBe(4);
+    expect(matchAppShortcut(azerty("à", 0, { meta: true }), true)).toBeNull();
+    expect(matchAppShortcut(azerty("&", 1, {}), true)).toBeNull();
   });
 
   it("removing a declaration removes the binding", () => {

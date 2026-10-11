@@ -33,6 +33,8 @@ export interface KeyEventLike {
   ctrlKey: boolean;
   shiftKey: boolean;
   altKey: boolean;
+  /** The physical key ("Digit1"); lets a digit shortcut work where the digit row types symbols (AZERTY). */
+  code?: string;
 }
 
 interface ParsedAccelerator {
@@ -91,7 +93,16 @@ export function matchesAccelerator(e: KeyEventLike, accelerator: string, mac: bo
     return false;
   }
   if (a.shift !== e.shiftKey || a.alt !== e.altKey) return false;
-  return a.keys.includes(e.key.toLowerCase());
+  if (a.keys.includes(e.key.toLowerCase())) return true;
+  const digit = /^Digit([0-9])$/.exec(e.code ?? "");
+  return !!digit && a.keys.includes(digit[1]);
+}
+
+/** The digit a digit shortcut was pressed with: the typed digit, else the digit-row key's (AZERTY types "&" there). */
+export function shortcutDigit(e: KeyEventLike): number {
+  if (/^[0-9]$/.test(e.key)) return Number(e.key);
+  const digit = /^Digit([0-9])$/.exec(e.code ?? "");
+  return digit ? Number(digit[1]) : NaN;
 }
 
 export interface AppShortcut {

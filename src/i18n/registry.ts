@@ -36,6 +36,8 @@ const ENGLISH_PACK: LanguagePack = {
   nativeLabel: "English",
   messages: {
     "app.plugins": "Plugins",
+    "app.pluginsUpToDate": "All plugins are up to date",
+    "app.pluginUpdateCheckFailed": "Couldn't check for plugin updates. Check your connection and try again.",
     "app.app": "App",
     "app.settings": "Settings",
     "app.context": "Context",

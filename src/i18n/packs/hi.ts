@@ -173,6 +173,8 @@ export const hiPack: LanguagePack = {
     "plugins.permission.featuresRead": "आपके फ़ीचर ट्रैक पढ़ना (केवल पढ़ना)",
     "plugins.permission.reviewChecks": "कोड रिव्यू में जाँचें जोड़ना",
     "app.plugins": "प्लगइन",
+    "app.pluginsUpToDate": "सभी प्लगइन अप टू डेट हैं",
+    "app.pluginUpdateCheckFailed": "प्लगइन अपडेट की जाँच नहीं हो सकी। अपना कनेक्शन जाँचें और फिर से कोशिश करें।",
     "app.app": "ऐप",
     "app.settings": "सेटिंग्स",
     "app.context": "संदर्भ",

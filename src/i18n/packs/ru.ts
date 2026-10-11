@@ -6,6 +6,8 @@ export const ruPack: LanguagePack = {
   nativeLabel: "Русский",
   messages: {
     "app.plugins": "Плагины",
+    "app.pluginsUpToDate": "Все плагины обновлены",
+    "app.pluginUpdateCheckFailed": "Не удалось проверить обновления плагинов. Проверьте подключение и повторите попытку.",
     "app.app": "Приложение",
     "app.settings": "Настройки",
     "app.context": "Контекст",

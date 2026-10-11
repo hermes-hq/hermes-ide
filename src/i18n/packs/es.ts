@@ -6,6 +6,8 @@ export const esPack: LanguagePack = {
   nativeLabel: "Español",
   messages: {
     "app.plugins": "Plugins",
+    "app.pluginsUpToDate": "Todos los plugins están actualizados",
+    "app.pluginUpdateCheckFailed": "No se pudieron buscar actualizaciones de plugins. Revisa tu conexión e inténtalo de nuevo.",
     "app.app": "Aplicación",
     "app.settings": "Configuración",
     "app.context": "Contexto",

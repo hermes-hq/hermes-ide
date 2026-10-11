@@ -21,7 +21,7 @@ import "./styles/topbar.css";
 import "./styles/onDemandViewStyles";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { fmt, isMac, PLATFORM } from "./utils/platform";
-import { matchAppShortcut } from "./utils/shortcuts";
+import { matchAppShortcut, shortcutDigit } from "./utils/shortcuts";
 import { shortcutLabel } from "./utils/keymap";
 import { installAppChordListener } from "./hooks/appChordListener";
 import { isMenuGated, triggerMenuBarActionFromKeyboard } from "./hooks/nativeMenuBridge";
@@ -66,6 +66,7 @@ import { SplitDirection, collectPanes } from "./state/layoutTypes";
 import { getDraggedSession } from "./components/SplitPane";
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { focusTerminal, getTerminal, refitActive } from "./terminal/TerminalPool";
+import { mayRefocusTerminalOnReturn } from "./terminal/focusGuard";
 import { useNativeMenuEvents } from "./hooks/useNativeMenuEvents";
 import { useMenuStateSync } from "./hooks/useMenuStateSync";
 import { useAutoUpdater } from "./hooks/useAutoUpdater";
@@ -762,7 +763,7 @@ function AppContent() {
       // Cmd+1-9 — session switch (matches sidebar visual order)
       if (action === "app.switch-session") {
         e.preventDefault();
-        const idx = parseInt(e.key) - 1;
+        const idx = shortcutDigit(e) - 1;
         if (idx < sidebarSessions.length) setActive(sidebarSessions[idx].id);
       }
     };
@@ -791,20 +792,21 @@ function AppContent() {
   // Re-focus the active terminal when the app window regains focus
   // (e.g. after a system dialog, Cmd+Tab, or notification steals focus).
   // Uses Tauri's onFocusChanged (reliable in WKWebView) + browser fallbacks.
-  // Skips re-focus when any modal/overlay with input fields is open so it
-  // doesn't steal focus from text inputs inside overlays.
+  // Skips re-focus when any modal/overlay with input fields is open, or a
+  // text field outside the terminal still has the keyboard, so it doesn't
+  // steal focus from text inputs.
   const activeSessionIdRef = useRef(activeSession?.id ?? null);
   activeSessionIdRef.current = activeSession?.id ?? null;
   const anyOverlayOpenRef = useRef(false);
   const [attentionInboxOpen, setAttentionInboxOpen] = useState(false);
-  anyOverlayOpenRef.current = !!(ui.commandPaletteOpen || settingsOpen || ui.composerOpen || sessionCreatorOpen || taskLauncherOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen || attentionInboxOpen);
+  anyOverlayOpenRef.current = !!(ui.commandPaletteOpen || settingsOpen || ui.composerOpen || sessionCreatorOpen || taskLauncherOpen || shortcutsOpen || costDashboardOpen || workspaceOpen || projectPickerOpen || attentionInboxOpen || libraryOpen);
 
   useEffect(() => {
     if (!activeSession) return;
     let cancelled = false;
 
     const safeFocus = () => {
-      if (anyOverlayOpenRef.current) return;
+      if (!mayRefocusTerminalOnReturn(anyOverlayOpenRef.current)) return;
       const id = activeSessionIdRef.current;
       if (id) focusTerminal(id);
     };
@@ -1893,9 +1895,11 @@ function AppContent() {
           pluginsWithSettings={pluginsWithSettings}
           onPluginCommand={(commandId) => pluginRuntime.executeCommand(commandId)}
           onCheckPluginUpdates={async () => {
-            await pluginUpdater.checkNow();
-            if (pluginUpdater.updatesAvailable.length === 0) {
-              toastStore.addToast({ message: "All plugins are up to date", type: "info", duration: 3000 });
+            const outcome = await pluginUpdater.checkNow();
+            if (outcome.failed) {
+              toastStore.addToast({ message: t("app.pluginUpdateCheckFailed"), type: "error", duration: 4000 });
+            } else if (outcome.updates === 0) {
+              toastStore.addToast({ message: t("app.pluginsUpToDate"), type: "info", duration: 3000 });
             }
           }}
         />
