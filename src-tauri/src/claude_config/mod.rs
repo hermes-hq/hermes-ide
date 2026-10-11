@@ -32,6 +32,21 @@ pub fn atomic_json_write<F>(path: &Path, mutator: F) -> Result<(), String>
 where
     F: FnOnce(&mut Map<String, Value>) -> Result<(), String>,
 {
+    // A symlinked config (a dotfiles setup) is written through to its
+    // target, so the link stays a link.
+    let resolved;
+    let path = match fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => {
+            resolved = fs::canonicalize(path).map_err(|e| {
+                format!(
+                    "{} links to a file that cannot be read: {e}",
+                    path.display()
+                )
+            })?;
+            resolved.as_path()
+        }
+        _ => path,
+    };
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("create parent dir: {e}"))?;
     }
@@ -68,19 +83,27 @@ where
         .map_err(|e| format!("write tmp newline: {e}"))?;
     f.sync_all().map_err(|e| format!("fsync tmp: {e}"))?;
     drop(f);
+    // Keep the file's permissions (the temporary file got the defaults).
+    if let Ok(meta) = fs::metadata(path) {
+        fs::set_permissions(&tmp, meta.permissions()).map_err(|e| format!("chmod tmp: {e}"))?;
+    }
 
     fs::rename(&tmp, path).map_err(|e| format!("rename: {e}"))?;
     Ok(())
 }
 
+/// The user's home folder.  Not `$HOME`: Windows does not set it, so the
+/// platform lookup (USERPROFILE / the known folder there) is used.
+fn home_dir() -> Result<PathBuf, String> {
+    crate::platform::home_dir().ok_or_else(|| "home folder not found".to_string())
+}
+
 fn home_config_path() -> Result<PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME unset".to_string())?;
-    Ok(PathBuf::from(home).join(".claude.json"))
+    Ok(home_dir()?.join(".claude.json"))
 }
 
 fn home_settings_path() -> Result<PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|_| "HOME unset".to_string())?;
-    Ok(PathBuf::from(home).join(".claude").join("settings.json"))
+    Ok(home_dir()?.join(".claude").join("settings.json"))
 }
 
 // ─── MCP server commands ──────────────────────────────────────────
@@ -712,6 +735,38 @@ mod tests {
         assert!(!tmp.exists() || fs::read(&tmp).map(|b| b.is_empty()).unwrap_or(true));
     }
 
+    /// A config kept as a symlink into a dotfiles folder is written
+    /// through: the link stays a link, the target gets the edit and keeps
+    /// its mode.
+    #[cfg(unix)]
+    #[test]
+    fn atomic_json_write_keeps_a_symlinked_config_a_link() {
+        use std::os::unix::fs::PermissionsExt;
+        let td = tempdir().unwrap();
+        let target = td.path().join("dotfiles").join("settings.json");
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        fs::write(&target, br#"{"model":"opus"}"#).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o600)).unwrap();
+        let link = td.path().join("settings.json");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+
+        atomic_json_write(&link, |root| {
+            root.insert("added".into(), Value::Bool(true));
+            Ok(())
+        })
+        .unwrap();
+
+        assert!(fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        let v: Value = serde_json::from_str(&fs::read_to_string(&target).unwrap()).unwrap();
+        assert_eq!(v["model"], Value::String("opus".into()));
+        assert_eq!(v["added"], Value::Bool(true));
+        let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
     #[test]
     fn validate_server_name_rejects_metachars() {
         assert!(validate_server_name("ok").is_ok());
@@ -840,8 +895,8 @@ pub fn read_static_slash_commands(cwd: Option<String>) -> Vec<String> {
             search.push(p);
         }
     }
-    if let Ok(home) = std::env::var("HOME") {
-        search.push(PathBuf::from(home).join(".claude").join("commands"));
+    if let Ok(home) = home_dir() {
+        search.push(home.join(".claude").join("commands"));
     }
 
     for dir in search {
@@ -875,8 +930,8 @@ pub fn read_static_slash_commands(cwd: Option<String>) -> Vec<String> {
 pub fn read_static_memory_paths(cwd: Option<String>) -> Vec<String> {
     let mut paths = Vec::new();
 
-    if let Ok(home) = std::env::var("HOME") {
-        let user_md = PathBuf::from(&home).join(".claude").join("CLAUDE.md");
+    if let Ok(home) = home_dir() {
+        let user_md = home.join(".claude").join("CLAUDE.md");
         if user_md.exists() {
             if let Some(s) = user_md.to_str() {
                 paths.push(s.to_string());
@@ -907,6 +962,22 @@ mod prewarm_tests {
     /// multi-threaded, which races us — guard every test with this
     /// mutex so HOME-mutating tests are serialised.
     static HOME_MUTEX: Mutex<()> = Mutex::new(());
+
+    /// Windows sets no `HOME`: the Claude config paths must still resolve
+    /// (from the platform's home folder), not fail with "HOME unset".
+    #[test]
+    fn config_paths_resolve_without_a_home_variable() {
+        let _g = HOME_MUTEX.lock().unwrap_or_else(|e| e.into_inner());
+        let prev = std::env::var_os("HOME");
+        std::env::remove_var("HOME");
+        let settings = home_settings_path();
+        let config = home_config_path();
+        if let Some(v) = prev {
+            std::env::set_var("HOME", v);
+        }
+        assert!(settings.unwrap().ends_with(".claude/settings.json"));
+        assert!(config.unwrap().ends_with(".claude.json"));
+    }
 
     #[test]
     fn pw_2_static_mcp_servers_returns_empty_when_file_missing() {
