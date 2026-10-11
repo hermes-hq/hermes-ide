@@ -117,8 +117,8 @@ pub struct LaunchInput<'a> {
     /// never reach Hermes, and a limit has no reset time).
     pub user_status_line: bool,
     /// The user has a `notify` program of their own in Codex's config, so
-    /// Hermes must not set one (one setting: ours would replace theirs; the
-    /// Stop hook still tells the turn's end).
+    /// Hermes must not set one when the hooks are trusted (one setting: ours
+    /// would replace theirs; the Stop hook still tells the turn's end).
     pub user_notify: bool,
     /// Absolute path of the `hi` helper.
     pub hi: &'a Path,
@@ -781,9 +781,13 @@ fn signal_setup(
                             let name = path.file_name().unwrap_or_default().to_string_lossy();
                             let text = format!("/{name}\n/.gitignore\n");
                             if std::fs::read_to_string(&ignore).is_ok_and(|t| t != text) {
-                                continue;
+                                // A `.gitignore` of the repository's own is
+                                // there: the shared exclude after all, so the
+                                // hooks still run.
+                                setup.git_excludes.push(rel.clone());
+                            } else {
+                                setup.files.push((ignore, text));
                             }
-                            setup.files.push((ignore, text));
                         }
                     }
                     let existing = std::fs::read_to_string(&path).ok();
@@ -971,14 +975,16 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         (input.stream_port, input.stream_secret),
         !input.user_status_line,
     );
-    if let Some(state) = input
+    let trusted = input
         .hook_trust
-        .filter(|_| terminal.signals.hook_trust.is_some())
-    {
+        .filter(|_| terminal.signals.hook_trust.is_some());
+    if let Some(state) = trusted {
         signals.args.push("-c".to_string());
         signals.args.push(format!("hooks.state={state}"));
     }
-    if input.user_notify {
+    // Only while the Stop hook is known to run: without trust (an old Codex,
+    // no answer in time) notify is the only turn end Hermes gets.
+    if input.user_notify && trusted.is_some() {
         if let Some(at) = signals
             .args
             .windows(2)
@@ -4530,6 +4536,17 @@ pub(crate) mod tests {
         write_plan(&tmp.path().join("launch").join("hermes-1"), &plan).unwrap();
         assert_eq!(git(&["status", "--porcelain"]), "");
 
+        // A `.gitignore` of the user's own beside it: the hooks are still
+        // written, and the shared exclude keeps them out of git.
+        std::fs::write(repo.join(".agents/.gitignore"), "/skills-cache\n").unwrap();
+        let own_ignore = plan_launch(&inp).unwrap();
+        assert_eq!(own_ignore.files.len(), 1, "{:?}", own_ignore.files);
+        assert_eq!(own_ignore.files[0].0, repo.join(".agents/hooks.json"));
+        assert_eq!(
+            own_ignore.git_excludes,
+            vec![".agents/hooks.json".to_string()]
+        );
+
         // A hooks file the repository tracks is the team's: left alone.
         git_in(&main, &["add", ".agents/hooks.json"]);
         git_in(
@@ -4830,13 +4847,19 @@ pub(crate) mod tests {
         assert!(!plan.spec.args.iter().any(|a| a.contains("hooks.state")));
     }
 
-    /// A Codex user's own `notify` program is kept: Hermes sets none then.
+    /// A Codex user's own `notify` program is kept: Hermes sets none then,
+    /// as long as its Stop hook is trusted to run.
     #[test]
     fn codex_keeps_the_users_own_notify_program() {
         let hi = Path::new("/app/hi");
         let dir = Path::new("/data/launch/hermes-1");
         let mut codex = input("codex", None, hi, dir);
         codex.user_notify = true;
+        // No trust (an old Codex, no answer in time): the Stop hook may not
+        // run, so Hermes's notify stays the turn end.
+        let args = plan_launch(&codex).unwrap().spec.args;
+        assert!(args.iter().any(|a| a.starts_with("notify=")), "{args:?}");
+        codex.hook_trust = Some("{}");
         let args = plan_launch(&codex).unwrap().spec.args;
         assert!(!args.iter().any(|a| a.starts_with("notify=")), "{args:?}");
         assert!(
