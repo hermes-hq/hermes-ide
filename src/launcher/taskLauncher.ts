@@ -92,6 +92,17 @@ export function secondAgentBranch(branch: string, agentId: string): string {
   return `${branch}-${suffix}`;
 }
 
+/**
+ * The second agent's branch when `branches` are taken: <branch>-<agent>, or
+ * the first free <branch>-<agent>-2, -3… (a second launch on the same
+ * branch has nothing in the sheet to rename it by).
+ */
+export function freeSecondAgentBranch(branch: string, agentId: string, branches: readonly string[]): string {
+  const base = secondAgentBranch(branch, agentId);
+  const taken = (b: string) => findBranchClash(b, branches) !== null || branchNameProblem(b, branches) !== null;
+  return taken(base) ? nextFreeBranch(base, taken) : base;
+}
+
 /** hermes/fix-login → hermes/fix-login-2, -3, ... (the first free one). */
 export function nextFreeBranch(branch: string, taken: (b: string) => boolean, limit = 50): string {
   for (let n = 2; n < limit; n++) {

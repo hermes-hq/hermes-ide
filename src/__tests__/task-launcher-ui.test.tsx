@@ -1197,3 +1197,28 @@ describe("TaskLauncher: attachments", () => {
     expect(chips()).toEqual(["/fixture-home/specs/login.md"]);
   });
 });
+
+describe("TaskLauncher: Also on, a second time on the same branch", () => {
+  it("an existing branch whose second-agent branch is already there: the second agent gets the next free name", async () => {
+    h.probe.set(REPO, { git_root: REPO, branch_exists: false, local_branches: ["main", "develop", "feature/inbox", "feature/inbox-codex"], worktree_toml: null, current_branch: "main" });
+    const { onLaunch } = await open();
+    await typeTask("Polish the inbox");
+    fireEvent.click(chip("where"));
+    fireEvent.click(document.querySelector('.task-launcher-menu [data-where="existing-branch"]') as HTMLElement);
+    await settle();
+    choose(".task-launcher-menu .task-launcher-existing", "feature/inbox");
+    await settle();
+    closeMenus();
+    fireEvent.keyDown(task(), { key: ".", ...modKey });
+    await settle();
+    fireEvent.click(document.querySelector(".task-launcher-also-toggle") as HTMLElement);
+    await settle();
+    expect(blocks()).toEqual([]);
+    await launchWithEnter();
+    expect(onLaunch).toHaveBeenCalledTimes(1);
+    expect(onLaunch.mock.calls[0][0].agents.map((a) => [a.id, a.branch, a.createBranch])).toEqual([
+      ["claude", "feature/inbox", false],
+      ["codex", "feature/inbox-codex-2", true],
+    ]);
+  });
+});
