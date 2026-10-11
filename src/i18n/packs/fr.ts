@@ -69,6 +69,8 @@ export const frPack: LanguagePack = {
     "startupProblem.migrationFailed.message": "Hermes n'a pas pu mettre à jour ses données (étape {step}). La mise à jour a été annulée et vos données sont inchangées : {detail}",
     "startupProblem.openFailed.title": "Hermes n'a pas pu ouvrir vos données",
     "startupProblem.openFailed.message": "Hermes n'a pas pu ouvrir ses données : {detail}",
+    "startupProblem.alreadyRunning.title": "Hermes est déjà en cours d'exécution",
+    "startupProblem.alreadyRunning.message": "Une autre fenêtre Hermes est déjà ouverte avec ces données. Passez à cette fenêtre, ou quittez-la puis rouvrez Hermes.",
     "startupProblem.dataFile": "Fichier de données",
     "startupProblem.quit": "Quitter Hermes",
     "common.close": "Fermer",

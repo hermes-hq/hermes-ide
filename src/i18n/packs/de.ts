@@ -69,6 +69,8 @@ export const dePack: LanguagePack = {
     "startupProblem.migrationFailed.message": "Hermes konnte seine Daten nicht aktualisieren (Schritt {step}). Die Aktualisierung wurde rückgängig gemacht, deine Daten sind unverändert: {detail}",
     "startupProblem.openFailed.title": "Hermes konnte deine Daten nicht öffnen",
     "startupProblem.openFailed.message": "Hermes konnte seine Daten nicht öffnen: {detail}",
+    "startupProblem.alreadyRunning.title": "Hermes läuft bereits",
+    "startupProblem.alreadyRunning.message": "Ein anderes Hermes-Fenster ist mit diesen Daten bereits geöffnet. Wechsle zu diesem Fenster oder beende es und öffne Hermes erneut.",
     "startupProblem.dataFile": "Datendatei",
     "startupProblem.quit": "Hermes beenden",
     "common.close": "Schließen",

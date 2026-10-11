@@ -17,10 +17,12 @@ const KEY_PREFIX: Record<StartupProblem["kind"], string> = {
 	"backup-failed": "startupProblem.backupFailed",
 	"migration-failed": "startupProblem.migrationFailed",
 	"open-failed": "startupProblem.openFailed",
+	"already-running": "startupProblem.alreadyRunning",
 };
 
 /**
- * Shown instead of the workspace when Hermes could not open its data.
+ * Shown instead of the workspace when Hermes could not open its data, or
+ * another running Hermes already has it open.
  * Nothing else starts in this state, so the data stays exactly as it was.
  * Plugins (and with them the language packs) never register here, so the
  * text is translated straight from the built-in packs (English until the

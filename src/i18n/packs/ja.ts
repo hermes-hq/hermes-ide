@@ -69,6 +69,8 @@ export const jaPack: LanguagePack = {
     "startupProblem.migrationFailed.message": "Hermes はデータを更新できませんでした（ステップ {step}）。更新は取り消され、データは変更されていません: {detail}",
     "startupProblem.openFailed.title": "Hermes はデータを開けませんでした",
     "startupProblem.openFailed.message": "Hermes はデータを開けませんでした: {detail}",
+    "startupProblem.alreadyRunning.title": "Hermes はすでに起動しています",
+    "startupProblem.alreadyRunning.message": "このデータを使う別の Hermes ウィンドウがすでに開いています。そのウィンドウに切り替えるか、終了してから Hermes を開き直してください。",
     "startupProblem.dataFile": "データファイル",
     "startupProblem.quit": "Hermes を終了",
     "common.close": "閉じる",

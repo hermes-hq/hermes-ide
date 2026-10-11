@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 /** Why Hermes could not open its data this run (see src-tauri/src/db/startup.rs). */
 export interface StartupProblem {
-	kind: "newer-data" | "backup-failed" | "migration-failed" | "open-failed";
+	kind: "newer-data" | "backup-failed" | "migration-failed" | "open-failed" | "already-running";
 	title: string;
 	message: string;
 	/** The database file Hermes tried to open. */

@@ -99,6 +99,8 @@ const ENGLISH_PACK: LanguagePack = {
     "startupProblem.migrationFailed.message": "Hermes could not update its data (step {step}). The update was undone and your data is unchanged: {detail}",
     "startupProblem.openFailed.title": "Hermes could not open your data",
     "startupProblem.openFailed.message": "Hermes could not open its data: {detail}",
+    "startupProblem.alreadyRunning.title": "Hermes is already running",
+    "startupProblem.alreadyRunning.message": "Another Hermes window is already open with this data. Switch to that window, or quit it and open Hermes again.",
     "startupProblem.dataFile": "Data file",
     "startupProblem.quit": "Quit Hermes",
     "common.close": "Close",

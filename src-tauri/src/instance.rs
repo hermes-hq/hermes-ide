@@ -294,9 +294,54 @@ pub fn shell_temp_root() -> PathBuf {
     }
 }
 
+/// Held for as long as this instance runs: the lock on its data folder.
+pub struct DataDirLock(#[allow(dead_code)] std::fs::File);
+
+/// Locks `data_dir` for this process. `Ok(None)` when another running Hermes
+/// holds it: a second launch on the same data would restore the same
+/// sessions and take over their terminals. The lock goes with the process,
+/// so a crash leaves nothing behind; `wait` covers a restart, whose new
+/// process can start before the old one is gone.
+pub fn claim_data_dir(
+    data_dir: &Path,
+    wait: std::time::Duration,
+) -> std::io::Result<Option<DataDirLock>> {
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .write(true)
+        .truncate(false)
+        .open(data_dir.join("instance.lock"))?;
+    let deadline = std::time::Instant::now() + wait;
+    loop {
+        match file.try_lock() {
+            Ok(()) => return Ok(Some(DataDirLock(file))),
+            Err(std::fs::TryLockError::WouldBlock) if std::time::Instant::now() < deadline => {
+                std::thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(std::fs::TryLockError::WouldBlock) => return Ok(None),
+            Err(std::fs::TryLockError::Error(e)) => return Err(e),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_second_instance_cannot_claim_the_same_data_folder() {
+        let dir = tempfile::tempdir().unwrap();
+        let none = std::time::Duration::ZERO;
+        let first = claim_data_dir(dir.path(), none).unwrap();
+        assert!(first.is_some());
+        assert!(claim_data_dir(dir.path(), none).unwrap().is_none());
+        // Another data folder is another instance.
+        let other = tempfile::tempdir().unwrap();
+        assert!(claim_data_dir(other.path(), none).unwrap().is_some());
+        // Once the first one is gone, the folder is free again.
+        drop(first);
+        assert!(claim_data_dir(dir.path(), none).unwrap().is_some());
+    }
 
     fn prod_under(base: &Path) -> PathBuf {
         base.join(PRODUCTION_IDENTIFIER)

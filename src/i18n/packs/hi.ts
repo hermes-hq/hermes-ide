@@ -196,6 +196,8 @@ export const hiPack: LanguagePack = {
     "startupProblem.migrationFailed.message": "Hermes अपना डेटा अपडेट नहीं कर सका (चरण {step})। अपडेट वापस ले लिया गया और आपका डेटा अपरिवर्तित है: {detail}",
     "startupProblem.openFailed.title": "Hermes आपका डेटा नहीं खोल सका",
     "startupProblem.openFailed.message": "Hermes अपना डेटा नहीं खोल सका: {detail}",
+    "startupProblem.alreadyRunning.title": "Hermes पहले से चल रहा है",
+    "startupProblem.alreadyRunning.message": "इस डेटा के साथ Hermes की एक और विंडो पहले से खुली है। उस विंडो पर जाएँ, या उसे बंद करके Hermes फिर से खोलें।",
     "startupProblem.dataFile": "डेटा फ़ाइल",
     "startupProblem.quit": "Hermes बंद करें",
     "common.close": "बंद करें",

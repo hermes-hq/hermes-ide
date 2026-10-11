@@ -15,6 +15,7 @@ use super::migrations::OpenError;
 #[serde(rename_all = "camelCase")]
 pub struct StartupProblem {
     /// "newer-data" | "backup-failed" | "migration-failed" | "open-failed"
+    /// | "already-running"
     pub kind: &'static str,
     pub title: &'static str,
     pub message: String,
@@ -68,6 +69,20 @@ impl StartupProblem {
             supported,
             step,
             detail,
+        }
+    }
+
+    /// Another Hermes is running on the same data (`claim_data_dir`).
+    pub fn already_running(db_path: &Path) -> Self {
+        Self {
+            kind: "already-running",
+            title: "Hermes is already running",
+            message: "Another Hermes window is already open with this data. Switch to that window, or quit it and open Hermes again.".to_string(),
+            data_path: db_path.display().to_string(),
+            found: None,
+            supported: None,
+            step: None,
+            detail: None,
         }
     }
 }

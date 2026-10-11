@@ -69,6 +69,8 @@ export const zhCNPack: LanguagePack = {
     "startupProblem.migrationFailed.message": "Hermes 无法更新其数据（步骤 {step}）。更新已撤销，你的数据未被更改：{detail}",
     "startupProblem.openFailed.title": "Hermes 无法打开你的数据",
     "startupProblem.openFailed.message": "Hermes 无法打开其数据：{detail}",
+    "startupProblem.alreadyRunning.title": "Hermes 已在运行",
+    "startupProblem.alreadyRunning.message": "另一个使用这些数据的 Hermes 窗口已经打开。请切换到该窗口，或将其退出后重新打开 Hermes。",
     "startupProblem.dataFile": "数据文件",
     "startupProblem.quit": "退出 Hermes",
     "common.close": "关闭",
