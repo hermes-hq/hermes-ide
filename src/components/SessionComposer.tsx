@@ -103,6 +103,20 @@ export function SessionComposer() {
   const [isDragOver, setIsDragOver] = useState(false);
   const [maximized, setMaximized] = useState(false);
   const [pendingImages, setPendingImages] = useState<PendingImage[]>([]);
+  // Unsent images belong to the Agent-view session they were added in: a
+  // switch to another one puts them aside and brings back its own.  A
+  // switch to a terminal session (no composer) keeps them for the way back.
+  const imagesBySession = useRef<Record<string, PendingImage[]>>({});
+  const imagesSessionId = useRef<string | null>(composerSessionId);
+  const pendingImagesRef = useRef(pendingImages);
+  pendingImagesRef.current = pendingImages;
+  useEffect(() => {
+    if (!composerSessionId || composerSessionId === imagesSessionId.current) return;
+    if (imagesSessionId.current) imagesBySession.current[imagesSessionId.current] = pendingImagesRef.current;
+    setPendingImages(imagesBySession.current[composerSessionId] ?? []);
+    delete imagesBySession.current[composerSessionId];
+    imagesSessionId.current = composerSessionId;
+  }, [composerSessionId]);
   const [pendingModel, setPendingModel] = useState<string | null>(null);
   const [modelSwitchError, setModelSwitchError] = useState<string | null>(null);
   const [pendingPerm, setPendingPerm] = useState<string | null>(null);
