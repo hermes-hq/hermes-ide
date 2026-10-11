@@ -2181,6 +2181,8 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "library_channel",
     "library_profile",
     "library_onboarded",
+    // Which 2.0 template pins the Library already carried over
+    "pinned_templates_library",
 ];
 
 #[tauri::command]
@@ -3302,6 +3304,8 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "library_last_check",
     "library_last_success",
     "library_last_error",
+    // Which 2.0 template pins were carried into the Library — per install
+    "pinned_templates_library",
 ];
 
 /// Validate a settings file path for export or import.

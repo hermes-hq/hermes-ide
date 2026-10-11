@@ -236,8 +236,7 @@ fn install_plugin_bytes(app: &tauri::AppHandle, data: Vec<u8>) -> Result<String,
         })?
         .to_string();
 
-    // Validate plugin_id doesn't contain path traversal
-    if plugin_id.contains("..") || plugin_id.contains('/') || plugin_id.contains('\\') {
+    if !is_safe_plugin_id(&plugin_id) {
         let _ = fs::remove_dir_all(&temp_dir);
         return Err("Invalid plugin ID".to_string());
     }
@@ -267,6 +266,21 @@ fn install_plugin_bytes(app: &tauri::AppHandle, data: Vec<u8>) -> Result<String,
     let _ = fs::remove_dir_all(&temp_dir);
 
     Ok(plugin_id)
+}
+
+/// A plugin id names exactly one folder inside the plugins directory: no
+/// path traversal, and not empty or dot-led (`""` and `"."` are the plugins
+/// directory itself, which installing would wipe; dot-led names are the
+/// installer's own temp folders).
+fn is_safe_plugin_id(id: &str) -> bool {
+    let mut parts = std::path::Path::new(id).components();
+    matches!(
+        (parts.next(), parts.next()),
+        (Some(std::path::Component::Normal(_)), None)
+    ) && !id.starts_with('.')
+        && !id.contains("..")
+        && !id.contains('/')
+        && !id.contains('\\')
 }
 
 /// Fetch the plugin registry JSON from a URL.
@@ -496,4 +510,19 @@ fn copy_dir_all(src: &std::path::Path, dst: &std::path::Path) -> Result<(), Stri
         }
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn plugin_ids_that_name_the_plugins_folder_itself_are_refused() {
+        for bad in ["", ".", "..", "../x", "a/b", "a\\b", ".install-tmp-1"] {
+            assert!(!is_safe_plugin_id(bad), "{bad:?} must be refused");
+        }
+        for good in ["git-status", "hermes.notes"] {
+            assert!(is_safe_plugin_id(good), "{good:?} must be accepted");
+        }
+    }
 }

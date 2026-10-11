@@ -12,6 +12,7 @@ const invokeMock = invoke as unknown as ReturnType<typeof vi.fn>;
 
 import {
   classifyRule,
+  PERMISSION_RULES_CHANGED_EVENT,
   testPattern,
   type PermissionRule,
 } from "../utils/permissionsRules";
@@ -115,5 +116,38 @@ describe("PermissionsSection — render (perm-2)", () => {
         scope: "user",
       });
     });
+  });
+
+  it("offers only scopes the backend saves: user, plus local with a project folder", async () => {
+    render(<PermissionsSection rules={[]} />);
+    fireEvent.click(screen.getByRole("button", { name: /add rule/i }));
+    expect(screen.queryByText("project")).toBeNull();
+    expect(screen.queryByText("local")).toBeNull();
+    cleanup();
+
+    render(<PermissionsSection rules={[]} projectDir="/work/app" />);
+    fireEvent.click(screen.getByRole("button", { name: /add rule/i }));
+    expect(screen.queryByText("project")).toBeNull();
+    fireEvent.click(screen.getByLabelText("local"));
+    fireEvent.change(screen.getByLabelText(/pattern/i), { target: { value: "Bash(make:*)" } });
+    fireEvent.click(screen.getByRole("button", { name: /^save rule$/i }));
+    await waitFor(() => {
+      const calls = invokeMock.mock.calls.filter(([c]) => c === "write_permission_rule");
+      expect(calls[0][1]).toMatchObject({ scope: "local", projectDir: "/work/app" });
+    });
+  });
+
+  it("a saved rule tells the rule lists to re-read", async () => {
+    const changed = vi.fn();
+    window.addEventListener(PERMISSION_RULES_CHANGED_EVENT, changed);
+    try {
+      render(<PermissionsSection rules={[]} />);
+      fireEvent.click(screen.getByRole("button", { name: /add rule/i }));
+      fireEvent.change(screen.getByLabelText(/pattern/i), { target: { value: "Read(**)" } });
+      fireEvent.click(screen.getByRole("button", { name: /^save rule$/i }));
+      await waitFor(() => expect(changed).toHaveBeenCalledTimes(1));
+    } finally {
+      window.removeEventListener(PERMISSION_RULES_CHANGED_EVENT, changed);
+    }
   });
 });

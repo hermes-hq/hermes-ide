@@ -6,6 +6,7 @@ import "../styles/components/PermissionsSection.css";
 import { useMemo, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import {
+  PERMISSION_RULES_CHANGED_EVENT,
   testPattern,
   type PermissionRule,
   type RuleKind,
@@ -14,9 +15,12 @@ import {
 
 interface Props {
   rules: PermissionRule[];
+  /** The session's folder: with one, a rule can be saved for this project
+   *  only (its `.claude/settings.local.json`). */
+  projectDir?: string | null;
 }
 
-export function PermissionsSection({ rules }: Props) {
+export function PermissionsSection({ rules, projectDir = null }: Props) {
   const [adding, setAdding] = useState(false);
   const [testInput, setTestInput] = useState("");
 
@@ -54,7 +58,7 @@ export function PermissionsSection({ rules }: Props) {
       >
         + Add rule
       </button>
-      {adding && <AddRuleDialog onClose={() => setAdding(false)} />}
+      {adding && <AddRuleDialog projectDir={projectDir} onClose={() => setAdding(false)} />}
     </div>
   );
 }
@@ -90,7 +94,15 @@ function Verdict({ verdict }: { verdict: ReturnType<typeof testPattern> }) {
   );
 }
 
-function AddRuleDialog({ onClose }: { onClose: () => void }) {
+function AddRuleDialog({
+  projectDir,
+  onClose,
+}: {
+  projectDir: string | null;
+  onClose: () => void;
+}) {
+  // Only scopes the backend writes: the shared project file is not one.
+  const scopes: RuleSource[] = projectDir ? ["user", "local"] : ["user"];
   const [pattern, setPattern] = useState("");
   const [kind, setKind] = useState<RuleKind>("allow");
   const [scope, setScope] = useState<RuleSource>("user");
@@ -123,7 +135,7 @@ function AddRuleDialog({ onClose }: { onClose: () => void }) {
       <div className="perms-add-row">
         <span className="perms-add-label">scope</span>
         <div className="perms-add-radio-row">
-          {(["user", "project"] as const).map((s) => (
+          {scopes.map((s) => (
             <label key={s} className="perms-add-radio">
               <input type="radio" checked={scope === s} onChange={() => setScope(s)} /> {s}
             </label>
@@ -145,7 +157,9 @@ function AddRuleDialog({ onClose }: { onClose: () => void }) {
                 pattern: pattern.trim(),
                 kind,
                 scope,
+                projectDir,
               });
+              window.dispatchEvent(new Event(PERMISSION_RULES_CHANGED_EVENT));
               onClose();
             } catch (err) {
               setError(err instanceof Error ? err.message : String(err));
