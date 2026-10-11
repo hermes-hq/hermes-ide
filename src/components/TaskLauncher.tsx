@@ -1259,7 +1259,7 @@ export function TaskLauncher({
     controlRef.current = {
       launch: () => launch(false),
       keepAsDraft: () => {
-        if (choice) saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode });
+        if (choice) saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode, ...(attachments.length > 0 ? { attachments } : {}) });
       },
     };
   }

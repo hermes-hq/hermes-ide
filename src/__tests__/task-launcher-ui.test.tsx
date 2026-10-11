@@ -67,7 +67,7 @@ vi.mock("../api/settings", () => ({
   getSettings: vi.fn(async () => Object.fromEntries(h.settings)),
 }));
 
-import { TaskLauncher, type TaskLaunchRequest, type TaskLaunchResult } from "../components/TaskLauncher";
+import { TaskLauncher, type TaskLauncherControl, type TaskLaunchRequest, type TaskLaunchResult } from "../components/TaskLauncher";
 import { I18nProvider } from "../i18n/I18nProvider";
 import { __resetDoctorForTest } from "../launcher/doctorStore";
 import { fakeCapabilityCommands } from "./fakes/capabilityCommands";
@@ -1223,6 +1223,18 @@ describe("TaskLauncher: attachments", () => {
     await settle();
     expect(task().value).toBe("Rename formatDate");
     expect(chips()).toEqual([]);
+  });
+
+  it("the welcome's Keep as draft keeps the attachments too", async () => {
+    const controlRef: { current: TaskLauncherControl | null } = { current: null };
+    const first = await open({ inline: true, controlRef });
+    await typeTask("Match this mockup");
+    await pasteImage();
+    act(() => controlRef.current?.keepAsDraft());
+    first.ui.unmount();
+    await open();
+    expect(task()).toHaveValue("Match this mockup");
+    expect(chips()).toEqual(["/fixture-data/attachments/1-a/pasted-image-1.png"]);
   });
 
   it("the attachments come back with the draft after a close", async () => {
