@@ -2,7 +2,6 @@ import "../styles/components/agent/AgentSessionView.css";
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
 import { listen } from "@tauri-apps/api/event";
 import type {
-  AgentEvent,
   ContentBlock,
   ToolResultBlockData,
   ToolUseBlockData,
@@ -646,7 +645,7 @@ function InteractivePermissionDispatcher({
     // recovery path).
     sendAgentEnvelope(sessionId, env)
       .then(() => {
-        store.clearPendingPermRequest();
+        store.clearPendingPermRequest(cached.id);
       })
       .catch((err) => {
         console.warn("[perm] bypass auto-allow send failed:", err);
@@ -655,7 +654,7 @@ function InteractivePermissionDispatcher({
         // intentionally do NOT release `lastBypassSentId` here: the
         // request is back in the store and the effect would otherwise
         // re-fire and loop forever auto-retrying a broken send.
-        store.injectEvent(cached as unknown as AgentEvent);
+        store.restorePendingPermRequest(cached);
         setSendError({
           requestId: cached.id,
           message: err instanceof Error ? err.message : String(err),
@@ -692,14 +691,14 @@ function InteractivePermissionDispatcher({
     // send fails we restore the request via the store and surface
     // an error banner (also fix H6 — used to be silent console.warn).
     const cached = request;
-    store.clearPendingPermRequest();
+    store.clearPendingPermRequest(request.id);
     setSendError(null);
     sendAgentEnvelope(sessionId, env)
       .catch((err) => {
         console.warn("[perm] send failed:", err);
         // Re-surface the request — the bridge is still waiting and
         // the user needs another shot at deciding.
-        store.injectEvent(cached as unknown as AgentEvent);
+        store.restorePendingPermRequest(cached);
         setSendError({
           requestId: cached.id,
           message: err instanceof Error ? err.message : String(err),
