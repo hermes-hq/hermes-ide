@@ -37,6 +37,11 @@ export function useFileEditor(opts: UseFileEditorOptions): UseFileEditorReturn {
 	const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
 	const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const contentRef = useRef(content);
+	// The text on disk as of the last successful write, and the save in
+	// flight: a save started before the last one returned waits for it and
+	// then expects what it wrote, not the text loaded before it.
+	const originalRef = useRef(initialContent);
+	const saveChain = useRef<Promise<boolean>>(Promise.resolve(true));
 
 	const isDirty = content !== originalContent;
 
@@ -52,6 +57,7 @@ export function useFileEditor(opts: UseFileEditorOptions): UseFileEditorReturn {
 	useEffect(() => {
 		setContentState(initialContent);
 		setOriginalContent(initialContent);
+		originalRef.current = initialContent;
 		setMtime(initialMtime);
 		contentRef.current = initialContent;
 		setSaveError(null);
@@ -59,9 +65,9 @@ export function useFileEditor(opts: UseFileEditorOptions): UseFileEditorReturn {
 		setLastSavedAt(null);
 	}, [filePath, initialContent, initialMtime]);
 
-	const doSave = useCallback(async (force = false): Promise<boolean> => {
+	const writeOnce = useCallback(async (force: boolean): Promise<boolean> => {
 		const currentContent = contentRef.current;
-		if (currentContent === originalContent) return true;
+		if (currentContent === originalRef.current) return true;
 
 		setIsSaving(true);
 		setSaveError(null);
@@ -70,9 +76,10 @@ export function useFileEditor(opts: UseFileEditorOptions): UseFileEditorReturn {
 				await sshWriteFile(sessionId, filePath, currentContent);
 			} else {
 				// Only write over the text this editor loaded (or last saved).
-				const newMtime = await writeFileContent(sessionId, projectId, filePath, currentContent, force ? null : originalContent);
+				const newMtime = await writeFileContent(sessionId, projectId, filePath, currentContent, force ? null : originalRef.current);
 				setMtime(newMtime);
 			}
+			originalRef.current = currentContent;
 			setOriginalContent(currentContent);
 			setChangedOnDisk(false);
 			setLastSavedAt(Date.now());
@@ -85,7 +92,12 @@ export function useFileEditor(opts: UseFileEditorOptions): UseFileEditorReturn {
 		} finally {
 			setIsSaving(false);
 		}
-	}, [sessionId, projectId, filePath, isSSH, originalContent]);
+	}, [sessionId, projectId, filePath, isSSH]);
+
+	const doSave = useCallback((force = false): Promise<boolean> => {
+		saveChain.current = saveChain.current.then(() => writeOnce(force));
+		return saveChain.current;
+	}, [writeOnce]);
 
 	// Immediate save (Cmd+S) — returns true if save succeeded or was unnecessary
 	const save = useCallback(async (): Promise<boolean> => {
