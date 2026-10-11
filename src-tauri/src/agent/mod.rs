@@ -1264,7 +1264,25 @@ async fn close_child(sessions_handle: &SessionMap, session_id: &str) -> Result<(
 
     let mut child = match entry.child.take() {
         Some(c) => c,
-        None => return Ok(()),
+        None => {
+            // The child waiter owns the process. Dropping it SIGKILLs the
+            // bridge before its SDK stops the `claude` process it started,
+            // which then finishes the turn on its own. Interrupt the bridge
+            // instead (it aborts the turn and exits, stopping `claude`) and
+            // give it a second; the waiter, finding no entry, stays quiet.
+            if let (Some(pid), Some(waiter)) = (entry.pid, entry.task_handles.pop()) {
+                signal_agent_pid(pid, false);
+                for _ in 0..10 {
+                    if waiter.is_finished() {
+                        break;
+                    }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+                waiter.abort();
+                let _ = waiter.await;
+            }
+            return Ok(());
+        }
     };
 
     match timeout(Duration::from_secs(1), child.wait()).await {
@@ -1426,7 +1444,11 @@ async fn await_child_exit(sessions: SessionMap, app: AppHandle, session_id: Stri
     #[cfg(not(unix))]
     let signal: Option<i32> = None;
 
-    sessions.lock().await.remove(&session_id);
+    // No entry: `close_child` stopped this process on purpose; a restart
+    // must not hear the old process's exit as the new one's.
+    if sessions.lock().await.remove(&session_id).is_none() {
+        return;
+    }
 
     let _ = app.emit(
         &format!("agent-exit-{}", session_id),
@@ -2576,6 +2598,63 @@ mod tests {
         force_stop(Arc::clone(&map), "s1").await.unwrap();
         assert!(started.elapsed() < Duration::from_millis(1500));
         assert_eq!(waiter.join().unwrap(), Some(libc::SIGINT));
+    }
+
+    /// A bridge stand-in: starts a long "claude" child and, like the real
+    /// bridge, stops it and exits on SIGINT. Returns it with that child's pid.
+    #[cfg(unix)]
+    async fn bridge_with_child() -> (Child, i32) {
+        let mut bridge = Command::new("/bin/sh")
+            .args([
+                "-c",
+                "trap 'kill $kid; exit 2' INT; /bin/sleep 30 & kid=$!; echo $kid; wait",
+            ])
+            .stdout(Stdio::piped())
+            .kill_on_drop(true)
+            .spawn()
+            .unwrap();
+        let mut line = String::new();
+        BufReader::new(bridge.stdout.take().unwrap())
+            .read_line(&mut line)
+            .await
+            .unwrap();
+        (bridge, line.trim().parse().unwrap())
+    }
+
+    #[cfg(unix)]
+    fn alive(pid: i32) -> bool {
+        // Safety: signal 0 only checks that the process exists.
+        unsafe { libc::kill(pid, 0) == 0 }
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn closing_a_busy_agent_stops_the_claude_process_it_started() {
+        let (mut bridge, claude) = bridge_with_child().await;
+        let map = registered(bridge.id().unwrap());
+        // The child waiter owns the process, as in `spawn_child`.
+        let waiter = tokio::spawn(async move {
+            let _ = bridge.wait().await;
+        });
+        map.lock()
+            .await
+            .get_mut("s1")
+            .unwrap()
+            .task_handles
+            .push(waiter);
+        close_child(&map, "s1").await.unwrap();
+        let mut stopped = false;
+        for _ in 0..20 {
+            if !alive(claude) {
+                stopped = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        if !stopped {
+            signal_agent_pid(claude as u32, true);
+        }
+        assert!(stopped, "the agent's own claude process outlived the close");
     }
 
     #[tokio::test]
