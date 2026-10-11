@@ -716,6 +716,10 @@ struct AgentLaunch {
 /// after this.
 const LAUNCH_WAITS_FOR_SIZE: std::time::Duration = std::time::Duration::from_secs(2);
 
+/// How long an agent's launch line waits for its session's turn-ledger
+/// baseline (see `crate::turn_ledger::wait_for_baseline`).
+const LAUNCH_WAITS_FOR_BASELINE: std::time::Duration = std::time::Duration::from_secs(3);
+
 /// Type the agent's launch line, once the terminal has its real size.
 ///
 /// The PTY opens at a size the frontend estimates; the pane then measures
@@ -735,6 +739,11 @@ fn type_agent_launch(
     watch_not_found: bool,
 ) {
     crate::pty::wait_until(sized, LAUNCH_WAITS_FOR_SIZE);
+    // Turn ledger (F20): the worktree is read before the agent can edit it,
+    // or the agent's first edits would count as where the session started.
+    if let Some(id) = session.lock().ok().map(|s| s.id.clone()) {
+        crate::turn_ledger::wait_for_baseline(app, &id, LAUNCH_WAITS_FOR_BASELINE);
+    }
     let gone = session.lock().map_or(true, |s| {
         matches!(
             s.phase,

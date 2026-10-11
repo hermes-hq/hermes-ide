@@ -54,7 +54,8 @@ pub const TURN_LEDGER_EVENT: &str = "hermes:turn-ledger";
 pub const KILL_SWITCH_SETTING: &str = "turn_ledger";
 
 /// A baseline is taken once per session start on a cold private index; it
-/// may take longer than a turn and nobody waits for it.
+/// may take longer than a turn, and only an agent's launch line waits for
+/// it, briefly (see [`wait_for_baseline`]).
 const BASELINE_BUDGET: Duration = Duration::from_secs(30);
 
 /// Refs of sessions closed this long ago are collected.
@@ -209,6 +210,12 @@ pub struct TurnLedger {
     /// edits to the agent).
     order: Mutex<HashMap<String, Tickets>>,
     order_cv: Condvar,
+    /// Sessions whose start baseline is still being read. An agent's launch
+    /// line waits for it (see [`wait_for_baseline`]): an agent at work
+    /// before the read would have its first edits taken for the worktree
+    /// the session started from, and its first turn would show nothing.
+    baselines: Mutex<HashSet<String>>,
+    baselines_cv: Condvar,
 }
 
 #[derive(Debug, Default, Clone, Copy)]
@@ -253,7 +260,45 @@ impl TurnLedger {
             queued: Mutex::new(HashSet::new()),
             order: Mutex::new(HashMap::new()),
             order_cv: Condvar::new(),
+            baselines: Mutex::new(HashSet::new()),
+            baselines_cv: Condvar::new(),
         }
+    }
+
+    /// A session's start baseline is being read from now on.
+    fn baseline_pending(&self, session_id: &str) {
+        self.baselines
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .insert(session_id.to_string());
+    }
+
+    /// A session's start baseline was read (or failed, or was not needed).
+    fn baseline_done(&self, session_id: &str) {
+        self.baselines
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .remove(session_id);
+        self.baselines_cv.notify_all();
+    }
+
+    /// Wait until the session's start baseline was read, at most `cap`.
+    /// True when it was (or none is being read).
+    pub fn wait_for_baseline(&self, session_id: &str, cap: Duration) -> bool {
+        let deadline = std::time::Instant::now() + cap;
+        let mut pending = self.baselines.lock().unwrap_or_else(|p| p.into_inner());
+        while pending.contains(session_id) {
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return false;
+            }
+            pending = self
+                .baselines_cv
+                .wait_timeout(pending, deadline - now)
+                .unwrap_or_else(|p| p.into_inner())
+                .0;
+        }
+        true
     }
 
     /// Take the session's next place in line, when its job is asked for.
@@ -1173,17 +1218,50 @@ pub fn on_session_started(app: &AppHandle, session_id: &str, cwd: &str) {
     }
     let sid = session_id.to_string();
     let cwd = PathBuf::from(cwd);
+    ledger.baseline_pending(session_id);
+    // Done however the job ends, even when it never runs (dropped unrun).
+    let done = BaselineDone {
+        app: app.clone(),
+        session_id: sid.clone(),
+    };
     spawn_in_order(
         app,
         &ledger,
         session_id,
         "baseline",
         move |_, state, ledger| {
+            let _done = done;
             if let Err(e) = ledger.ensure_baseline(&state.db, &sid, &cwd) {
                 log::warn!("[turn-ledger] baseline for {sid}: {e}");
             }
         },
     );
+}
+
+/// Marks a session's start baseline done when dropped.
+struct BaselineDone {
+    app: AppHandle,
+    session_id: String,
+}
+
+impl Drop for BaselineDone {
+    fn drop(&mut self) {
+        if let Some(ledger) = self.app.try_state::<TurnLedger>() {
+            ledger.baseline_done(&self.session_id);
+        }
+    }
+}
+
+/// An agent's launch line waits for its session's start baseline, at most
+/// `cap` (a large repository on a cold index can take longer; its agent
+/// then starts without it, as before).
+pub fn wait_for_baseline(app: &AppHandle, session_id: &str, cap: Duration) {
+    let Some(ledger) = app.try_state::<TurnLedger>() else {
+        return;
+    };
+    if !ledger.wait_for_baseline(session_id, cap) {
+        log::debug!("[turn-ledger] {session_id}: the agent starts before its baseline was read");
+    }
 }
 
 /// A turn began. `exact` when the agent itself said so. The worktree as it
@@ -1634,6 +1712,58 @@ mod tests {
             Some(base.clone())
         );
         assert_eq!(t.repo.parent_of(&base), t.repo.rev_parse("HEAD"));
+    }
+
+    /// F20 step F on a slow machine: the start baseline is read in the
+    /// background, and an agent launched before that read ended, editing at
+    /// once, had its edit taken for the worktree the session started from;
+    /// its turn then showed nothing. The launch waits for the read.
+    #[test]
+    fn an_agent_launched_after_the_start_baseline_keeps_its_first_edit_in_turn_one() {
+        let t = TestRepo::new();
+        let (_d, db) = open_db();
+        let db = Mutex::new(db);
+        let l = ledger();
+        l.baseline_pending("s1");
+        std::thread::scope(|scope| {
+            // The baseline worker, slow to get to the worktree.
+            scope.spawn(|| {
+                std::thread::sleep(Duration::from_millis(300));
+                l.ensure_baseline(&db, "s1", t.root()).unwrap();
+                l.baseline_done("s1");
+            });
+            assert!(
+                l.wait_for_baseline("s1", Duration::from_secs(20)),
+                "the launch waits until the baseline was read"
+            );
+            // The agent, launched now, edits at once.
+            write(t.root(), "README.md", "# demo\nguessed\n");
+        });
+        let turn = recorded(l.record_turn(&db, "s1", t.root(), None, 2000).unwrap());
+        assert_eq!(turn.diffstat.files, 1, "{turn:?}");
+        let diff = l.turn_diff(&db, "s1", 1, Some(t.root())).unwrap().unwrap();
+        assert!(diff.patch.contains("+guessed"), "{}", diff.patch);
+    }
+
+    #[test]
+    fn waiting_for_a_baseline_is_bounded_and_free_when_none_is_read() {
+        let l = ledger();
+        let started = Instant::now();
+        assert!(l.wait_for_baseline("s1", Duration::from_secs(20)));
+        assert!(
+            started.elapsed() < Duration::from_secs(1),
+            "no baseline pending: no wait"
+        );
+        l.baseline_pending("s1");
+        let started = Instant::now();
+        assert!(!l.wait_for_baseline("s1", Duration::from_millis(200)));
+        assert!(started.elapsed() >= Duration::from_millis(200));
+        assert!(
+            l.wait_for_baseline("s2", Duration::from_secs(20)),
+            "per session"
+        );
+        l.baseline_done("s1");
+        assert!(l.wait_for_baseline("s1", Duration::from_millis(1)));
     }
 
     #[test]
