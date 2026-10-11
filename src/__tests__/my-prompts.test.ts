@@ -131,6 +131,20 @@ describe("changes", () => {
     expect(seen).toEqual([1, 1, 1, 1]);
     expect(JSON.parse(settings.my_prompts)).toHaveLength(1);
   });
+
+  it("reads the list again after a settings import changed it, so a later change keeps the import", async () => {
+    settings.my_prompts = JSON.stringify([{ id: "mine-1", kind: "prompt", title: "Here", description: "", text: "a", createdAt: 1, updatedAt: 1 }]);
+    settings.my_prompts_migrated = "[]";
+    expect(await m.loadMyPrompts()).toHaveLength(1);
+    const seen: string[][] = [];
+    m.onMyPromptsChange((list) => seen.push(list.map((x) => x.id)));
+    // What the import wrote: this machine's prompt plus one from the file.
+    settings.my_prompts = JSON.stringify([...JSON.parse(settings.my_prompts), { id: "mine-2", kind: "prompt", title: "There", description: "", text: "b", createdAt: 2, updatedAt: 2 }]);
+    await m.reloadMyPrompts();
+    expect(seen).toEqual([["mine-1", "mine-2"]]);
+    await m.recordMyUse("mine-1", 7);
+    expect(JSON.parse(settings.my_prompts).map((x: { id: string }) => x.id)).toEqual(["mine-1", "mine-2"]);
+  });
 });
 
 describe("files", () => {

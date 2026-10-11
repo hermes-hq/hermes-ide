@@ -2407,6 +2407,51 @@ mod tests {
     }
 
     #[test]
+    fn importing_settings_adds_to_my_prompts_instead_of_replacing_them() {
+        let db = test_db();
+        db.set_setting(
+            "my_prompts",
+            r#"[{"id":"mine-1","title":"Here","updatedAt":5},{"id":"mine-2","title":"Old","updatedAt":1}]"#,
+        )
+        .unwrap();
+        db.set_setting("my_prompts_migrated", r#"["user-1"]"#)
+            .unwrap();
+        let imported: HashMap<String, String> = [
+            (
+                "my_prompts",
+                r#"[{"id":"mine-2","title":"Newer","updatedAt":9},{"id":"mine-3","title":"There","updatedAt":2},{"id":"mine-1","title":"Stale","updatedAt":1}]"#,
+            ),
+            ("my_prompts_migrated", r#"["user-2","user-1"]"#),
+            ("theme", "light"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect();
+        assert_eq!(apply_imported_settings(&db, &imported).unwrap(), 3);
+
+        let mine: Vec<serde_json::Value> =
+            serde_json::from_str(&db.get_setting("my_prompts").unwrap().unwrap()).unwrap();
+        let titles: Vec<&str> = mine.iter().map(|m| m["title"].as_str().unwrap()).collect();
+        assert_eq!(titles, vec!["Here", "Newer", "There"]);
+        assert_eq!(
+            db.get_setting("my_prompts_migrated").unwrap().as_deref(),
+            Some(r#"["user-1","user-2"]"#)
+        );
+        assert_eq!(db.get_setting("theme").unwrap().as_deref(), Some("light"));
+    }
+
+    #[test]
+    fn importing_my_prompts_onto_an_empty_machine_takes_the_list_as_is() {
+        let db = test_db();
+        let list = r#"[{"id":"mine-1","updatedAt":1}]"#;
+        let imported: HashMap<String, String> = [("my_prompts".to_string(), list.to_string())]
+            .into_iter()
+            .collect();
+        apply_imported_settings(&db, &imported).unwrap();
+        assert_eq!(db.get_setting("my_prompts").unwrap().as_deref(), Some(list));
+    }
+
+    #[test]
     fn a_project_pin_changes_every_session_on_that_project() {
         let db = test_db();
         db.insert_project("p1", "/work/one", "one", "[]", "[]")
@@ -3396,8 +3441,23 @@ pub fn import_settings(
     }
 
     let db = state.db.lock().map_err(|e| e.to_string())?;
+    let applied = apply_imported_settings(&db, &imported)?;
+    log::info!("Imported {} settings from {}", applied, validated.display());
+    db.get_all_settings()
+}
+
+/// Settings that hold lists the person builds up on this machine (their own
+/// prompts, and which 2.0 ids already moved into them): an import adds to
+/// them instead of replacing them.
+const MERGED_ON_IMPORT_KEYS: &[&str] = &["my_prompts", "my_prompts_migrated"];
+
+/// Writes the valid keys of an import file. Returns how many were written.
+fn apply_imported_settings(
+    db: &Database,
+    imported: &HashMap<String, String>,
+) -> Result<u32, String> {
     let mut applied = 0u32;
-    for (key, value) in &imported {
+    for (key, value) in imported {
         // Skip metadata keys (prefixed with _hermes_)
         if key.starts_with("_hermes_") {
             continue;
@@ -3405,11 +3465,49 @@ pub fn import_settings(
         if !VALID_SETTING_KEYS.contains(&key.as_str()) {
             continue; // Skip unknown keys silently during import
         }
-        db.set_setting(key, value)?;
+        if MERGED_ON_IMPORT_KEYS.contains(&key.as_str()) {
+            let local = db.get_setting(key)?;
+            db.set_setting(key, &merge_imported_list(local.as_deref(), value))?;
+        } else {
+            db.set_setting(key, value)?;
+        }
         applied += 1;
     }
-    log::info!("Imported {} settings from {}", applied, validated.display());
-    db.get_all_settings()
+    Ok(applied)
+}
+
+/// The JSON list `imported` added to `local`. An item already here (same
+/// `id`, or the same string) is replaced only when the imported one has a
+/// later `updatedAt`. A list that does not parse is left out.
+fn merge_imported_list(local: Option<&str>, imported: &str) -> String {
+    use serde_json::Value;
+    let parse = |raw: &str| serde_json::from_str::<Vec<Value>>(raw).ok();
+    let Some(mut merged) = local.and_then(parse) else {
+        return imported.to_string();
+    };
+    let Some(incoming) = parse(imported) else {
+        return local.unwrap_or_default().to_string();
+    };
+    let id = |v: &Value| match v {
+        Value::Object(o) => o.get("id").and_then(Value::as_str).map(str::to_string),
+        Value::String(s) => Some(s.clone()),
+        _ => None,
+    };
+    let updated = |v: &Value| v.get("updatedAt").and_then(Value::as_f64).unwrap_or(0.0);
+    for item in incoming {
+        let Some(item_id) = id(&item) else {
+            continue;
+        };
+        match merged.iter().position(|m| id(m) == Some(item_id.clone())) {
+            Some(i) => {
+                if updated(&item) > updated(&merged[i]) {
+                    merged[i] = item;
+                }
+            }
+            None => merged.push(item),
+        }
+    }
+    serde_json::to_string(&merged).unwrap_or_else(|_| imported.to_string())
 }
 
 // ── Prompt Bundle Export / Import ─────────────────────────────────────

@@ -252,6 +252,13 @@ export async function recordMyUse(id: string, now = Date.now()): Promise<void> {
   await write(list.map((m) => (m.id === id ? { ...m, lastUsedAt: now, useCount: (m.useCount ?? 0) + 1 } : m)));
 }
 
+/** The stored list changed underneath (a settings import): read it again and tell listeners. */
+export async function reloadMyPrompts(): Promise<void> {
+  cache = null;
+  const list = await loadMyPrompts();
+  for (const fn of listeners) fn(list);
+}
+
 /** Test hook: forget the cached list. */
 export function resetMyPromptsCache(): void {
   cache = null;
