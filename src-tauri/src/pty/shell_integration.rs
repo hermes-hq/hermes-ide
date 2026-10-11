@@ -46,6 +46,8 @@ _hermes_user="${HERMES_ORIGINAL_ZDOTDIR:-$HOME}"
 # Temporarily point ZDOTDIR at the user's dir while sourcing their .zshenv
 ZDOTDIR="$_hermes_user"
 [[ -f "$_hermes_user/.zshenv" ]] && source "$_hermes_user/.zshenv"
+# The user's .zshenv may move ZDOTDIR (XDG layout): the later files live there
+export HERMES_ORIGINAL_ZDOTDIR="${ZDOTDIR:-$HOME}"
 # Re-point ZDOTDIR to Hermes temp dir so zsh finds our .zprofile next
 ZDOTDIR="$_HERMES_ZDOTDIR"
 "#;
@@ -913,6 +915,59 @@ mod tests {
         assert!(ZSH_ZLOGIN.contains("export ZDOTDIR="));
         assert!(ZSH_ZLOGIN.contains("unset _HERMES_ZDOTDIR"));
         assert!(ZSH_ZLOGIN.contains("unset") && ZSH_ZLOGIN.contains("HERMES_ORIGINAL_ZDOTDIR"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn zsh_follows_a_zdotdir_set_in_the_users_zshenv() {
+        // XDG layout: ~/.zshenv sets ZDOTDIR and the real config lives there.
+        // The app itself has no ZDOTDIR, so Hermes seeds HOME.
+        let home = tempfile::tempdir().unwrap();
+        let home = home.path().canonicalize().unwrap();
+        let xdg = home.join(".config").join("zsh");
+        std::fs::create_dir_all(&xdg).unwrap();
+        std::fs::write(
+            home.join(".zshenv"),
+            "export ZDOTDIR=\"$HOME/.config/zsh\"\n",
+        )
+        .unwrap();
+        for f in ["zprofile", "zshrc", "zlogin"] {
+            std::fs::write(xdg.join(format!(".{f}")), format!("echo user-{f}\n")).unwrap();
+        }
+        let tmp = home.join("hermes-zdotdir");
+        std::fs::create_dir_all(&tmp).unwrap();
+        for (name, body) in [
+            (".zshenv", ZSH_ZSHENV.to_string()),
+            (".zprofile", ZSH_ZPROFILE.to_string()),
+            (".zshrc", zsh_zshrc(false)),
+            (".zlogin", ZSH_ZLOGIN.to_string()),
+        ] {
+            std::fs::write(tmp.join(name), body).unwrap();
+        }
+        // -d skips the system-wide rc files.
+        let Ok(out) = std::process::Command::new("zsh")
+            .args(["-d", "-l", "-i", "-c", "echo ZDOTDIR=$ZDOTDIR"])
+            .env_clear()
+            .env("HOME", &home)
+            .env("PATH", "/usr/bin:/bin")
+            .env("ZDOTDIR", &tmp)
+            .env("_HERMES_ZDOTDIR", &tmp)
+            .env("HERMES_ORIGINAL_ZDOTDIR", &home)
+            .output()
+        else {
+            return;
+        };
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        for f in ["zprofile", "zshrc", "zlogin"] {
+            assert!(
+                stdout.contains(&format!("user-{f}")),
+                "{f} missing: {stdout}"
+            );
+        }
+        assert!(
+            stdout.contains(&format!("ZDOTDIR={}", xdg.display())),
+            "{stdout}"
+        );
     }
 
     #[test]

@@ -1505,11 +1505,12 @@ pub fn create_session(
     // UTF-8 bytes like 0xC3 0xA3 (ã) as two meta-key sequences (Meta-C +
     // Meta-#) instead of a single Unicode character.  macOS GUI apps don't
     // inherit terminal locale vars, so we must set them explicitly.
-    if std::env::var("LANG").unwrap_or_default().is_empty() {
-        cmd.env("LANG", "en_US.UTF-8");
-    }
-    if std::env::var("LC_CTYPE").unwrap_or_default().is_empty() {
-        cmd.env("LC_CTYPE", "UTF-8");
+    for (key, value) in locale_defaults(
+        std::env::consts::OS,
+        &std::env::var("LANG").unwrap_or_default(),
+        &std::env::var("LC_CTYPE").unwrap_or_default(),
+    ) {
+        cmd.env(key, value);
     }
 
     // Suppress zsh's PROMPT_SP indicator (the inverse `%` shown when the
@@ -5300,6 +5301,43 @@ mod tests {
 /// prediction off, so Hermes suggestions must stay on there.
 fn powershell_predicts_by_default(shell: &str) -> bool {
     shell.to_ascii_lowercase().contains("pwsh")
+}
+
+/// The locale variables a new terminal gets when the app's own environment
+/// leaves them empty, on `os` (`std::env::consts::OS`).  LC_CTYPE=UTF-8 is a
+/// valid locale on macOS but not in glibc, where it makes every program fall
+/// back to ASCII; en_US.UTF-8 is often not generated on Linux, C.UTF-8 is.
+fn locale_defaults(os: &str, lang: &str, lc_ctype: &str) -> Vec<(&'static str, &'static str)> {
+    let mut env = Vec::new();
+    if os == "linux" {
+        if lang.is_empty() {
+            env.push(("LANG", "C.UTF-8"));
+        }
+        return env;
+    }
+    if lang.is_empty() {
+        env.push(("LANG", "en_US.UTF-8"));
+    }
+    if lc_ctype.is_empty() {
+        env.push(("LC_CTYPE", "UTF-8"));
+    }
+    env
+}
+
+#[cfg(test)]
+mod locale_defaults_tests {
+    use super::locale_defaults;
+
+    #[test]
+    fn linux_never_gets_the_macos_only_utf8_ctype() {
+        assert!(locale_defaults("linux", "en_US.UTF-8", "").is_empty());
+        assert_eq!(locale_defaults("linux", "", ""), vec![("LANG", "C.UTF-8")]);
+        assert_eq!(
+            locale_defaults("macos", "", ""),
+            vec![("LANG", "en_US.UTF-8"), ("LC_CTYPE", "UTF-8")]
+        );
+        assert!(locale_defaults("macos", "de_DE.UTF-8", "UTF-8").is_empty());
+    }
 }
 
 #[cfg(test)]
