@@ -2,12 +2,12 @@
 // bridge server: the token travels with every request, refusals surface as
 // errors, script failures inside the app become errors, and waits poll.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { deflateSync } from "node:zlib";
-import { Bridge, e2eDataDir, inheritedEnv, pngColourCount, pngFlatColour, pngPixel, pngPixels, prepareAppHome, E2E_IDENTIFIER } from "./harness.mjs";
+import { Bridge, e2eDataDir, inheritedEnv, launchApp, pngColourCount, pngFlatColour, pngPixel, pngPixels, prepareAppHome, sleep, E2E_IDENTIFIER } from "./harness.mjs";
 
 const TOKEN = "t".repeat(64);
 let server;
@@ -338,5 +338,66 @@ describe("prepareAppHome", () => {
     const kept = prepareAppHome({ home: "real", resetData: false, privateTmp: root, reset });
     expect(resets).toBe(1);
     expect(kept.dataDir).toBe(e2eDataDir());
+  });
+});
+
+// An app that dies by itself mid-scenario: the log says so with its exit code
+// (a Windows crash names its class by it), and exitInfo() hands it to the
+// scenario. A stand-in app (node, behind a POSIX shell script) serves the
+// bridge; POST /crash makes it exit with code 3.
+describe.skipIf(process.platform === "win32")("launchApp and an app that exits by itself", () => {
+  let root;
+  let binary;
+  beforeAll(() => {
+    root = mkdtempSync(join(tmpdir(), "hermes-exit-"));
+    const script = join(root, "stand-in-app.mjs");
+    writeFileSync(
+      script,
+      `import { createServer } from "node:http";
+import { writeFileSync } from "node:fs";
+const token = "s".repeat(64);
+const server = createServer((req, res) => {
+  req.resume();
+  req.on("end", () => {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    if (req.url === "/health") return res.end(JSON.stringify({ ok: true, identifier: ${JSON.stringify(E2E_IDENTIFIER)}, pid: process.pid, version: "0.0.0" }));
+    if (req.url === "/eval") return res.end(JSON.stringify({ ok: true, value: true }));
+    res.end("{}");
+    if (req.url === "/crash") setTimeout(() => process.exit(3), 20);
+    if (req.url === "/quit") setTimeout(() => process.exit(0), 20);
+  });
+});
+server.listen(0, "127.0.0.1", () => writeFileSync(process.env.HERMES_E2E_BRIDGE_FILE, JSON.stringify({ port: server.address().port, token, pid: process.pid })));
+`,
+    );
+    binary = join(root, "hermes-ide-e2e");
+    writeFileSync(binary, `#!/bin/sh\nexec "${process.execPath}" "${script}"\n`);
+    chmodSync(binary, 0o755);
+  });
+  afterAll(() => rmSync(root, { recursive: true, force: true }));
+
+  const launch = async (name, lines) => {
+    const app = await launchApp({ runDir: join(root, name), binary, flagDefaults: null, log: (m) => lines.push(m) });
+    return app;
+  };
+
+  it("logs the exit code of an exit nobody asked for, and exitInfo returns it", async () => {
+    const lines = [];
+    const app = await launch("crash", lines);
+    expect(app.exitInfo()).toBe(null);
+    await app.bridge.request("POST", "/crash", {});
+    for (let i = 0; i < 100 && app.isRunning(); i++) await sleep(50);
+    expect(app.isRunning()).toBe(false);
+    expect(app.exitInfo()).toEqual({ code: 3, signal: null });
+    expect(lines).toContain('app exited without stop(): {"code":3,"signal":null}');
+    await app.stop();
+  });
+
+  it("stays quiet when stop() quit the app", async () => {
+    const lines = [];
+    const app = await launch("quit", lines);
+    expect(await app.stop()).toEqual({ code: 0, signal: null });
+    expect(app.exitInfo()).toEqual({ code: 0, signal: null });
+    expect(lines.some((l) => l.includes("without stop()"))).toBe(false);
   });
 });

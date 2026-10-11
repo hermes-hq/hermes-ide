@@ -670,8 +670,13 @@ export async function launchApp({
   });
   closeSync(fd);
   let exited = null;
+  let stopping = false;
   child.on("exit", (code, signal) => {
     exited = { code, signal };
+    // A crash names itself by its code (on Windows 3221225477 is an access
+    // violation, 3221225725 a stack overflow); a quit asked for elsewhere
+    // (bridge.quit() in a scenario) logs here too.
+    if (!stopping) log(`app exited without stop(): ${JSON.stringify(exited)}`);
   });
   log(`launched ${binary} (pid ${child.pid}); app log: ${appLog}`);
   log(`home folder: ${home}; app data folder: ${dataDir}`);
@@ -728,6 +733,7 @@ export async function launchApp({
   // quitting did before terminals could outlive the app. False leaves the
   // question to the scenario.
   const stop = async ({ keepFiles = false, stopPrograms = true } = {}) => {
+    stopping = true;
     if (!exited) {
       await bridge.quit();
       const until = Date.now() + 10_000;
@@ -755,7 +761,7 @@ export async function launchApp({
     return exited;
   };
 
-  return { bridge, child, stop, cleanup: cleanTmp, isRunning: () => !exited, appLog, tmpDir: appTmp, dataDir };
+  return { bridge, child, stop, cleanup: cleanTmp, isRunning: () => !exited, exitInfo: () => exited, appLog, tmpDir: appTmp, dataDir };
 }
 
 // ─── In-page helpers (sent along with every script) ──────────────────
