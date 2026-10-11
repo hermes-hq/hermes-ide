@@ -140,12 +140,15 @@ export function useFleetControls({ enabled, ready = true, sessions, startTask, t
   // (in flight, or created but not rendered): each holds a slot.
   const inFlightRef = useRef(0);
   const pendingIdsRef = useRef(new Set<string>());
-  const starting = useCallback(() => {
+  const dropListedPending = useCallback(() => {
     for (const id of [...pendingIdsRef.current]) {
       if (sessionsRef.current.some((s) => s.id === id)) pendingIdsRef.current.delete(id);
     }
-    return inFlightRef.current + pendingIdsRef.current.size;
   }, []);
+  const starting = useCallback(() => {
+    dropListedPending();
+    return inFlightRef.current + pendingIdsRef.current.size;
+  }, [dropListedPending]);
 
   const watcher = useMemo(
     () =>
@@ -303,10 +306,13 @@ export function useFleetControls({ enabled, ready = true, sessions, startTask, t
     };
   }, [enabled, idsKey, watcher, pumpQueue]);
 
-  // Session phases and startup states change without an event.
+  // Session phases and startup states change without an event. A pending
+  // id is dropped as soon as the list shows it, even with nothing waiting:
+  // a session closed before the next queue check must not hold a slot.
   useEffect(() => {
+    dropListedPending();
     if (enabled) pumpQueue();
-  }, [enabled, ready, sessions, pumpQueue]);
+  }, [enabled, ready, sessions, pumpQueue, dropListedPending]);
 
   // ── N22: the agents' load, polled while a cap is set (every second
   // while tasks wait, every few seconds otherwise) ─────────────────────
@@ -350,7 +356,8 @@ export function useFleetControls({ enabled, ready = true, sessions, startTask, t
   }, [enabled]);
 
   const noteStarted = useCallback((sessionId: string) => {
-    pendingIdsRef.current.add(sessionId);
+    // Already listed: the list counts it.
+    if (!sessionsRef.current.some((s) => s.id === sessionId)) pendingIdsRef.current.add(sessionId);
   }, []);
 
   return useMemo(() => ({ queueIfFull, noteStarted }), [queueIfFull, noteStarted]);
