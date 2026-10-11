@@ -166,7 +166,7 @@ const readLog = (file) =>
 
 // ── One run of the fake agent ────────────────────────────────────────
 
-async function runFakeAgent(bridge, sessionId, shell, { tag, answer, expectExit, shellMayMisreport = false, expectLine, expectBusy = false, shot }) {
+async function runFakeAgent(bridge, sessionId, shell, { tag, answer, expectExit, expectLine, expectBusy = false, shot }) {
 	const agentLog = join(evidenceDir, `fake-agent-${tag}.jsonl`);
 	rmSync(agentLog, { force: true });
 	const marker = `fake-agent-${tag}-exit=`;
@@ -214,37 +214,14 @@ async function runFakeAgent(bridge, sessionId, shell, { tag, answer, expectExit,
 	}
 	await sleep(800); // let the shell draw its prompt again
 	const exitPattern = new RegExp(`^${marker}\\d+\\s*$`);
-	let done;
-	for (let attempt = 1; ; attempt++) {
-		await bridge.typeInTerminal(sessionId, `${echoExitCode(shell, marker)}\n`);
-		try {
-			done = await bridge.waitForTerminal(sessionId, exitPattern, { timeoutMs: shellMayMisreport ? 8_000 : 20_000 });
-			break;
-		} catch (e) {
-			// Same known Hermes behaviour as below: the extra SIGINT Hermes
-			// sends on Ctrl-C can reach the shell late, and bash's line editor
-			// then throws away what it has read of the next line (seen on
-			// Linux as `cho: command not found`). The line is typed once more;
-			// the shell's number is then not the agent's, which is why the
-			// agent's own exit code is asserted from its log.
-			if (!shellMayMisreport || attempt >= 2) throw e;
-			log("  KNOWN ISSUE: the shell dropped the start of the next typed line after Ctrl-C; typing it again");
-		}
-	}
+	await bridge.typeInTerminal(sessionId, `${echoExitCode(shell, marker)}\n`);
+	const done = await bridge.waitForTerminal(sessionId, exitPattern, { timeoutMs: 20_000 });
 	await sleep(2600); // past Hermes's 2 s silence threshold
 	const seen = await phases.stop();
 	const exitLine = done.lines.filter((l) => l.startsWith(marker)).at(-1)?.trimEnd();
-	if (shellMayMisreport && exitLine !== `${marker}${expectExit}`) {
-		// Known Hermes behaviour, not a fake-agent problem: when Ctrl-C is
-		// pressed, Hermes writes ^C to the terminal and also sends a SIGINT
-		// of its own, which reaches the shell (macOS). bash then reports 1
-		// for the interrupted command even though it exited 130 (zsh and
-		// PowerShell report 130). The agent's own exit code is asserted from
-		// its log below.
-		log(`  KNOWN ISSUE: the shell reports "${exitLine}" after Ctrl-C (the agent exited ${expectExit})`);
-	} else {
-		assert(exitLine === `${marker}${expectExit}`, `the shell reports exit code ${expectExit} ("${exitLine}")`);
-	}
+	// After Ctrl-C too: Hermes sends nothing but the key, so bash reports the
+	// agent's 130 and runs the next line as typed (#394).
+	assert(exitLine === `${marker}${expectExit}`, `the shell reports exit code ${expectExit} ("${exitLine}")`);
 	// Everything the agent printed on the main screen, up to the exit line.
 	const tail = after(done.lines, "fake-agent 1.0: working on the task");
 	if (expectLine) assert(tail.some((l) => l.includes(expectLine)), `the terminal shows "${expectLine}"`);
@@ -322,7 +299,6 @@ try {
 		tag: "interrupt",
 		answer: "ctrl-c",
 		expectExit: 130,
-		shellMayMisreport: true,
 		shot: "03",
 	});
 } catch (e) {

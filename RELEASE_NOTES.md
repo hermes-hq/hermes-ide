@@ -1,5 +1,5 @@
-# Hermes IDE 2.2.5
+# Hermes IDE 2.2.6
 
 ## Fixes
 
-- An agent's first edits after starting are no longer left out of its first turn in the turn history, which happened on slower machines and larger projects.
+- Pressing Ctrl-C to stop a program in a terminal now interrupts it once: bash reports the right exit code afterwards, and the next command you type is no longer cut short on Linux.

@@ -2314,38 +2314,14 @@ pub fn write_to_session(
         }
     }
 
-    // ── Direct SIGINT delivery (macOS/Unix) ──
-    //
-    // Writing \x03 to the PTY master makes the line discipline generate
-    // SIGINT for the foreground process group. The shell's own group also
-    // gets one directly (see `ctrl_c_groups`).
-    #[cfg(unix)]
-    if bytes.contains(&0x03) {
-        if let Some(shell_pid) = session.transport.pid() {
-            for group in ctrl_c_groups(shell_pid) {
-                unsafe {
-                    libc::kill(-group, libc::SIGINT);
-                }
-            }
-        }
-    }
+    // Ctrl+C is the \x03 byte alone: every shell has the terminal as its
+    // controlling terminal (on macOS through the trampoline, #214; on Linux
+    // and in the session host from the PTY spawn), so the line discipline
+    // interrupts a cooked-mode foreground program, and a raw-mode one (an
+    // agent's TUI) reads the key and handles it. A SIGINT of our own on top
+    // reached the shell after the program had exited: bash then misreported
+    // the exit code or dropped the start of the next typed line (#394).
     Ok(())
-}
-
-/// The process groups a Ctrl+C written to a session also signals directly:
-/// only the shell's own. The shell has its controlling terminal (on macOS
-/// through the trampoline, #214; on Linux from the PTY spawn), so the line
-/// discipline interrupts a cooked-mode foreground program itself. A signal
-/// sent to a raw-mode program (an agent's TUI) would kill it instead of
-/// letting it handle the Ctrl+C it reads, and one sent to every child of the
-/// shell would also kill its background jobs (`npm run dev &`).
-#[cfg(unix)]
-fn ctrl_c_groups(shell_pid: u32) -> Vec<i32> {
-    i32::try_from(shell_pid)
-        .ok()
-        .filter(|&pid| pid > 0)
-        .into_iter()
-        .collect()
 }
 
 /// Check whether the shell is the foreground process in the PTY.
@@ -5545,26 +5521,6 @@ mod foreground_tests {
         let _ = shell.wait();
         assert!(running, "a shell running a program does not");
         assert!(!super::shell_holds_prompt(None));
-    }
-
-    /// Ctrl+C never signals a job of the shell directly: a background job
-    /// leads its own process group, which a terminal would leave alone.
-    #[cfg(unix)]
-    #[test]
-    fn ctrl_c_signals_only_the_shells_own_group_not_its_jobs() {
-        use std::os::unix::process::CommandExt;
-        let mut job = Command::new("sleep")
-            .arg("30")
-            .process_group(0)
-            .spawn()
-            .unwrap();
-        let shell = std::process::id();
-        let listed = eventually(|| !super::enumerate_child_pids(shell).is_empty());
-        let groups = super::ctrl_c_groups(shell);
-        let _ = job.kill();
-        let _ = job.wait();
-        assert!(listed, "the job never showed up as a child");
-        assert_eq!(groups, vec![shell as i32]);
     }
 
     /// The process-table scan hosted terminals rely on (the session host
