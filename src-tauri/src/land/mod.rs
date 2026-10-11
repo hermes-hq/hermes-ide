@@ -1093,6 +1093,37 @@ mod tests {
     }
 
     #[test]
+    fn a_pull_request_is_still_offered_after_a_local_merge() {
+        let (_t, repo, wt) = repo_with_task();
+        let data = TempDir::new().unwrap();
+        let target = target_for(&repo, &wt);
+        fs::write(wt.join("b.txt"), "b\n").unwrap();
+        let out = execute(
+            data.path(),
+            "s1",
+            "p1",
+            &target,
+            &req(LandMode::Merge, "first"),
+            None,
+        )
+        .unwrap();
+        assert_eq!(out.status, LandStatus::Landed);
+        // The squash is not on the branch: its commit still goes in a PR.
+        let p = preview(data.path(), "s1", &target, None).unwrap();
+        assert!(p.analysis.commits_ahead > 0);
+        let err = execute(
+            data.path(),
+            "s1",
+            "p1",
+            &target,
+            &req(LandMode::Pr, "PR"),
+            None,
+        )
+        .unwrap_err();
+        assert!(!err.contains("nothing on this branch"), "{err}");
+    }
+
+    #[test]
     fn a_conflicting_merge_is_refused_before_anything_changes() {
         let (_t, repo, wt) = repo_with_task();
         let data = TempDir::new().unwrap();
