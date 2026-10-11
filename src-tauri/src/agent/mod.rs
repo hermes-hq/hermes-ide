@@ -1224,11 +1224,17 @@ fn signal_agent_pid(pid: u32, kill: bool) {
     #[cfg(windows)]
     {
         // No SIGINT for a process without a shared console: end it (with
-        // the processes it started), as interrupt_agent does.
+        // the processes it started), as interrupt_agent does. No console
+        // window, and not waited on: callers poll for the exit themselves.
+        use std::os::windows::process::CommandExt;
         let _ = kill;
         let _ = std::process::Command::new("taskkill")
             .args(["/PID", &pid.to_string(), "/T", "/F"])
-            .output();
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .spawn();
     }
 }
 
@@ -2550,6 +2556,18 @@ mod tests {
             },
         );
         map
+    }
+
+    #[test]
+    fn stopping_an_agent_on_windows_opens_no_console_and_does_not_wait() {
+        // std has no getter for creation flags, so check the source: every
+        // Agent view close goes through signal_agent_pid, and on Windows its
+        // taskkill must pass CREATE_NO_WINDOW and not block on the run.
+        let src = include_str!("mod.rs");
+        let start = src.find("fn signal_agent_pid(").unwrap();
+        let body = &src[start..start + src[start..].find("\n}\n").unwrap()];
+        assert!(body.contains("creation_flags(0x0800_0000)"), "{body}");
+        assert!(!body.contains(".output()"), "{body}");
     }
 
     #[cfg(unix)]
