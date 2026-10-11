@@ -69,6 +69,8 @@ export const ruPack: LanguagePack = {
     "startupProblem.migrationFailed.message": "Hermes не удалось обновить данные (шаг {step}). Обновление отменено, ваши данные не изменены: {detail}",
     "startupProblem.openFailed.title": "Hermes не удалось открыть данные",
     "startupProblem.openFailed.message": "Hermes не удалось открыть данные: {detail}",
+    "startupProblem.alreadyRunning.title": "Hermes уже запущен",
+    "startupProblem.alreadyRunning.message": "Другое окно Hermes уже открыто с этими данными. Перейдите в это окно или закройте его и откройте Hermes снова.",
     "startupProblem.dataFile": "Файл данных",
     "startupProblem.quit": "Выйти из Hermes",
     "common.close": "Закрыть",

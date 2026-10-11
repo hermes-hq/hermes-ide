@@ -69,6 +69,8 @@ export const ptBRPack: LanguagePack = {
     "startupProblem.migrationFailed.message": "O Hermes não conseguiu atualizar os dados (etapa {step}). A atualização foi desfeita e seus dados não foram alterados: {detail}",
     "startupProblem.openFailed.title": "O Hermes não conseguiu abrir seus dados",
     "startupProblem.openFailed.message": "O Hermes não conseguiu abrir os dados: {detail}",
+    "startupProblem.alreadyRunning.title": "O Hermes já está em execução",
+    "startupProblem.alreadyRunning.message": "Outra janela do Hermes já está aberta com estes dados. Mude para essa janela ou feche-a e abra o Hermes novamente.",
     "startupProblem.dataFile": "Arquivo de dados",
     "startupProblem.quit": "Sair do Hermes",
     "common.close": "Fechar",

@@ -51,6 +51,8 @@ export async function restoreWindowState(settings: Record<string, string>): Prom
   if (!isNaN(x) && !isNaN(y) && (await isPositionVisible(x, y, w))) {
     await win.setPosition(new LogicalPosition(x, y));
   }
+  // The size above is the one from before maximizing, so un-maximizing returns to it.
+  if (settings.window_maximized === "1") await win.maximize();
 
   startTracking();
 }
@@ -64,6 +66,13 @@ function startTracking(): void {
       try {
         // Minimizing on Windows fires move/resize with (-32000, -32000) and a 0x0 size.
         if (await win.isMinimized()) return;
+        // A maximized or fullscreen window fills the screen: keep the size it
+        // had before, and only remember that it was maximized.
+        if (await win.isFullscreen()) return;
+        if (await win.isMaximized()) {
+          setSetting("window_maximized", "1").catch(() => {});
+          return;
+        }
         const size = await win.innerSize();
         const pos = await win.outerPosition();
         const factor = await win.scaleFactor();
@@ -77,6 +86,7 @@ function startTracking(): void {
         setSetting("window_height", String(lh)).catch(() => {});
         setSetting("window_x", String(lx)).catch(() => {});
         setSetting("window_y", String(ly)).catch(() => {});
+        setSetting("window_maximized", "0").catch(() => {});
       } catch {
         /* window may be closing */
       }

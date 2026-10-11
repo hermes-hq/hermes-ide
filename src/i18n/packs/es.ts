@@ -69,6 +69,8 @@ export const esPack: LanguagePack = {
     "startupProblem.migrationFailed.message": "Hermes no pudo actualizar sus datos (paso {step}). La actualización se deshizo y tus datos no han cambiado: {detail}",
     "startupProblem.openFailed.title": "Hermes no pudo abrir tus datos",
     "startupProblem.openFailed.message": "Hermes no pudo abrir sus datos: {detail}",
+    "startupProblem.alreadyRunning.title": "Hermes ya se está ejecutando",
+    "startupProblem.alreadyRunning.message": "Ya hay otra ventana de Hermes abierta con estos datos. Cambia a esa ventana o ciérrala y vuelve a abrir Hermes.",
     "startupProblem.dataFile": "Archivo de datos",
     "startupProblem.quit": "Salir de Hermes",
     "common.close": "Cerrar",

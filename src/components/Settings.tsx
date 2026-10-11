@@ -1043,6 +1043,8 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   applyTheme(newSettings.theme || "frosted-dark", newSettings);
                   // Sync analytics state
                   void setAnalyticsEnabled(newSettings.telemetry_enabled === "true");
+                  // The import added to the person's own prompts: drop the copy read before it.
+                  void import("../library/myPrompts").then((m) => m.reloadMyPrompts()).catch(() => {});
                   setFooterStatus(t("settings.imported"));
                 } catch (e) {
                   setFooterStatus(t("settings.importFailed", { error: String(e) }));

@@ -646,6 +646,23 @@ pub fn run() {
             let app_dir = instance::app_data_dir(app.handle())?;
             std::fs::create_dir_all(&app_dir)
                 .map_err(|e| format!("Failed to create app data dir: {}", e))?;
+            // One running Hermes per data folder: a second one would restore
+            // the same sessions. It shows why in its window and starts nothing.
+            match instance::claim_data_dir(&app_dir, std::time::Duration::from_secs(3)) {
+                Ok(Some(lock)) => {
+                    app.manage(lock);
+                }
+                Ok(None) => {
+                    log::error!("Another Hermes is already running on {}", app_dir.display());
+                    app.manage(db::startup::StartupProblemState(Some(
+                        db::startup::StartupProblem::already_running(
+                            &app_dir.join("hermes_idea_v3.db"),
+                        ),
+                    )));
+                    return Ok(());
+                }
+                Err(e) => log::warn!("Could not lock the data folder: {e}"),
+            }
             // Only worktrees under this folder are ours to remove, ask
             // about or recreate; another instance's are somebody else's.
             git::worktree::set_instance_worktrees_base(&app_dir);

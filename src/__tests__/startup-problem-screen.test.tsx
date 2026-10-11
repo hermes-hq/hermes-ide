@@ -36,6 +36,14 @@ describe("StartupProblemScreen", () => {
 		expect(screen.getByText(newerData.dataPath)).toBeInTheDocument();
 	});
 
+	it("says another Hermes already has the data open", () => {
+		const alreadyRunning: StartupProblem = { ...newerData, kind: "already-running", title: "x", message: "x", found: null, supported: null };
+		render(<StartupProblemScreen problem={alreadyRunning} onQuit={() => {}} />);
+		const dialog = screen.getByRole("alertdialog");
+		expect(dialog).toHaveAccessibleName("Hermes is already running");
+		expect(dialog).toHaveAccessibleDescription(/Another Hermes window is already open with this data/);
+	});
+
 	it("quits when the user presses Quit", () => {
 		const onQuit = vi.fn();
 		render(<StartupProblemScreen problem={newerData} onQuit={onQuit} />);

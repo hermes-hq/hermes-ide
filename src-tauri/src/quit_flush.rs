@@ -186,8 +186,24 @@ pub fn hold_for_flush(app: &AppHandle, after: After) -> bool {
 
 /// The quit menu item: save the workspace, then exit.
 pub fn quit(app: &AppHandle) {
-    if !hold_for_flush(app, After::Exit(0)) {
-        app.exit(0);
+    quit_steps(
+        || crate::session_host::on_exit_requested(app),
+        || hold_for_flush(app, After::Exit(0)),
+        || app.exit(0),
+    );
+}
+
+/// The quit menu item's order, as closing the window does it: the
+/// "keep running or stop?" question comes first (`ask` true: the dialog is
+/// up), so cancelling it leaves the flush unused for the next quit. Asked
+/// after the flush, a cancel would leave it released and the next quit
+/// would skip writing the workspace.
+fn quit_steps(ask: impl FnOnce() -> bool, hold: impl FnOnce() -> bool, exit: impl FnOnce()) {
+    if ask() {
+        return;
+    }
+    if !hold() {
+        exit();
     }
 }
 
@@ -258,6 +274,27 @@ mod tests {
         let waited = started.elapsed();
         assert!(waited >= Duration::from_millis(80), "{waited:?}");
         assert!(waited < Duration::from_secs(2), "{waited:?}");
+    }
+
+    #[test]
+    fn a_quit_cancelled_at_the_keep_or_stop_question_still_writes_the_workspace_later() {
+        let flush = QuitFlush::default();
+        flush.frontend_ready();
+        // What hold_for_flush does with the state, the flush finishing at once.
+        let hold = || match flush.begin() {
+            Begin::Proceed => false,
+            Begin::Hold => true,
+            Begin::Flush(_) => {
+                flush.release();
+                true
+            }
+        };
+        let mut exited = false;
+        // An agent is working: the question is asked, and cancelled.
+        quit_steps(|| true, hold, || exited = true);
+        assert!(!exited);
+        // The next quit, once the agent is idle, still writes the workspace.
+        assert!(matches!(flush.begin(), Begin::Flush(_)));
     }
 
     #[test]
