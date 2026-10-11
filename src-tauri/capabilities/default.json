@@ -27,6 +27,7 @@
     "core:window:allow-close",
     "core:window:allow-destroy",
     "core:window:allow-toggle-maximize",
+    "core:window:allow-maximize",
     "core:window:allow-is-maximized",
     "updater:default",
     "process:allow-restart",

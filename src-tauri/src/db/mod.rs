@@ -2075,6 +2075,7 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "window_height",
     "window_x",
     "window_y",
+    "window_maximized",
     // Settings panel geometry (excluded from export — machine-specific)
     "settings_panel_width",
     "settings_panel_height",
@@ -3270,6 +3271,7 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "window_height",
     "window_x",
     "window_y",
+    "window_maximized",
     // Panel geometry — depends on window size
     "settings_panel_width",
     "settings_panel_height",

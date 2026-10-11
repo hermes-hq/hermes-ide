@@ -25,6 +25,9 @@ const win = {
     movedHandler = cb;
   }),
   isMinimized: vi.fn(() => Promise.resolve(false)),
+  isMaximized: vi.fn(() => Promise.resolve(false)),
+  isFullscreen: vi.fn(() => Promise.resolve(false)),
+  maximize: vi.fn(() => Promise.resolve()),
   innerSize: vi.fn(() => Promise.resolve({ width: 0, height: 0 })),
   outerPosition: vi.fn(() => Promise.resolve({ x: -32000, y: -32000 })),
   scaleFactor: vi.fn(() => Promise.resolve(1)),
@@ -93,6 +96,17 @@ describe("restoreWindowState", () => {
     expect(win.setPosition).toHaveBeenCalledTimes(1);
     expect(win.setPosition).toHaveBeenCalledWith(expect.objectContaining({ x: 100, y: 50 }));
   });
+
+  it("maximizes again over the size from before, when it was saved maximized", async () => {
+    await restoreWindowState({ window_width: "1200", window_height: "800", window_x: "100", window_y: "50", window_maximized: "1" });
+    expect(win.setSize).toHaveBeenCalledWith(expect.objectContaining({ width: 1200, height: 800 }));
+    expect(win.maximize).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not maximize a window saved at a normal size", async () => {
+    await restoreWindowState({ window_width: "1200", window_height: "800", window_maximized: "0" });
+    expect(win.maximize).not.toHaveBeenCalled();
+  });
 });
 
 describe("window state tracking", () => {
@@ -107,6 +121,28 @@ describe("window state tracking", () => {
   it("does not persist geometry while the window is minimized", async () => {
     await restoreWindowState({});
     win.isMinimized.mockImplementation(() => Promise.resolve(true));
+    movedHandler?.();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(setSetting).not.toHaveBeenCalled();
+  });
+
+  it("keeps the normal size while maximized and only remembers the maximize", async () => {
+    await restoreWindowState({});
+    win.isMinimized.mockImplementation(() => Promise.resolve(false));
+    win.isMaximized.mockImplementation(() => Promise.resolve(true));
+    win.innerSize.mockImplementation(() => Promise.resolve({ width: 1920, height: 1080 }));
+    win.outerPosition.mockImplementation(() => Promise.resolve({ x: -8, y: -8 }));
+    movedHandler?.();
+    await vi.advanceTimersByTimeAsync(600);
+    expect(setSetting).toHaveBeenCalledWith("window_maximized", "1");
+    expect(setSetting).not.toHaveBeenCalledWith("window_width", expect.anything());
+    expect(setSetting).not.toHaveBeenCalledWith("window_x", expect.anything());
+  });
+
+  it("saves nothing while fullscreen", async () => {
+    await restoreWindowState({});
+    win.isMaximized.mockImplementation(() => Promise.resolve(false));
+    win.isFullscreen.mockImplementation(() => Promise.resolve(true));
     movedHandler?.();
     await vi.advanceTimersByTimeAsync(600);
     expect(setSetting).not.toHaveBeenCalled();
