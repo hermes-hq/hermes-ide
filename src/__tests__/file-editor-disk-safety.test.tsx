@@ -2,13 +2,15 @@
 /**
  * The file editor never changes a file the user did not edit, and never
  * writes over changes made on disk since it loaded:
- * - a CRLF file keeps its line endings (opening it wrote it back as LF)
- * - a save is refused when an agent changed the file meanwhile
+ * - a CRLF file keeps its line endings (opening it wrote it back as LF), and
+ *   a file with mixed breaks keeps its most common one
+ * - a save is refused when an agent changed the file meanwhile, but not
+ *   because of the editor's own save still in flight
  * - a file that is not UTF-8 opens read-only
  * - Alt+Up/Down in the editor does not also switch panes (Windows/Linux)
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, waitFor, screen, fireEvent, act } from "@testing-library/react";
+import { render, renderHook, waitFor, screen, fireEvent, act } from "@testing-library/react";
 import { EditorView } from "@codemirror/view";
 
 let disk = "";
@@ -68,6 +70,22 @@ describe("CRLF files keep their line endings", () => {
     expect(onContentChange).toHaveBeenLastCalledWith("xline one\r\nline two\r\n");
   });
 
+  it("one odd break does not rewrite the file with it", async () => {
+    const { EditorPane } = await import("../editor/EditorPane");
+    const edit = async (content: string) => {
+      document.body.innerHTML = "";
+      const onContentChange = vi.fn();
+      render(<EditorPane content={content} language="plaintext" onContentChange={onContentChange} onSave={() => {}} />);
+      await waitFor(() => expect(document.querySelector(".cm-content")).not.toBeNull());
+      act(() => editorView().dispatch({ changes: { from: 0, insert: "#" } }));
+      return onContentChange.mock.lastCall?.[0];
+    };
+    expect(await edit("l1\nl2\r\nl3\nl4\n")).toBe("#l1\nl2\nl3\nl4\n");
+    expect(await edit("echo a\nprintf 'x\rY'\nl3\n")).toBe("#echo a\nprintf 'x\nY'\nl3\n");
+    expect(await edit("l1\r\nl2\nl3\r\nl4\r\n")).toBe("#l1\r\nl2\r\nl3\r\nl4\r\n");
+    expect(await edit("l1\rl2\r")).toBe("#l1\rl2\r");
+  });
+
   it("a CRLF file opened in the preview is not dirty and not saved", async () => {
     disk = "line one\r\nline two\r\n";
     await openPreview();
@@ -102,6 +120,26 @@ describe("a save never writes over changes made on disk", () => {
     fireEvent.click(screen.getByText("Overwrite"));
     await waitFor(() => expect(disk).toBe("// note\nfn a() {}\n"));
     await waitFor(() => expect(screen.queryByRole("alert")).toBeNull());
+  });
+});
+
+describe("a save while the last one is still writing", () => {
+  it("expects the text the last save wrote, not a changed-on-disk conflict", async () => {
+    disk = "fn a() {}\n";
+    const { useFileEditor } = await import("../hooks/useFileEditor");
+    const { result } = renderHook(() =>
+      useFileEditor({ sessionId: "s", projectId: "p", filePath: "a.rs", initialContent: disk, initialMtime: 1, isSSH: false }),
+    );
+    act(() => result.current.setContent("fn b() {}\n"));
+    let saves: Promise<boolean>[] = [];
+    // The autosave is writing when the user presses Cmd+S.
+    await act(async () => {
+      saves = [result.current.save(), result.current.save()];
+      await Promise.all(saves);
+    });
+    expect(await Promise.all(saves)).toEqual([true, true]);
+    expect(disk).toBe("fn b() {}\n");
+    expect(result.current.changedOnDisk).toBe(false);
   });
 });
 

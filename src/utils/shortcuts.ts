@@ -94,6 +94,10 @@ export function matchesAccelerator(e: KeyEventLike, accelerator: string, mac: bo
   }
   if (a.shift !== e.shiftKey || a.alt !== e.altKey) return false;
   if (a.keys.includes(e.key.toLowerCase())) return true;
+  // A digit-row key that types something else (AZERTY "&") still counts as
+  // its digit, except "-", "=" and "+": those are font-size shortcuts of
+  // their own (AZERTY types "-" on the 6 key).
+  if (/^[-=+]$/.test(e.key)) return false;
   const digit = /^Digit([0-9])$/.exec(e.code ?? "");
   return !!digit && a.keys.includes(digit[1]);
 }

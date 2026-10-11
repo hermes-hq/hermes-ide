@@ -50,11 +50,15 @@ interface EditorPaneProps {
 /**
  * The line break a file uses ("\r\n", "\r" or "\n"). The editor keeps lines
  * without their breaks and joins them with "\n", so the text handed back is
- * re-joined with this one: a CRLF file must not be rewritten as LF.
+ * re-joined with this one: a CRLF file must not be rewritten as LF. Mixed
+ * breaks take the most common one, so one odd line does not rewrite the
+ * file; a lone "\r" counts only in a file with no "\n" at all.
  */
 export function detectLineBreak(text: string): string {
-  if (text.includes("\r\n")) return "\r\n";
-  if (text.includes("\r")) return "\r";
+  const crlf = text.split("\r\n").length - 1;
+  const lf = text.split("\n").length - 1 - crlf;
+  if (crlf > lf) return "\r\n";
+  if (crlf + lf === 0 && text.includes("\r")) return "\r";
   return "\n";
 }
 

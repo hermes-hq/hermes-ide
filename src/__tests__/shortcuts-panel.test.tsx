@@ -214,6 +214,14 @@ describe("matchAppShortcut", () => {
     expect(matchAppShortcut(azerty("&", 1, {}), true)).toBeNull();
   });
 
+  it("AZERTY Ctrl/Cmd+- (the 6 key) shrinks the font and does not switch to session 6", () => {
+    const azerty = (k: string, n: number, mods: Parameters<typeof key>[1]) => ({ ...key(k, mods), code: `Digit${n}` });
+    expect(matchAppShortcut(azerty("-", 6, { ctrl: true }), false)).toBeNull();
+    expect(matchAppShortcut(azerty("-", 6, { meta: true }), true)).toBeNull();
+    expect(matchAppShortcut(azerty("+", 1, { ctrl: true }), false)).toBeNull();
+    expect(matchAppShortcut(azerty("(", 5, { ctrl: true }), false)).toBe("app.switch-session");
+  });
+
   it("removing a declaration removes the binding", () => {
     const withoutPalette = APP_SHORTCUTS.filter((s) => s.id !== "app.command-palette-alt");
     expect(matchAppShortcut(key("P", { meta: true, shift: true }), true, withoutPalette)).toBeNull();
