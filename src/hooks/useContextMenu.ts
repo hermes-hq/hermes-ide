@@ -175,24 +175,14 @@ export function buildStashMenuItems(
 export function buildFileExplorerMenuItems(
   entry: { name: string; is_dir: boolean; path: string },
 ): ContextMenuItem[] {
+  // Only actions FileExplorerPanel carries out: New File, Rename, Delete,
+  // Open in Terminal and Reveal were listed here but did nothing.
   const items: ContextMenuItem[] = [];
-
-  if (entry.is_dir) {
-    items.push(menuItem("file-explorer.new-file", "New File..."));
-    items.push(menuItem("file-explorer.new-folder", "New Folder..."));
-    items.push(separator());
-  }
 
   if (!entry.is_dir) {
     items.push(menuItem("file-explorer.open-in-editor", "Open in Editor"));
   }
-  items.push(menuItem("file-explorer.open-terminal", "Open in Terminal"));
-  items.push(separator());
-  items.push(menuItem("file-explorer.rename", "Rename..."));
-  items.push(menuItem("file-explorer.delete", "Delete"));
-  items.push(separator());
   items.push(menuItem("file-explorer.copy-path", "Copy Path"));
-  items.push(menuItem("file-explorer.reveal", "Reveal in Finder"));
 
   return items;
 }
