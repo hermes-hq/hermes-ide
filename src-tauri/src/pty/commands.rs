@@ -997,14 +997,37 @@ impl Drop for OpeningGuard<'_> {
 /// it was being opened.
 const CLOSED_WHILE_OPENING: &str = "The session was closed while it was being opened";
 
-/// Input bigger than this (a paste, not typing) is written to the terminal
-/// in the background (CHAOS-05).
-const BACKGROUND_WRITE_BYTES: usize = 64 * 1024;
-
-/// Whether input of `len` bytes is written in the background (a paste)
-/// rather than right away (typing); see [`BACKGROUND_WRITE_BYTES`].
-fn writes_in_background(len: usize) -> bool {
-    len > BACKGROUND_WRITE_BYTES
+/// Hands `bytes` to the terminal's input thread, which writes them in the
+/// order they came, and starts that thread first if need be. A write blocks
+/// while the running program leaves its input unread (on macOS once about
+/// 1 KB waits there): only that thread waits, never the caller. A failed
+/// write goes to `on_error`.
+fn queue_input(
+    input: &mut Option<std::sync::mpsc::Sender<Vec<u8>>>,
+    writer: &Arc<StdMutex<Box<dyn Write + Send>>>,
+    bytes: Vec<u8>,
+    on_error: impl Fn(String) + Send + 'static,
+) -> Result<(), String> {
+    let tx = input.get_or_insert_with(|| {
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<u8>>();
+        let writer = Arc::clone(writer);
+        // Ends once the session is gone (its sender with it).
+        thread::spawn(move || {
+            for bytes in rx {
+                let written = writer.lock().map_err(|e| e.to_string()).and_then(|mut w| {
+                    w.write_all(&bytes)
+                        .and_then(|_| w.flush())
+                        .map_err(|e| e.to_string())
+                });
+                if let Err(e) = written {
+                    on_error(e);
+                }
+            }
+        });
+        tx
+    });
+    tx.send(bytes)
+        .map_err(|_| "Write failed: the terminal no longer takes input".to_string())
 }
 
 // Tauri command handler — params come from frontend invocation. Off the main
@@ -2095,6 +2118,7 @@ pub fn create_session(
     let mut pty_session = PtySession {
         transport,
         writer,
+        input: None,
         session: session_arc,
         analyzer,
         shell_integration,
@@ -2247,40 +2271,20 @@ pub fn write_to_session(
         a.typed_line.feed(&bytes);
     }
 
-    // CHAOS-05: a big paste takes as long as the program needs to read it.
-    // Written here, it would hold the session list (and the window, whose
-    // thread runs this command) until then. It is written in the
-    // background instead; a failure is reported on `pty-write-failed-<id>`.
-    if writes_in_background(bytes.len()) {
-        let writer = Arc::clone(&session.writer);
-        drop(mgr);
-        let id = session_id.clone();
-        thread::spawn(move || {
-            let written = writer.lock().map_err(|e| e.to_string()).and_then(|mut w| {
-                w.write_all(&bytes)
-                    .and_then(|_| w.flush())
-                    .map_err(|e| e.to_string())
-            });
-            if let Err(e) = written {
-                log::warn!(
-                    "[write_to_session] {id}: a paste of {} bytes failed: {e}",
-                    bytes.len()
-                );
-                let _ = app.emit(&format!("pty-write-failed-{id}"), e);
-            }
-        });
-        return Ok(());
-    }
-
-    {
-        let mut w = session
-            .writer
-            .lock()
-            .map_err(|e| format!("Writer lock failed: {}", e))?;
-        w.write_all(&bytes)
-            .map_err(|e| format!("Write failed: {}", e))?;
-        w.flush().map_err(|e| format!("Flush failed: {}", e))?;
-    }
+    // CHAOS-05: input takes as long as the program needs to read it, and
+    // this command runs on the window's thread with the session list held.
+    // A thread of the session's own writes it instead; a failure is
+    // reported on `pty-write-failed-<id>`.
+    let (failed, id) = (app.clone(), session_id.clone());
+    queue_input(
+        &mut session.input,
+        &session.writer,
+        bytes.clone(),
+        move |e| {
+            log::warn!("[write_to_session] {id}: input failed: {e}");
+            let _ = failed.emit(&format!("pty-write-failed-{id}"), e);
+        },
+    )?;
 
     // What the person types is never the CLI refusing the launch, and their
     // first Enter in a resumed agent ends its replayed history.
@@ -4269,18 +4273,69 @@ pub fn ssh_get_remote_git_info(
 
 #[cfg(test)]
 mod write_and_shell_list_tests {
-    use super::{available_shells, writes_in_background, BACKGROUND_WRITE_BYTES};
+    use super::{available_shells, queue_input};
+    use std::io::Write;
+    use std::sync::{mpsc, Arc, Mutex};
+    use std::time::Duration;
+
+    /// A terminal whose program leaves its input unread: every write waits
+    /// until the test lets it through (or gives up).
+    struct Unread {
+        go: mpsc::Receiver<()>,
+        got: Arc<Mutex<Vec<u8>>>,
+    }
+
+    impl Write for Unread {
+        fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+            let _ = self.go.recv();
+            self.got.lock().unwrap().extend_from_slice(buf);
+            Ok(buf.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
 
     #[test]
-    fn typing_is_written_right_away_and_a_big_paste_in_the_background() {
-        // CHAOS-05: a paste over 64 KiB would hold the window while the
-        // program reads it.
-        assert_eq!(BACKGROUND_WRITE_BYTES, 65_536);
-        assert!(!writes_in_background(1));
-        assert!(!writes_in_background(4 * 1024));
-        assert!(!writes_in_background(BACKGROUND_WRITE_BYTES));
-        assert!(writes_in_background(BACKGROUND_WRITE_BYTES + 1));
-        assert!(writes_in_background(1024 * 1024));
+    fn input_the_program_leaves_unread_never_holds_the_caller_and_keeps_its_order() {
+        // A paste of a few KB while a build runs used to be written right
+        // here, on the window's thread: the window froze until the build
+        // ended.
+        let (go, wait) = mpsc::channel();
+        let got = Arc::new(Mutex::new(Vec::new()));
+        let writer: Arc<Mutex<Box<dyn Write + Send>>> = Arc::new(Mutex::new(Box::new(Unread {
+            go: wait,
+            got: Arc::clone(&got),
+        })));
+        let mut input = None;
+        let (done_tx, done) = mpsc::channel();
+        let paste = "echo next\r".repeat(300).into_bytes();
+        let queued = {
+            let writer = Arc::clone(&writer);
+            let paste = paste.clone();
+            std::thread::spawn(move || {
+                queue_input(&mut input, &writer, paste, |_| {}).unwrap();
+                queue_input(&mut input, &writer, b"\x03".to_vec(), |_| {}).unwrap();
+                done_tx.send(()).unwrap();
+                input
+            })
+        };
+        let returned = done.recv_timeout(Duration::from_secs(2)).is_ok();
+        // Let the writes through, so the test ends either way.
+        go.send(()).unwrap();
+        go.send(()).unwrap();
+        assert!(returned, "the caller waited for the program to read");
+        drop(queued.join().unwrap());
+        let mut want = paste;
+        want.push(0x03);
+        let deadline = std::time::Instant::now() + Duration::from_secs(5);
+        while *got.lock().unwrap() != want {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "input lost or reordered"
+            );
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
 
     #[test]
