@@ -168,6 +168,13 @@ describe("deriveStatus: precedence", () => {
     expect(derive([...exited, { type: "attention", at: 2, source: "osc", detail: "?" }]).kind).toBe("exited");
   });
 
+  it("an agent's own bare notification (Claude's idle reminder) asks nothing; an OSC one still does", () => {
+    const done = status(1, "done_unread", "exact", "hook:claude");
+    const reminder: SessionEvent = { type: "attention", at: 60, source: "hook:claude", detail: "Claude is waiting for your input" };
+    expect(derive([done, reminder], 10)).toMatchObject({ kind: "idle", source: "hook:claude" });
+    expect(derive([{ ...reminder, source: "osc" }]).kind).toBe("needs_answer");
+  });
+
   it("an exact working holds against later pty guesses (documented limit, F11 reconciles)", () => {
     expect(derive([status(1, "working", "exact", "hook:x"), status(2, "idle", "guessed", "pty")]).kind).toBe("working");
   });

@@ -131,7 +131,10 @@ export function statusOfEvent(event: SessionEvent): DerivedStatus | null {
     case "turn_interrupted":
       return make("idle");
     case "attention":
-      return make("needs_answer", event.detail);
+      // An agent that reports its own statuses reports its asks as statuses:
+      // its bare notifications (Claude's idle reminder, an auth notice) ask
+      // nothing. Only a signal (an OSC notification) is an ask on its own.
+      return isAgentReported(source) ? null : make("needs_answer", event.detail);
     case "exit":
       // The detail stays empty: the renderer words the exit from the
       // snapshot's { code, signal } in the person's language.
