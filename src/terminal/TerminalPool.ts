@@ -194,9 +194,11 @@ function handleTerminalInput(sessionId: string, data: string): void {
       clearGhostText(sessionId);
       // Fall through to normal Enter handling (buffer update + PTY write)
     }
-    // Escape — dismiss overlay
+    // Escape — dismiss overlay and its ghost text (a ghost left behind would
+    // make the next Tab run the dismissed suggestion)
     if (data === "\x1b" || data === "\x1b\x1b") {
       dismissSuggestions(sessionId);
+      clearGhostText(sessionId);
       return; // CONSUME
     }
     // Ctrl-C — dismiss overlay, then pass through to PTY
