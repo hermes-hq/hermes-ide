@@ -37,6 +37,10 @@ export function useLaunchAttachmentInput(setAttachments: SetAttachments) {
     (e: ClipboardEvent<HTMLTextAreaElement>) => {
       const files = Array.from(e.clipboardData?.files ?? []);
       if (files.length === 0) return;
+      // Text with only the clipboard's own picture of it (cells copied from a
+      // spreadsheet show up as an "image.png" too): the text is what was meant.
+      const text = e.clipboardData?.getData("text/plain") ?? "";
+      if (text.trim() && files.every((f) => !f.name || f.name === "image.png")) return;
       e.preventDefault();
       void (async () => {
         for (const file of files) {

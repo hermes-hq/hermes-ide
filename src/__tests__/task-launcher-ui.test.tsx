@@ -1165,6 +1165,19 @@ describe("TaskLauncher: attachments", () => {
     expect(chips()).toEqual([]);
   });
 
+  it("cells copied from a spreadsheet (text plus a picture of them) paste as text", async () => {
+    await open();
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    const file = new File([new Uint8Array([1])], "image.png", { type: "image/png" });
+    Object.defineProperty(paste, "clipboardData", { value: { files: [file], getData: (type: string) => (type === "text/plain" ? "Q1\t120\nQ2\t140" : "") } });
+    await act(async () => {
+      task().dispatchEvent(paste);
+    });
+    await settle();
+    expect(paste.defaultPrevented).toBe(false);
+    expect(chips()).toEqual([]);
+  });
+
   it("Attach… adds the picked files where they are; × removes one; a launch without any sends none", async () => {
     const dialog = await import("@tauri-apps/plugin-dialog");
     vi.mocked(dialog.open).mockResolvedValueOnce(["/fixture-home/specs/login.md", "/fixture-home/shots/broken.jpg"] as never);
