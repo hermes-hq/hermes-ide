@@ -1,6 +1,7 @@
 // Queued agent tasks (N22), shown above the sessions while any wait.
 // Each starts on its own when a slot frees; "Start now" skips the wait and
-// "Remove" drops the task without starting it. Each row says which task it
+// "Remove" drops the task without starting it. A task whose start failed
+// stays, marked, until one of the two. Each row says which task it
 // is (the whole task on hover) and where it will run.
 
 import "../styles/components/Fleet.css";
@@ -60,6 +61,7 @@ export function TaskQueueSection() {
               <span className="task-queue-text" title={text}>
                 <span className="task-queue-label">{task.label}</span>
                 {where && <span className="task-queue-where">{where}</span>}
+                {task.failed && <span className="task-queue-failed">{t("fleet.queueFailed")}</span>}
               </span>
               <Button size="sm" variant="quiet" className="task-queue-start" aria-label={t("fleet.queueStartNowTask", { task: task.label })} onClick={() => startTaskNow(task.id)}>
                 {t("fleet.queueStartNow")}

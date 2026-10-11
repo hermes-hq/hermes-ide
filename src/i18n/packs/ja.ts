@@ -1098,6 +1098,7 @@ export const jaPack: LanguagePack = {
     "fleet.queueRunning": "{cap} 中 {running} 実行中",
     "fleet.queueMemory": "{cap} MB 中 {used}",
     "fleet.queueWaiting": "空きが出たら開始します",
+    "fleet.queueFailed": "開始できませんでした — 「今すぐ開始」で再試行",
     "fleet.queueStartNow": "今すぐ開始",
     "fleet.queueRemove": "削除",
     "fleet.capOff": "オフ",

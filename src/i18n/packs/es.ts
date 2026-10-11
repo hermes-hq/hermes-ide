@@ -1098,6 +1098,7 @@ export const esPack: LanguagePack = {
     "fleet.queueRunning": "{running} de {cap} en marcha",
     "fleet.queueMemory": "{used} de {cap} MB",
     "fleet.queueWaiting": "Empieza cuando quede un hueco libre",
+    "fleet.queueFailed": "No se inició: «Iniciar ahora» lo vuelve a intentar",
     "fleet.queueStartNow": "Iniciar ahora",
     "fleet.queueRemove": "Quitar",
     "fleet.capOff": "Desactivado",

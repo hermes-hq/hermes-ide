@@ -57,6 +57,8 @@ export interface LaunchTaskDeps {
    * is what finishes the launch once it starts (finishQueuedLaunch).
    */
   queue?(opts: CreateSessionOpts, label: string, launch: QueuedLaunch): boolean;
+  /** A session of this launch was created: it holds a slot before the session list shows it. */
+  started?(sessionId: string): void;
   /** Show a new session: the first in the focused pane, a second one split beside the first. */
   place(sessionId: string, index: number, firstSessionId: string | null): void;
   /** The session's linked worktree, or null when it runs in the repository's own checkout. */
@@ -112,6 +114,18 @@ function nameOf(task: string, library: TaskLaunchRequest["library"]): string {
   return library?.prompt?.title || task || library?.persona?.title || "";
 }
 
+/**
+ * The feature folder of a Full-track task: its slug, else (a task in a
+ * script the slug cannot spell, emoji) task-<this launch's id>, so two such
+ * tasks never share .hermes/features/task/.
+ */
+function featureSlug(task: string, library: TaskLaunchRequest["library"], launchId: string): string {
+  const slug = taskSlug(nameOf(task, library));
+  if (slug) return slug;
+  const id = launchId.replace(/^launch-/, "").toLowerCase().replace(/[^a-z0-9]/g, "").slice(-8);
+  return id ? `task-${id}` : "task";
+}
+
 function promptsFor(launch: QueuedLaunch): { firstPrompt: string; systemPrompt: string | null } {
   const agent = launch.req.agents[launch.agentIndex];
   return launchPrompts(agent.id, agent.mode, launch.firstPrompt, launch.req.library?.persona);
@@ -165,7 +179,7 @@ async function finishAgent(launch: QueuedLaunch, sessionId: string, deps: Launch
     console.warn("[launchTask] could not read the session's worktree:", err);
   }
   if (req.track === "Full") {
-    const slug = taskSlug(nameOf(task, req.library)) || "task";
+    const slug = featureSlug(task, req.library, launch.launchId);
     // A session on the current checkout has no worktree: the feature lives in the repository's own folder.
     const checkout = worktree ?? (agent.worktree ? null : req.repoRoot);
     try {
@@ -223,7 +237,9 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
 
   const projectId = await deps.projectFor(req.repoRoot);
   const label = taskLabel(nameOf(task, req.library));
-  const slug = taskSlug(nameOf(task, req.library)) || "task";
+  const launchId = newLaunchId(deps);
+  result.launchId = launchId;
+  const slug = featureSlug(task, req.library, launchId);
   // A Full track drives the agent phase by phase from its first prompt. When
   // the prompt cannot be built the launch still goes, with the bare task.
   let firstPrompt = task;
@@ -236,8 +252,6 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
   }
   // Attached files and images: their paths follow the task.
   firstPrompt = promptWithAttachments(firstPrompt, req.attachments);
-  const launchId = newLaunchId(deps);
-  result.launchId = launchId;
   const plan = (agentIndex: number): QueuedLaunch => ({ req: { ...req, task }, agentIndex, projectId, launchId, firstPrompt });
 
   const started: { sessionId: string; launch: QueuedLaunch }[] = [];
@@ -255,6 +269,7 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
       if (i === 0) return result;
       continue;
     }
+    deps.started?.(session.id);
     deps.place(session.id, i, result.sessionIds[0] ?? null);
     result.sessionIds.push(session.id);
     started.push({ sessionId: session.id, launch });

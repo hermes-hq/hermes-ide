@@ -198,6 +198,19 @@ describe("launchTask", () => {
     expect(q.created[0].initialPrompt).toBe("Fix the login bug");
   });
 
+  it("Full-track tasks the slug cannot spell (Chinese, Russian) each get their own feature folder", async () => {
+    const trackPrompt = vi.fn(async (_root: string, slug: string) => `TRACK(${slug})`);
+    let n = 0;
+    const f = fakeDeps({ trackPrompt, worktreePath: vi.fn(async () => null), newLaunchId: () => `launch-${++n}` });
+    const inCheckout = [agent("claude", "terminal", "", { worktree: false, createBranch: false })];
+    await launchTask(req({ task: "修复登录页面的测试", track: "Full", agents: inCheckout }), f.deps);
+    await launchTask(req({ task: "Исправить тест входа", track: "Full", agents: inCheckout }), f.deps);
+    const slugs = f.files.map(([, slug]) => slug);
+    expect(slugs).toEqual(["task-1", "task-2"]);
+    // The first prompt sends the agent to the same folder feature.md is in.
+    expect(trackPrompt.mock.calls.map(([, slug]) => slug)).toEqual(slugs);
+  });
+
   it("a Full track whose prompt cannot be built still launches, with the bare task", async () => {
     const f = fakeDeps({ trackPrompt: vi.fn(async () => Promise.reject(new Error("no repo"))) });
     const r = await launchTask(req({ track: "Full" }), f.deps);

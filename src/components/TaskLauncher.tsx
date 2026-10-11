@@ -62,6 +62,7 @@ import { LaunchAttachments, useFileDrop, useLaunchAttachmentInput } from "./Laun
 import { FILE_DROP_TARGET } from "../utils/fileDropTarget";
 import { attachmentFromPath, type LaunchAttachment } from "../launcher/attachments";
 import { useModalTabTrap } from "../hooks/useFocusTrap";
+import { queuedNewBranches, useTaskQueue } from "../fleet/taskQueue";
 import {
   TASK_LAUNCHES_KEY,
   agentTakesFirstPrompt,
@@ -683,6 +684,12 @@ export function TaskLauncher({
   // checkout, or that folder.
   const plainFolder = gitRoot === null && !!folder && folder.exists && folder.isDir;
   const root = launchRoot(gitRoot, folder, probed?.resolved || repoPath.trim());
+  // Branches the tasks waiting in the queue will make when they start: taken already.
+  const queued = useTaskQueue();
+  const takenBranches = useMemo(() => {
+    const reserved = root ? queuedNewBranches(queued, root, PLATFORM === "win") : [];
+    return reserved.length > 0 ? [...localBranches, ...reserved] : localBranches;
+  }, [queued, root, localBranches]);
   useEffect(() => {
     if (!checksEditedRef.current) setChecks(doneWhen.commands);
   }, [doneWhen, checksEdited]);
@@ -690,9 +697,9 @@ export function TaskLauncher({
   useEffect(() => {
     if (branchEdited || branchEditedRef.current) return;
     // A library prompt's text opens with markup ("<context>"): its title names the branch.
-    const auto = autoTaskBranch(libPrompt?.title || task, localBranches, fallbackId);
+    const auto = autoTaskBranch(libPrompt?.title || task, takenBranches, fallbackId);
     setBranch((cur) => (branchEditedRef.current ? cur : auto));
-  }, [task, libPrompt, branchEdited, localBranches, fallbackId]);
+  }, [task, libPrompt, branchEdited, takenBranches, fallbackId]);
 
   // Another project: its usual combination, when the person has not made
   // this one their own; when they have, the launcher only says what the
@@ -875,12 +882,12 @@ export function TaskLauncher({
     const list = [mk(main, mainBranch, hasAgentView(effective.agentId) ? viewMode : "terminal")];
     if (effective.alsoOn) {
       // The second agent always gets its own new branch (two agents never share a checkout).
-      const alsoBranch = freeSecondAgentBranch(where.kind === "existing-branch" ? where.branch : mainBranch || taskBranch(task, fallbackId), effective.alsoOn.agentId, localBranches);
+      const alsoBranch = freeSecondAgentBranch(where.kind === "existing-branch" ? where.branch : mainBranch || taskBranch(task, fallbackId), effective.alsoOn.agentId, takenBranches);
       const also: LaunchChoice = { ...effective.alsoOn, where: { kind: "new-worktree", baseBranch: where.kind === "new-worktree" ? where.baseBranch : where.kind === "existing-branch" ? where.branch : "", branch: alsoBranch } };
       list.push(mk(also, alsoBranch, "terminal"));
     }
     return list;
-  }, [effective, branch, viewMode, capsOf, where, task, backend, fallbackId, plainFolder, localBranches]);
+  }, [effective, branch, viewMode, capsOf, where, task, backend, fallbackId, plainFolder, takenBranches]);
 
   /** Whether the account an agent runs on is signed in, as the capability backend says (undefined: not known). */
   const accountSignedIn = useCallback(
@@ -902,7 +909,7 @@ export function TaskLauncher({
       doctor: byId,
       repoPath,
       gitRoot,
-      branches: localBranches,
+      branches: takenBranches,
       disk: disk ? { freeBytes: disk.free_bytes, requiredBytes: disk.required_bytes, belowThreshold: disk.below_threshold } : null,
       folder,
     });
@@ -925,7 +932,7 @@ export function TaskLauncher({
         // The held account's own row (below) says it, with what to do.
         !(holdActive && r.kind === "signed-out" && r.agentId === accountHold?.agentId && r.accountId === accountHold?.was),
     );
-  }, [plannedAgents, byId, repoPath, gitRoot, branchSet, localBranches, disk, where, folder, accountSignedIn, holdActive, accountHold]);
+  }, [plannedAgents, byId, repoPath, gitRoot, branchSet, takenBranches, disk, where, folder, accountSignedIn, holdActive, accountHold]);
 
   const customMissing = isCustom && !choice?.extraArgs.trim();
   // A base branch the repository lacks, until the effect above has replaced it: never launched.
