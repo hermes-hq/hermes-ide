@@ -292,7 +292,10 @@ export function SessionComposer() {
       // bridge that makes multi-turn conversations feel continuous.
       await submitAgentMessage(composerSessionId, draft, attachments);
       dispatch({ type: "SET_COMPOSER_DRAFT", sessionId: composerSessionId, draft: "" });
-      setPendingImages([]);
+      // Switched away while it was sending: the images on screen are the
+      // other session's; drop the sent ones from this session's stash.
+      if (imagesSessionId.current === composerSessionId) setPendingImages([]);
+      else delete imagesBySession.current[composerSessionId];
       closeOverlay();
     } catch (err) {
       console.error("[SessionComposer] Failed to submit:", err);

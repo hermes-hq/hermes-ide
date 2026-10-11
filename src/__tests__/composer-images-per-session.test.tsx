@@ -93,6 +93,31 @@ describe("composer images stay with their session", () => {
     expect(sentAttachments()).toHaveLength(1);
   });
 
+  it("a switch while A's message is sending keeps B's image and does not bring A's back", async () => {
+    const ui = () => <I18nProvider><SessionComposer /></I18nProvider>;
+    const { container, rerender } = render(ui());
+    await pasteImage(container);
+
+    let finishSend = () => {};
+    submitAgentMessageMock.mockImplementationOnce(() => new Promise<void>((r) => { finishSend = r; }));
+    await send(container);
+
+    fakeState.activeSessionId = "b";
+    rerender(ui());
+    await pasteImage(container);
+    await act(async () => { finishSend(); });
+
+    await send(container);
+    expect(submitAgentMessageMock.mock.calls.at(-1)?.[0]).toBe("b");
+    expect(sentAttachments()).toHaveLength(1);
+
+    fakeState.activeSessionId = "a";
+    rerender(ui());
+    await send(container);
+    expect(submitAgentMessageMock.mock.calls.at(-1)?.[0]).toBe("a");
+    expect(sentAttachments()).toHaveLength(0);
+  });
+
   it("a switch to a terminal session and back keeps the image", async () => {
     const ui = () => <I18nProvider><SessionComposer /></I18nProvider>;
     const { container, rerender } = render(ui());
