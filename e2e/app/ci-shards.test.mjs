@@ -258,6 +258,24 @@ describe.skipIf(process.platform === "win32")("real-app shard steps in ci.yml", 
     expect(codes.filter((c) => c !== 0)).toHaveLength(1);
   });
 
+  it("a failed attempt's evidence is kept under a name a rerun cannot overwrite and the acceptance gate does not read", () => {
+    const lines = workflowLines();
+    const job = lines.findIndex((l) => l === "  e2e-app:");
+    const end = lines.findIndex((l, i) => i > job && /^ {2}\S/.test(l));
+    const at = lines.findIndex((l, i) => i > job && i < end && l.trim() === "- name: Keep this failed attempt's evidence");
+    expect(at).toBeGreaterThan(job);
+    const step = [];
+    for (let i = at + 1; i < end && !/^\s+- name:/.test(lines[i]); i++) step.push(lines[i].trim());
+    expect(step).toContain("if: failure()");
+    const name = step.find((l) => l.startsWith("name: "))?.slice(6) ?? "";
+    expect(name).toContain("${{ github.run_attempt }}");
+    expect(step).not.toContain("overwrite: true");
+    const gate = lines.map((l) => /^\s+pattern:\s*(e2e-evidence-\S*)$/.exec(l)).find(Boolean);
+    expect(gate).toBeTruthy();
+    const glob = new RegExp(`^${gate[1].replace(/[.+?^${}()|[\]\\]/g, "\\$&").replace(/\*/g, ".*")}$`);
+    expect(glob.test(name)).toBe(false);
+  });
+
   it("the build job runs the build-toolchain scenarios, and fails when one fails", () => {
     const buildFiles = Object.keys(CI_ELSEWHERE).filter((f) => CI_ELSEWHERE[f] === "build");
     const ok = runStep(makeRig(), "Run build-toolchain scenarios");

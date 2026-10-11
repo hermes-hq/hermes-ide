@@ -734,6 +734,18 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      # A passing rerun replaces the evidence above, so a failed attempt's
+      # logs are also kept under their own name (outside the e2e-evidence-*
+      # pattern the acceptance gate reads).
+      - name: Keep this failed attempt's evidence
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: failed-attempt-${{ github.run_attempt }}-${{ matrix.platform.name }}-${{ matrix.shard }}
+          path: ${{ runner.temp }}/hermes-e2e/evidence
+          if-no-files-found: warn
+          retention-days: 14
+
   # ── Installers: AppImage self-update (Linux), winget (Windows) ───────
   # F25. Linux builds two real AppImages of the test app (0.9.0 and 0.9.1,
   # signed with a throwaway updater key), installs the old one, and lets it

@@ -78,10 +78,32 @@ export async function startAgent(bridge, fx, { agentId = "claude", cwd, label },
   return id;
 }
 
-/** The fake agent asks for permission (its own PermissionRequest hook). */
-export async function block(bridge, id) {
+/**
+ * The fake agent asks for permission (its own PermissionRequest hook). With
+ * `fx`, a timeout also says how far it got: whether the terminal showed the
+ * question (the key arrived), how the hook ended (code, ms, stderr) and what
+ * the session's last events were.
+ */
+export async function block(bridge, id, fx) {
   await bridge.eval(`await window.__TAURI_INTERNALS__.invoke("write_to_session", { sessionId: ${JSON.stringify(id)}, data: btoa("p") }); return true;`);
-  await bridge.waitFor("needs approval", `return window.__HERMES_E2E__.sessionStatus(${JSON.stringify(id)}).kind === "needs_approval";`, { timeoutMs: 15_000 });
+  try {
+    await bridge.waitFor("needs approval", `return window.__HERMES_E2E__.sessionStatus(${JSON.stringify(id)}).kind === "needs_approval";`, { timeoutMs: 15_000 });
+  } catch (e) {
+    const app = await bridge
+      .eval(`const h = window.__HERMES_E2E__, id = ${JSON.stringify(id)};
+        return { status: h.sessionStatus(id), terminal: (h.readTerminal(id) || []).slice(-6), events: h.sessionEventSnapshot(id).events.slice(-8) };`)
+      .catch((err) => `unavailable: ${err.message}`);
+    let fakes = "not asked";
+    if (fx) {
+      try {
+        fakes = fx.records().map((r) => ({ pid: r.pid, cwd: r.cwd, events: r.events.slice(-6), hooks: r.hooksRan.slice(-3) }));
+      } catch (err) {
+        fakes = `unavailable: ${err.message}`;
+      }
+    }
+    e.message += `\n  session ${id}: ${JSON.stringify(app)}\n  fake agents: ${JSON.stringify(fakes)}`;
+    throw e;
+  }
 }
 
 /** Type into a session's terminal (bytes, as the keyboard sends them). */
