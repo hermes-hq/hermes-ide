@@ -116,6 +116,10 @@ pub struct LaunchInput<'a> {
     /// agent, so Hermes must not set one (the vendor's `rate_limits` then
     /// never reach Hermes, and a limit has no reset time).
     pub user_status_line: bool,
+    /// The user has a `notify` program of their own in Codex's config, so
+    /// Hermes must not set one (one setting: ours would replace theirs; the
+    /// Stop hook still tells the turn's end).
+    pub user_notify: bool,
     /// Absolute path of the `hi` helper.
     pub hi: &'a Path,
     /// The session's launch folder (`<app data>/launch/<session id>`).
@@ -519,12 +523,18 @@ pub fn settings_set_status_line(files: &[PathBuf]) -> bool {
 }
 
 /// The settings files where a user may have set Claude's status line: their
-/// own (`$CLAUDE_CONFIG_DIR` or `~/.claude`) and the project's.
-fn claude_settings_files(cwd: &str) -> Vec<PathBuf> {
+/// own (the account's profile the launch sets, else `$CLAUDE_CONFIG_DIR` or
+/// `~/.claude`) and the project's.
+fn claude_settings_files(cwd: &str, profile_env: Option<(&str, &str)>) -> Vec<PathBuf> {
     let mut files = Vec::new();
-    let config_dir = std::env::var_os("CLAUDE_CONFIG_DIR")
-        .filter(|d| !d.is_empty())
-        .map(PathBuf::from)
+    let config_dir = profile_env
+        .filter(|(name, value)| *name == "CLAUDE_CONFIG_DIR" && !value.is_empty())
+        .map(|(_, value)| PathBuf::from(value))
+        .or_else(|| {
+            std::env::var_os("CLAUDE_CONFIG_DIR")
+                .filter(|d| !d.is_empty())
+                .map(PathBuf::from)
+        })
         .or_else(|| crate::platform::home_dir().map(|h| h.join(".claude")));
     if let Some(dir) = config_dir {
         files.push(dir.join("settings.json"));
@@ -533,6 +543,22 @@ fn claude_settings_files(cwd: &str) -> Vec<PathBuf> {
     files.push(project.join("settings.json"));
     files.push(project.join("settings.local.json"));
     files
+}
+
+/// Whether a TOML document sets `key` at its top level (before any table).
+fn toml_sets_top_level_key(text: &str, key: &str) -> bool {
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') && line.ends_with(']') {
+            return false;
+        }
+        if line
+            .strip_prefix(key)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// The per-launch defaults file for the `env_file` method (Gemini's
@@ -736,17 +762,34 @@ fn signal_setup(
         "worktree_file" => {
             if crate::git::worktree::is_hermes_worktree_path(&cwd.to_string_lossy()) {
                 for rel in &signals.files {
+                    // A hooks file the repository tracks is the team's: git
+                    // would show it changed and a commit would carry our hook.
+                    if git_tracks(cwd, rel) {
+                        continue;
+                    }
                     let path = cwd.join(rel);
+                    match rel.find("/hooks/") {
+                        // The plugin's whole folder, a name only Hermes uses:
+                        // the shared `info/exclude`.
+                        Some(at) => setup.git_excludes.push(format!("{}/", &rel[..at])),
+                        // A file name the user may use too (Antigravity's
+                        // project hooks): ignored by a `.gitignore` beside it
+                        // that only this worktree has, since `info/exclude`
+                        // would hide the user's own file in every checkout.
+                        None => {
+                            let ignore = path.with_file_name(".gitignore");
+                            let name = path.file_name().unwrap_or_default().to_string_lossy();
+                            let text = format!("/{name}\n/.gitignore\n");
+                            if std::fs::read_to_string(&ignore).is_ok_and(|t| t != text) {
+                                continue;
+                            }
+                            setup.files.push((ignore, text));
+                        }
+                    }
                     let existing = std::fs::read_to_string(&path).ok();
                     setup
                         .files
                         .push((path, worktree_hooks_json(agent, hi, existing.as_deref())));
-                    // Exclude the plugin's whole folder when it has one.
-                    let exclude = match rel.find("/hooks/") {
-                        Some(at) => format!("{}/", &rel[..at]),
-                        None => rel.clone(),
-                    };
-                    setup.git_excludes.push(exclude);
                 }
             }
             None
@@ -934,6 +977,15 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
     {
         signals.args.push("-c".to_string());
         signals.args.push(format!("hooks.state={state}"));
+    }
+    if input.user_notify {
+        if let Some(at) = signals
+            .args
+            .windows(2)
+            .position(|w| w[0] == "-c" && w[1].starts_with("notify="))
+        {
+            signals.args.drain(at..at + 2);
+        }
     }
     env.extend(signals.env.iter().map(|(k, v)| (k.clone(), v.clone())));
 
@@ -1138,6 +1190,16 @@ fn plan_login(agent: &Agent, input: &LaunchInput<'_>) -> Option<LaunchPlan> {
         check_hook: false,
         first_prompt: None,
     })
+}
+
+/// Whether git tracks `rel` in the checkout at `cwd`.
+fn git_tracks(cwd: &Path, rel: &str) -> bool {
+    crate::git::cli::git_command()
+        .arg("-C")
+        .arg(cwd)
+        .args(["ls-files", "--error-unmatch", "--", rel])
+        .output()
+        .is_ok_and(|o| o.status.success())
 }
 
 /// Keep the hook files Hermes wrote into its own worktree out of git:
@@ -1549,6 +1611,11 @@ pub(crate) fn prepare_helper_launch(
     let new_session_id = uuid::Uuid::new_v4().to_string();
     let nonce = uuid::Uuid::new_v4().simple().to_string();
     let stream_secret = uuid::Uuid::new_v4().simple().to_string();
+    let profile_env = s
+        .agent_launch
+        .profile_env
+        .as_ref()
+        .map(|p| (p.name.as_str(), p.value.as_str()));
     let Some(plan) = plan_launch(&LaunchInput {
         session_id: &s.id,
         provider: &provider,
@@ -1566,7 +1633,11 @@ pub(crate) fn prepare_helper_launch(
         resume_id: s.vendor_session_id.as_deref(),
         seed_prompt: s.seed_prompt.as_deref(),
         user_status_line: limits_via_status_line(agent)
-            && settings_set_status_line(&claude_settings_files(&s.working_directory)),
+            && settings_set_status_line(&claude_settings_files(&s.working_directory, profile_env)),
+        user_notify: agent.terminal.signals.hook_flags.as_deref() == Some("toml_config")
+            && crate::agent_caps::report::codex_home(s.agent_launch.profile_env.as_ref())
+                .and_then(|home| std::fs::read_to_string(home.join("config.toml")).ok())
+                .is_some_and(|text| toml_sets_top_level_key(&text, "notify")),
         hi: &hi,
         session_dir: &session_dir,
         new_session_id: &new_session_id,
@@ -1575,11 +1646,7 @@ pub(crate) fn prepare_helper_launch(
         stream_secret: &stream_secret,
         model_id: s.agent_launch.model_id.as_deref(),
         effort: s.agent_launch.effort.as_deref(),
-        profile_env: s
-            .agent_launch
-            .profile_env
-            .as_ref()
-            .map(|p| (p.name.as_str(), p.value.as_str())),
+        profile_env,
         login: s.agent_launch.login,
         clear_screen: s.agent_launch.relaunch,
         hook_trust,
@@ -3747,6 +3814,7 @@ pub(crate) mod tests {
             resume_id,
             seed_prompt: None,
             user_status_line: false,
+            user_notify: false,
             hi,
             session_dir,
             new_session_id: "11111111-2222-4333-8444-555555555555",
@@ -4353,19 +4421,20 @@ pub(crate) mod tests {
         assert!(plain.git_excludes.is_empty());
         assert_eq!(plain.spec.args, Vec::<String>::new());
 
-        // A Hermes-owned worktree (a real git repository, so the exclude
-        // file can be written and checked).
+        // A Hermes-owned worktree (a real linked worktree, so what git sees
+        // there and in the main checkout can be checked).
         let tmp = tempfile::tempdir().unwrap();
+        let main = tmp.path().join("main");
         let repo = tmp
             .path()
             .join("hermes-worktrees")
             .join("abc")
             .join("s1_task");
-        std::fs::create_dir_all(&repo).unwrap();
-        let git = |args: &[&str]| {
+        std::fs::create_dir_all(&main).unwrap();
+        let git_in = |dir: &Path, args: &[&str]| {
             let out = std::process::Command::new("git")
                 .arg("-C")
-                .arg(&repo)
+                .arg(dir)
                 .args(args)
                 .output()
                 .unwrap();
@@ -4376,8 +4445,27 @@ pub(crate) mod tests {
             );
             String::from_utf8_lossy(&out.stdout).trim().to_string()
         };
-        git(&["init", "-q"]);
-        // A hooks file the repository already carries is merged, not replaced.
+        let git = |args: &[&str]| git_in(&repo, args);
+        git_in(&main, &["init", "-q", "-b", "main"]);
+        git_in(
+            &main,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "--allow-empty",
+                "-m",
+                "init",
+            ],
+        );
+        git_in(
+            &main,
+            &["worktree", "add", "-q", "-b", "s1", &repo.to_string_lossy()],
+        );
+        // An untracked hooks file already there is merged, not replaced.
         std::fs::create_dir_all(repo.join(".agents")).unwrap();
         std::fs::write(
             repo.join(".agents/hooks.json"),
@@ -4388,9 +4476,10 @@ pub(crate) mod tests {
         let mut inp = input("antigravity", None, hi, dir);
         inp.cwd = &cwd;
         let plan = plan_launch(&inp).unwrap();
-        assert_eq!(plan.files.len(), 1);
-        assert_eq!(plan.files[0].0, repo.join(".agents/hooks.json"));
-        let json: serde_json::Value = serde_json::from_str(&plan.files[0].1).unwrap();
+        assert_eq!(plan.files.len(), 2);
+        assert_eq!(plan.files[0].0, repo.join(".agents/.gitignore"));
+        assert_eq!(plan.files[1].0, repo.join(".agents/hooks.json"));
+        let json: serde_json::Value = serde_json::from_str(&plan.files[1].1).unwrap();
         assert_eq!(
             json["team-lint"]["enabled"], true,
             "the repository's own entry survives"
@@ -4415,26 +4504,52 @@ pub(crate) mod tests {
                 format!("\"/app/hi\" signal --agent antigravity --event {event}")
             );
         }
-        assert_eq!(plan.git_excludes, vec![".agents/hooks.json".to_string()]);
+        // The file name is the user's too: kept out of the shared exclude.
+        assert!(plan.git_excludes.is_empty());
         assert!(!plan.expects_start_signal);
 
-        // Writing the plan writes the file and excludes it from git.
+        // Writing the plan writes the file, which git ignores in this
+        // worktree only: the user's own hooks file in the main checkout
+        // still shows.
         write_plan(&tmp.path().join("launch").join("hermes-1"), &plan).unwrap();
         let written: serde_json::Value = serde_json::from_str(
             &std::fs::read_to_string(repo.join(".agents/hooks.json")).unwrap(),
         )
         .unwrap();
         assert!(written.get("hermes-signal").is_some());
-        let exclude = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
-        assert!(
-            exclude.lines().any(|l| l == ".agents/hooks.json"),
-            "{exclude}"
-        );
         assert_eq!(git(&["status", "--porcelain"]), "", "git sees nothing new");
-        // A second launch does not duplicate the exclude line.
+        std::fs::create_dir_all(main.join(".agents")).unwrap();
+        std::fs::write(main.join(".agents/hooks.json"), "{}").unwrap();
+        assert_eq!(
+            git_in(&main, &["status", "--porcelain", "-uall"]),
+            "?? .agents/hooks.json"
+        );
+        // A second launch rewrites the same ignore file.
+        let plan = plan_launch(&inp).unwrap();
+        assert_eq!(plan.files.len(), 2);
         write_plan(&tmp.path().join("launch").join("hermes-1"), &plan).unwrap();
-        let exclude = std::fs::read_to_string(repo.join(".git/info/exclude")).unwrap();
-        assert_eq!(exclude.matches(".agents/hooks.json").count(), 1);
+        assert_eq!(git(&["status", "--porcelain"]), "");
+
+        // A hooks file the repository tracks is the team's: left alone.
+        git_in(&main, &["add", ".agents/hooks.json"]);
+        git_in(
+            &main,
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "-m",
+                "hooks",
+            ],
+        );
+        std::fs::remove_dir_all(repo.join(".agents")).unwrap();
+        git(&["merge", "-q", "--ff-only", "main"]);
+        let tracked = plan_launch(&inp).unwrap();
+        assert!(tracked.files.is_empty(), "{:?}", tracked.files);
+        assert!(tracked.git_excludes.is_empty());
 
         // goose: its own plugin folder, excluded as a folder.
         let mut inp = input("goose", None, hi, dir);
@@ -4713,6 +4828,31 @@ pub(crate) mod tests {
         claude.hook_trust = Some(trust);
         let plan = plan_launch(&claude).unwrap();
         assert!(!plan.spec.args.iter().any(|a| a.contains("hooks.state")));
+    }
+
+    /// A Codex user's own `notify` program is kept: Hermes sets none then.
+    #[test]
+    fn codex_keeps_the_users_own_notify_program() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let mut codex = input("codex", None, hi, dir);
+        codex.user_notify = true;
+        let args = plan_launch(&codex).unwrap().spec.args;
+        assert!(!args.iter().any(|a| a.starts_with("notify=")), "{args:?}");
+        assert!(
+            args.iter().any(|a| a.starts_with("hooks.Stop=")),
+            "{args:?}"
+        );
+        assert!(args.windows(2).all(|w| !(w[0] == "-c" && w[1] == "-c")));
+
+        assert!(toml_sets_top_level_key(
+            "model = \"o3\"\nnotify = [\"bash\", \"-lc\", \"afplay x\"]\n",
+            "notify"
+        ));
+        assert!(!toml_sets_top_level_key(
+            "# notify = [\"x\"]\nnotify_extra = 1\n[profiles.work]\nnotify = [\"y\"]\n",
+            "notify"
+        ));
     }
 
     #[test]
@@ -5105,6 +5245,28 @@ pub(crate) mod tests {
             broken.clone()
         ]));
         assert!(settings_set_status_line(&[none, plain, with]));
+    }
+
+    /// A second Claude account: its own profile's settings are the user's,
+    /// not the default `~/.claude` ones.
+    #[test]
+    fn an_account_profile_is_where_claude_user_settings_are_read() {
+        let tmp = tempfile::tempdir().unwrap();
+        let work = tmp.path().join(".claude-work");
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(
+            work.join("settings.json"),
+            r#"{"statusLine":{"type":"command","command":"mine"}}"#,
+        )
+        .unwrap();
+        let cwd = tmp.path().join("project").to_string_lossy().to_string();
+        let work_str = work.to_string_lossy().to_string();
+        let files = claude_settings_files(&cwd, Some(("CLAUDE_CONFIG_DIR", &work_str)));
+        assert_eq!(files[0], work.join("settings.json"));
+        assert!(settings_set_status_line(&files));
+        // Another agent's profile variable is not Claude's.
+        let other = claude_settings_files(&cwd, Some(("CODEX_HOME", &work_str)));
+        assert_ne!(other[0], work.join("settings.json"));
     }
 
     #[test]

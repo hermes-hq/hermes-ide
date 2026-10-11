@@ -19,6 +19,7 @@
 //! answer is not asked for again before [`RETRY_AFTER`].
 
 use std::collections::HashMap;
+use std::ffi::{OsStr, OsString};
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
@@ -82,15 +83,30 @@ pub fn trust_table(hooks: &[ListedHook], hi: &str) -> Option<String> {
     (!ours.is_empty()).then(|| format!("{{{}}}", ours.join(",")))
 }
 
-/// Ask `program app-server <flags>` for its hooks, in `cwd`.
-fn ask(program: &Path, flags: &[String], cwd: &Path) -> Result<Vec<ListedHook>, String> {
-    let mut child = Command::new(program)
-        .arg("app-server")
+/// Ask `program app-server <flags>` for its hooks, in `cwd`, with `path_env`
+/// as its PATH: an app opened from the Dock has a short one, and an npm
+/// install is a `node` script that would not start with it.
+fn ask(
+    program: &Path,
+    flags: &[String],
+    cwd: &Path,
+    path_env: &OsStr,
+) -> Result<Vec<ListedHook>, String> {
+    let mut cmd = Command::new(program);
+    cmd.arg("app-server")
         .args(flags)
         .current_dir(cwd)
+        .env("PATH", path_env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
-        .stderr(Stdio::null())
+        .stderr(Stdio::null());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    let mut child = cmd
         .spawn()
         .map_err(|e| format!("could not start {}: {e}", program.display()))?;
     let mut stdin = child.stdin.take().ok_or("no stdin")?;
@@ -216,7 +232,9 @@ pub fn trusted_state(
             );
             std::thread::spawn(move || {
                 let started = Instant::now();
-                let result = match ask(&program, &flags, &cwd) {
+                let path_env: OsString = std::env::join_paths(search_dirs())
+                    .unwrap_or_else(|_| std::env::var_os("PATH").unwrap_or_default());
+                let result = match ask(&program, &flags, &cwd, &path_env) {
                     Ok(hooks) => {
                         let value = trust_table(&hooks, &hi);
                         log::info!(
@@ -252,10 +270,15 @@ pub fn trusted_state(
     }
 }
 
+/// The folders a new terminal would search.
+fn search_dirs() -> &'static [PathBuf] {
+    static DIRS: OnceLock<Vec<PathBuf>> = OnceLock::new();
+    DIRS.get_or_init(crate::agent_doctor::search_dirs)
+}
+
 /// Find `name` in the folders a new terminal would search.
 pub fn find_program(name: &str) -> Option<PathBuf> {
-    static DIRS: OnceLock<Vec<PathBuf>> = OnceLock::new();
-    let dirs = DIRS.get_or_init(crate::agent_doctor::search_dirs);
+    let dirs = search_dirs();
     let names: Vec<String> = if cfg!(windows) {
         vec![
             format!("{name}.exe"),
@@ -404,6 +427,36 @@ mod tests {
             1,
             "asked once, however many launches waited"
         );
+    }
+
+    /// An npm install of Codex is a script run by `node`, which an app
+    /// opened from the Dock does not have on its PATH: the app server is
+    /// started with the PATH a new terminal would have.
+    #[cfg(unix)]
+    #[test]
+    fn the_app_server_starts_with_the_terminal_path() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let bin = dir.path().join("bin");
+        std::fs::create_dir_all(&bin).unwrap();
+        let list = r#"{"id":2,"result":{"data":[{"cwd":"/repo","hooks":[{"key":"k:stop","source":"sessionFlags","command":"/app/hi signal","currentHash":"sha256:1"}]}]}}"#;
+        let node = bin.join("fake-node-for-hermes");
+        std::fs::write(
+            &node,
+            format!("#!/bin/sh\nread a\necho '{{\"id\":1,\"result\":{{}}}}'\nread b\nread c\necho '{list}'\n"),
+        )
+        .unwrap();
+        let program = dir.path().join("codex");
+        std::fs::write(&program, "#!/bin/sh\nexec fake-node-for-hermes\n").unwrap();
+        for f in [&node, &program] {
+            std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o755)).unwrap();
+        }
+        let path_env =
+            std::env::join_paths([bin.as_path(), Path::new("/usr/bin"), Path::new("/bin")])
+                .unwrap();
+        let hooks = ask(&program, &[], dir.path(), &path_env).unwrap();
+        assert_eq!(hooks.len(), 1);
+        assert_eq!(hooks[0].key, "k:stop");
     }
 
     #[cfg(unix)]
