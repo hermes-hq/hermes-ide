@@ -1071,8 +1071,11 @@ mod tests {
         assert_eq!(p.analysis.changed_files, vec!["a.txt", "c.txt"]);
         let out = land("second");
         assert_eq!(out.status, LandStatus::Landed, "{:?}", out.conflict_files);
+        // (Line ends as written: git on Windows may check files out with CRLF.)
         assert_eq!(
-            fs::read_to_string(repo.join("a.txt")).unwrap(),
+            fs::read_to_string(repo.join("a.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "one\nTWO!\nthree\n"
         );
         // Main moved on in another file since: still only the new work
@@ -1086,7 +1089,9 @@ mod tests {
         assert_eq!(p.analysis.changed_files, vec!["a.txt"]);
         assert_eq!(land("third").status, LandStatus::Landed);
         assert_eq!(
-            fs::read_to_string(repo.join("a.txt")).unwrap(),
+            fs::read_to_string(repo.join("a.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "one\nTWO!!\nthree\n"
         );
         assert!(repo.join("d.txt").exists() && repo.join("c.txt").exists());
