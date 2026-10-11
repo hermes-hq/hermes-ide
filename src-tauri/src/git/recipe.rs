@@ -617,27 +617,37 @@ fn kill_tree(pid: u32) {
         .status();
 }
 
+/// Setup lines are sh syntax: the user's login shell runs them only when it
+/// is a POSIX one (fish is not).
+#[cfg(unix)]
+fn is_posix_shell(shell: &str) -> bool {
+    let known = ["sh", "bash", "zsh", "dash", "ksh"];
+    Path::new(shell)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| known.contains(&n))
+}
+
 /// The shell a setup command runs in: the user's login shell when it is a
-/// POSIX-like one (so its profile's PATH applies), else `/bin/sh`.
+/// POSIX one (so its profile's PATH applies), else `/bin/sh` with the PATH
+/// the user's shell sets up.
 #[cfg(unix)]
 fn shell_command(cmd: &str) -> Command {
     use std::os::unix::process::CommandExt;
     let user_shell = crate::pty::detect_shell();
-    let known = ["sh", "bash", "zsh", "dash", "ksh", "fish"];
-    let is_known = Path::new(&user_shell)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| known.contains(&n));
-    let shell = if is_known {
-        user_shell
+    let (shell, path) = if is_posix_shell(&user_shell) {
+        (user_shell, std::env::var_os("PATH"))
     } else {
-        "/bin/sh".to_string()
+        (
+            "/bin/sh".to_string(),
+            Some(crate::done_when::check_path_var()),
+        )
     };
     let mut c = Command::new(shell);
     c.args(["-l", "-c", cmd]);
     c.process_group(0);
     // A GUI app starts with a short PATH: add the usual tool folders.
-    let mut paths: Vec<PathBuf> = std::env::var_os("PATH")
+    let mut paths: Vec<PathBuf> = path
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
     for dir in crate::platform::well_known_path_dirs() {
@@ -1554,6 +1564,15 @@ mod tests {
             started.elapsed().as_secs() < 30,
             "the command was killed, not waited for"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_lines_run_in_a_posix_shell_never_in_fish() {
+        assert!(is_posix_shell("/bin/zsh"));
+        assert!(is_posix_shell("/usr/local/bin/bash"));
+        assert!(!is_posix_shell("/opt/homebrew/bin/fish"));
+        assert!(!is_posix_shell("/usr/bin/nu"));
     }
 
     #[cfg(unix)]
