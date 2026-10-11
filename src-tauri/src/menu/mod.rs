@@ -118,6 +118,7 @@ fn app_accel(action: &str) -> Result<String, Box<dyn std::error::Error>> {
 pub const QUIT_ID: &str = "hermes.quit";
 
 /// View > Toggle Fullscreen on Windows and Linux (macOS has the predefined item).
+/// The builder spells it out: the shortcuts generator reads literal ids.
 const FULLSCREEN_ID: &str = "view.fullscreen";
 
 /// Label and accelerator the predefined Quit item has on each platform:
@@ -325,7 +326,7 @@ pub fn build_app_menu(app: &AppHandle) -> Result<Menu<Wry>, Box<dyn std::error::
 
     #[cfg(not(target_os = "macos"))]
     {
-        let fullscreen = MenuItemBuilder::with_id(FULLSCREEN_ID, "Toggle Fullscreen")
+        let fullscreen = MenuItemBuilder::with_id("view.fullscreen", "Toggle Fullscreen")
             .accelerator("F11")
             .build(app)?;
         view_builder = view_builder.item(&fullscreen);
