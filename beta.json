@@ -1,47 +1,47 @@
 {
-  "version": "2.1.5",
-  "notes": "Hermes IDE 2.1.5 — https://github.com/hermes-hq/hermes-ide/releases/tag/v2.1.5",
-  "pub_date": "2026-10-11T01:31:06Z",
+  "version": "2.2.1",
+  "notes": "Hermes IDE 2.2.1 — https://github.com/hermes-hq/hermes-ide/releases/tag/v2.2.1",
+  "pub_date": "2026-10-11T03:41:05Z",
   "platforms": {
     "darwin-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQU9DRnBQK2IwSmRTR1ovYmNzTzdFSlRKMkY2YzdOT1QwRWZpV1diaTFMU1FvaUV0TWEwSCtML0FPUjFoM0loWEgrK1p6cHJ0MlBCb0NNWTJZZ2NSNWc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjgxMzgwCWZpbGU6SEVSTUVTLUlERS5hcHAudGFyLmd6CXZlcnNpb246Mi4xLjUKVzhiQVR2ajhiME9ocmdRYnJoMWtpbDh2RUlXcTRWMHBEc1hjTFhTMzhDYzd0QVBWVEVHdlVWSDk5YUFIZ0JLTC9XdVl0S2g2Ny8ya3RoWDNQSDdQQ2c9PQo=",
-      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.1.5/darwin-aarch64-HERMES-IDE.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUhIc0hUd3lxNHltcVFDQkkwelZ2MlNDekh1RWJKUHNOa2ZxV0hjeVI5VlZITFJNWXBvbXo2ZFZSM1VROGFxMm5sWjJGRlB5dzV6cDcwRzBZN1JyUFF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjg5Nzc4CWZpbGU6SEVSTUVTLUlERS5hcHAudGFyLmd6CXZlcnNpb246Mi4yLjEKVlBVa21YQTFOS2Y1bndHZFJWMUxMdFNKTEtlVGxUM2lySWhVazA4a1RXV0oxNVVrelJYOWdGNUdRU01PWU4zN3VTMlRraHgrVU1pQ0w4WW1ia213Q3c9PQo=",
+      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.2.1/darwin-aarch64-HERMES-IDE.app.tar.gz"
     },
     "darwin-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQU9ONnk4eS9XZytRUU90dFAyQVlyZ2dDWU5XYlVpdU9hdG1OUWtWZWxnMWYrdkVDUnZRSVp5VnJGd09kcVZmb1pYMVlVU2dmVXNKYUdSakFETUJSZHc0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjgxNjYyCWZpbGU6SEVSTUVTLUlERS5hcHAudGFyLmd6CXZlcnNpb246Mi4xLjUKS1U5NEJTbVA3Vnl6ZWl3aWxjTnFweEw4WGRaTDZsS0hIY0FlaFplQlp0SWNiS0JhamJneW1oZEMxQXNuYlVjOEplYlRLRit1SEtweE95cFpCdHUwRHc9PQo=",
-      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.1.5/darwin-x86_64-HERMES-IDE.app.tar.gz"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQVBwZVl4SExzdXkrcGFrdmg2MXRTRE9MUEt5N1pyVWJGVEhaVDNnckl2R0g3alJydGNrOXRBaVNoaG5CQlQvVXdPYVVvT0ZPTEtZTVp4blNDamFqL1E0PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjg5NzI2CWZpbGU6SEVSTUVTLUlERS5hcHAudGFyLmd6CXZlcnNpb246Mi4yLjEKblo1VHBBcllWWmx2K3hzY1libDFxSFpFU2hDbndjT05ibExjV0luMnlFVnpLWjZMUlBoSW9Wb1ozWEhCNHh3UFJiSjRmYlg4VmE1MU41cVdEaFphRFE9PQo=",
+      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.2.1/darwin-x86_64-HERMES-IDE.app.tar.gz"
     },
     "linux-x86_64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUpNa2dCTGtycVp0Vlk2VVZHb1VGQXViRlB2d1dRZ2lNd2c1amdmRm9TQnBvWk5NbE1uT3ZKMFIwaFROenA2OW9Oc00vYktqSTEyeTlhTU9xTXA2c2djPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjgxNTI2CWZpbGU6SEVSTUVTLUlERV8yLjEuNV9hbWQ2NC5kZWIJdmVyc2lvbjoyLjEuNQowai9zREd6SzhpajN0UGpKRitmUktrU0JrbzZ3WDMzUS9QRTFha3oyd1liYkRtRGN3UnV6aDBxcFMrS05XNkp3Mzkxdyt5amJMMEgxK2NpemNvMW5CQT09Cg==",
-      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.1.5/HERMES-IDE_2.1.5_amd64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUVJSEM1ZnR5UzhBZ2ROdVM1Umw1RXJnQUVnOTNrVzUrWU91MkYyUCtCaCsyZ1oxRlNBU29MLzIvVGQydVFIbVB5UG5kVTlQNkFJTmZTRmMvL3ZUeWdBPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjg5ODY1CWZpbGU6SEVSTUVTLUlERV8yLjIuMV9hbWQ2NC5kZWIJdmVyc2lvbjoyLjIuMQpMWDRhZzZuM1FoVUhYazlQbnhSZDZrbnpEYWxDR3JCR1lGQWMvWkxDNkFFVWx1Q3kvbWt1UGRDQmhFd0tVS3E4K2RwaHJ3RFJ0Q3RXLzEwRHIyNlFDZz09Cg==",
+      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.2.1/HERMES-IDE_2.2.1_amd64.deb"
     },
     "linux-aarch64-deb": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUp5aCtFQnBMQXpmUWoxM1VHLytrVnFYcXEyZ3hiNjlPNnJUZUYyaWFHS1VpTUMzc3d1ZjQ2WEQ1dVp6S2M3bGl2Zk1lWmphSUtmSHNqU1BDYzFCL1FjPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjgxNDc4CWZpbGU6SEVSTUVTLUlERV8yLjEuNV9hcm02NC5kZWIJdmVyc2lvbjoyLjEuNQpMR0pJR0V5OGIyc0lrMzRnVUJVR3JiWU5HTjlUYWxtYUF4U3dwQTBaMUtwSm96STdjWE5pM0lUWXFkYWQ0cERoc3VVdm85MzVHeTQyb1R4LzVVTjdBZz09Cg==",
-      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.1.5/HERMES-IDE_2.1.5_arm64.deb"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUtlQ2ZsQlZpQlFrdjZoMGNzZlhZU1Z3MEdhNlBuQi9uTkkvY1plRDVTNFoyKzRPMFBuK3VpWWpabDhGbGI4UmxxT0NLQThFLy9vYWhZc2pOZis3TXdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjg5Njk5CWZpbGU6SEVSTUVTLUlERV8yLjIuMV9hcm02NC5kZWIJdmVyc2lvbjoyLjIuMQozTW9SRE84cHArSDRWTlE0NkRmczJiWFE2ZUp4cmVoNW5ScVc1Uml1Yjh4K0Rjc1hiQ2pYUkNXVnBBL1NuTU0rYWlsU2daU3lrVGZUSWlsSmhaZzRCZz09Cg==",
+      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.2.1/HERMES-IDE_2.2.1_arm64.deb"
     },
     "linux-x86_64-appimage": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQU53Z25odm03bElMYTQycVhxR2tZdTdDQ3EvTm5DRXh1TUlDbEpKUG1wTUUrTzJwdEswc1d5SFZZOWlnMGdqUlcxS3NsQ2VhVDRyZDVmSHBYTzBxUmdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjgxNTI2CWZpbGU6SEVSTUVTLUlERV8yLjEuNV9hbWQ2NC5BcHBJbWFnZQl2ZXJzaW9uOjIuMS41CllvZUl5QnE1elBKV0IzSzVkdDhBN1dRSHNiVkN1SUdyaXZNK0RwWnhnUlYxQStPMG9pRXM2SmhpTVl6Z0FDVnJaMWtzakt2UnI5N0d6ZlFPNTY2U0JnPT0K",
-      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.1.5/HERMES-IDE_2.1.5_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQU9pY1F2aENrQ0FFbm4xeS9vMDBFOFZNZlRlYTlWU3ZQNEMxdkJ4d3AvZEQ3dFJ2Yi9wTjZ0SUxsNWdSR3FxRWpHWXVFTkdpTHRqTDQ0anMvUFpwQkFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjg5ODY1CWZpbGU6SEVSTUVTLUlERV8yLjIuMV9hbWQ2NC5BcHBJbWFnZQl2ZXJzaW9uOjIuMi4xCjAzZVFNNUNxcExjWlUrN1JWd0ZheW5DRnhadFN4MlozRCtrdXY5NHRiRDY3M05FbXlzV3ZxYkZSdHQrQWcyczVPWEx3cDlnYVczUGQwZ2JXUXhsbkFBPT0K",
+      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.2.1/HERMES-IDE_2.2.1_amd64.AppImage"
     },
     "linux-aarch64-appimage": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUpYVXBBdk9ETUZ0b3FpeTdQVm5INmwyR21Xc2FydlJiZmtaZGFSM0ZEYjBuaFZaWENKTUZucGJOcXpReXZNdVNFQTgwTENEVHJRSEJhWXFmdzdBd1FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjgxNDc4CWZpbGU6SEVSTUVTLUlERV8yLjEuNV9hYXJjaDY0LkFwcEltYWdlCXZlcnNpb246Mi4xLjUKT2Vrckl2OHBWczBJQXBCc3NoTUVsdnV3REZjMjZhUUhYb09JN2JxUVp4OEtqQ3N2bGdKZVlDdnZmSEEyOXdpdWljVXhqajVuVUxKZTRONWtsZzJlQ3c9PQo=",
-      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.1.5/HERMES-IDE_2.1.5_aarch64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUY5SFJ1VzRhYTMxbDd5MVJVZzMzbFloMHdLbWU5bURrQVBYK2IydmxQRTM4dnZiVmpPVDRqZld6bThaVjc0Z2EwelFKcGRqdWtjOXRGOGJGT2RaNFF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjg5Njk5CWZpbGU6SEVSTUVTLUlERV8yLjIuMV9hYXJjaDY0LkFwcEltYWdlCXZlcnNpb246Mi4yLjEKdHJtMHpGL0V6cHpZeEY0NU1MN1lCYmsxTjNObzByK0NhNG5CQUZIYStVYWRVTG9pczhobHViVEM5VkJHWWpZTTFjVnB0VFVETk9wQ01hRk9iekNtQVE9PQo=",
+      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.2.1/HERMES-IDE_2.2.1_aarch64.AppImage"
     },
     "linux-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQU53Z25odm03bElMYTQycVhxR2tZdTdDQ3EvTm5DRXh1TUlDbEpKUG1wTUUrTzJwdEswc1d5SFZZOWlnMGdqUlcxS3NsQ2VhVDRyZDVmSHBYTzBxUmdnPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjgxNTI2CWZpbGU6SEVSTUVTLUlERV8yLjEuNV9hbWQ2NC5BcHBJbWFnZQl2ZXJzaW9uOjIuMS41CllvZUl5QnE1elBKV0IzSzVkdDhBN1dRSHNiVkN1SUdyaXZNK0RwWnhnUlYxQStPMG9pRXM2SmhpTVl6Z0FDVnJaMWtzakt2UnI5N0d6ZlFPNTY2U0JnPT0K",
-      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.1.5/HERMES-IDE_2.1.5_amd64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQU9pY1F2aENrQ0FFbm4xeS9vMDBFOFZNZlRlYTlWU3ZQNEMxdkJ4d3AvZEQ3dFJ2Yi9wTjZ0SUxsNWdSR3FxRWpHWXVFTkdpTHRqTDQ0anMvUFpwQkFZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjg5ODY1CWZpbGU6SEVSTUVTLUlERV8yLjIuMV9hbWQ2NC5BcHBJbWFnZQl2ZXJzaW9uOjIuMi4xCjAzZVFNNUNxcExjWlUrN1JWd0ZheW5DRnhadFN4MlozRCtrdXY5NHRiRDY3M05FbXlzV3ZxYkZSdHQrQWcyczVPWEx3cDlnYVczUGQwZ2JXUXhsbkFBPT0K",
+      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.2.1/HERMES-IDE_2.2.1_amd64.AppImage"
     },
     "linux-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUpYVXBBdk9ETUZ0b3FpeTdQVm5INmwyR21Xc2FydlJiZmtaZGFSM0ZEYjBuaFZaWENKTUZucGJOcXpReXZNdVNFQTgwTENEVHJRSEJhWXFmdzdBd1FvPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjgxNDc4CWZpbGU6SEVSTUVTLUlERV8yLjEuNV9hYXJjaDY0LkFwcEltYWdlCXZlcnNpb246Mi4xLjUKT2Vrckl2OHBWczBJQXBCc3NoTUVsdnV3REZjMjZhUUhYb09JN2JxUVp4OEtqQ3N2bGdKZVlDdnZmSEEyOXdpdWljVXhqajVuVUxKZTRONWtsZzJlQ3c9PQo=",
-      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.1.5/HERMES-IDE_2.1.5_aarch64.AppImage"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUY5SFJ1VzRhYTMxbDd5MVJVZzMzbFloMHdLbWU5bURrQVBYK2IydmxQRTM4dnZiVmpPVDRqZld6bThaVjc0Z2EwelFKcGRqdWtjOXRGOGJGT2RaNFF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjg5Njk5CWZpbGU6SEVSTUVTLUlERV8yLjIuMV9hYXJjaDY0LkFwcEltYWdlCXZlcnNpb246Mi4yLjEKdHJtMHpGL0V6cHpZeEY0NU1MN1lCYmsxTjNObzByK0NhNG5CQUZIYStVYWRVTG9pczhobHViVEM5VkJHWWpZTTFjVnB0VFVETk9wQ01hRk9iekNtQVE9PQo=",
+      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.2.1/HERMES-IDE_2.2.1_aarch64.AppImage"
     },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQU4wa0t6SmlRWU0rOVpDT1d5YUVkdUczWmloUWhtKzZmU05nc3JjempIR2hBOVNyTGRHSGpUaDh4RTd3U3hFMWQvc0Via21YMnJpWmFLckhXdytESFFrPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjgxNzg4CWZpbGU6SEVSTUVTLUlERV8yLjEuNV94NjQtc2V0dXAuZXhlCXZlcnNpb246Mi4xLjUKSGdkd2xrbWxFVEg1eVIzU1N6MkZnWWU3SS80MlpKZzduSUUweURCTmdURWNsem9DK1UxbmNWd1JVTEpUZEtsZU5OdldFc3loc3ppUTI1bmd1aUR6QlE9PQo=",
-      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.1.5/windows-x86_64-HERMES-IDE_2.1.5_x64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUludUNrTVkvWVVEZXE5Q3JzSTZWVTNkbURIZ2lSSzk0RVBoVk5UakVub0dOK09iRWNzOVdkQU9MMldFbkN5Z3ZFNlQvTldRd3IraldPd054M0tyZ2d3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjg5OTkxCWZpbGU6SEVSTUVTLUlERV8yLjIuMV94NjQtc2V0dXAuZXhlCXZlcnNpb246Mi4yLjEKOVgvTDZsN0E1WXlNQXZCYXpMTFpzU3ZrbVpGNHhOckUwblJ1SVJqendsakFSRTIwelFjV1pNMGR6RXk4QXBzQlhCWG9HUFR2MzZHalB1emgvZzRPREE9PQo=",
+      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.2.1/windows-x86_64-HERMES-IDE_2.2.1_x64-setup.exe"
     },
     "windows-aarch64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUFhYjY4YlFiWmRXb2JrLzlsQkxzSkN6cjVvM0J4VDZXNzhRckdob3JrVitveCs5K0RqOXV2eVpWVzlSSU91Z0tWbFJMNGRlcGdUTy9OVTVRR1UzK0FzPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjgxODk2CWZpbGU6SEVSTUVTLUlERV8yLjEuNV9hcm02NC1zZXR1cC5leGUJdmVyc2lvbjoyLjEuNQpDVmExZ1N1bThrMklBMVZkTUpWd2hCZThBeWpNUlJPbmg4QzZpeTdKMURUVmxVcUtxd2RYNmRIY3VGa3hzbXgxOHFQT1dQZ1Y5MVJ4RHZGYTREZXdBQT09Cg==",
-      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.1.5/windows-aarch64-HERMES-IDE_2.1.5_arm64-setup.exe"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVRamZIeDNEOHBDQUI0a2tLSFRrRWZrYjlJYTA0UHJTdGk4ZzRHand2SWs3R0p3ZDVBb3RBeEY0aFArL3B1d0RETFhLNlZOTFNQdUc3dlpTMDBHc1FUemJMTURkcDZLUHcwPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzkxNjg5OTYzCWZpbGU6SEVSTUVTLUlERV8yLjIuMV9hcm02NC1zZXR1cC5leGUJdmVyc2lvbjoyLjIuMQpmRDMyZ2FaMGJRSkd1YW13MEIzd3F4UGF2eUtMYm42YW5MeW8zcHVuZ0s1T0p6Q05TV0w2T2l1QzRHZFF2ZlVuTDZLNXZiQzhhTTlXd0ppZTZLLzZDQT09Cg==",
+      "url": "https://github.com/hermes-hq/hermes-ide/releases/download/v2.2.1/windows-aarch64-HERMES-IDE_2.2.1_arm64-setup.exe"
     }
   }
 }
