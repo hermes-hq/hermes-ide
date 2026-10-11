@@ -316,6 +316,17 @@ export function lastReportedStatus(snap: SessionEventSnapshot): AgentStatus | nu
     const e = snap.events[i];
     if (e.type === "exit") return EXITED_STATUS;
     if (e.type === "status" && !isHeuristicSource(e.source)) return e.status;
+    const interrupted = interruptedStatus(e);
+    if (interrupted) return interrupted;
   }
   return null;
+}
+
+/**
+ * A turn the person interrupted ends the turn as the agent recorded it (its
+ * transcript; no hook says so): idle, as sure as its source. Null for any
+ * other event, or for one Hermes only observed.
+ */
+export function interruptedStatus(e: SessionEvent): AgentStatus | null {
+  return e.type === "turn_interrupted" && !isHeuristicSource(e.source) ? { kind: "idle", confidence: confidenceOfSource(e.source), detail: "" } : null;
 }

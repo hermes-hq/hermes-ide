@@ -207,6 +207,14 @@ describe("status bridge", () => {
     bridge.stop();
   });
 
+  it("an interrupted turn (Esc; only the transcript says so) reads as idle, so keep-awake lets go", () => {
+    dispatchSessionEvent("I", { type: "turn_start", at: 1, source: "hook:claude", n: 1 });
+    dispatchSessionEvent("I", { type: "status", at: 2, source: "hook:claude", status: { kind: "working", confidence: "exact", detail: "" } });
+    expect(trustedStatus(getSessionEventSnapshot("I"), [])?.kind).toBe("working");
+    dispatchSessionEvent("I", { type: "turn_interrupted", at: 3, source: "transcript:claude", n: 1 });
+    expect(trustedStatus(getSessionEventSnapshot("I"), [])).toMatchObject({ kind: "idle", confidence: "exact" });
+  });
+
   it("a guessed approval (Antigravity's, from the OS layer) never raises or keeps an item, and so never notifies", () => {
     const bridge = startStatusBridge();
     const notified: string[] = [];

@@ -379,4 +379,9 @@ describe("lastReportedStatus: what an agent said, never the terminal's guess", (
     expect(lastReportedStatus(snapshotOf([status(1, "needs_approval", "signal", "osc"), status(2, "working", "guessed", "pty")]))?.kind).toBe("needs_approval");
     expect(lastReportedStatus(snapshotOf([status(1, "working", "exact", "hook:x"), { type: "exit", at: 2, source: "pty", code: 0, signal: null }]))?.kind).toBe("exited");
   });
+
+  it("an interrupted turn the agent recorded ends the work (the task queue frees the slot)", () => {
+    const interrupted: SessionEvent = { type: "turn_interrupted", at: 2, source: "transcript:claude", n: 1 };
+    expect(lastReportedStatus(snapshotOf([status(1, "working", "exact", "hook:claude"), interrupted]))).toMatchObject({ kind: "idle", confidence: "exact" });
+  });
 });
