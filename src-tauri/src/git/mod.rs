@@ -4730,7 +4730,10 @@ mod tests {
 
         // The session's git commands must not run in the project folder.
         let err = resolve_worktree_path(&db, "sess1", "proj1").unwrap_err();
-        assert!(err.contains("/nonexistent/hermes-worktrees/abc/wt"), "{err}");
+        assert!(
+            err.contains("/nonexistent/hermes-worktrees/abc/wt"),
+            "{err}"
+        );
     }
 
     #[test]
