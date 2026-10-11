@@ -334,7 +334,7 @@ function SectionContent({ sessionId, projectDir, collapsed, onToggle }: SectionC
         collapsed={collapsed.permissions ?? false}
         onToggle={() => onToggle("permissions")}
       >
-        <PermissionsSection rules={permRules} />
+        <PermissionsSection rules={permRules} projectDir={projectDir} />
       </Section>
       <Section
         sectionKey="pinned"
