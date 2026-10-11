@@ -32,7 +32,9 @@ import {
   saveAllSnapshots,
   addWorkspacePath,
   sessionHostStatus,
+  isShellForeground,
 } from "../api/sessions";
+import { closeNeedsConfirm } from "./closeConfirm";
 import { deriveSessionLabelFromMessage, isDefaultSessionLabel } from "../utils/autoSessionLabel";
 import { loadImageAttachments } from "../launcher/attachments";
 import { getProjects, getSessionProjects, attachSessionProject } from "../api/projects";
@@ -2278,6 +2280,11 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     const mode = stateRef.current.sessions[id]?.mode ?? "terminal";
     try {
       await performAgentAwareClose(id, mode);
+      // The backend has written its close time: the start screen's recent
+      // sessions list it now, not after a relaunch.
+      getRecentSessions(10)
+        .then((entries) => dispatch({ type: "SET_RECENT", entries }))
+        .catch(console.error);
     } catch (err) {
       console.error("Failed to close session:", err);
     } finally {
@@ -2337,7 +2344,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       }
 
       // No dirty worktrees — proceed with standard close flow
-      if (skipCloseConfirmRef.current) {
+      if (skipCloseConfirmRef.current || !(await closeNeedsConfirm(stateRef.current.sessions[id], () => isShellForeground(id)))) {
         closeSession(id);
       } else {
         dispatch({ type: "REQUEST_CLOSE_SESSION", id });
