@@ -410,11 +410,12 @@ function remapLayoutSessionIds(node: LayoutNode, oldToNew: Map<string, string>):
   return null;
 }
 
-/** The focused pane ID gets regenerated, so find the first pane in the tree. */
-function remapPaneFocusId(layout: LayoutNode, _oldFocusId: string | null): string | null {
-  // After remapping, IDs are fresh — just pick the first pane
-  if (layout.type === "pane") return layout.id;
-  return remapPaneFocusId(layout.children[0], _oldFocusId);
+/** Pane IDs are regenerated: focus the pane showing the active session, so
+ *  the keyboard and the pane actions go where the app says is active, or
+ *  else the first pane. */
+function remapPaneFocus(layout: LayoutNode, activeSessionId: string | null): PaneLeaf {
+  const panes = collectPanes(layout);
+  return panes.find((p) => p.sessionId === activeSessionId) ?? panes[0];
 }
 
 // ─── Session Mode Helpers ───────────────────────────────────────────
@@ -1974,13 +1975,13 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           // Rebuild the layout with remapped session IDs
           if (workspace.layout) {
             const remappedLayout = remapLayoutSessionIds(workspace.layout as LayoutNode, oldToNew);
-            const remappedFocus = remappedLayout ? remapPaneFocusId(remappedLayout, workspace.focused_pane_id) : null;
             const remappedActive = workspace.active_session_id ? (oldToNew.get(workspace.active_session_id) ?? null) : null;
+            const remappedFocus = remappedLayout ? remapPaneFocus(remappedLayout, remappedActive) : null;
             dispatch({
               type: "RESTORE_LAYOUT",
               root: remappedLayout,
-              focusedPaneId: remappedFocus,
-              activeSessionId: remappedActive || oldToNew.values().next().value || null,
+              focusedPaneId: remappedFocus?.id ?? null,
+              activeSessionId: remappedActive || remappedFocus?.sessionId || oldToNew.values().next().value || null,
             });
           } else {
             // No layout saved — just activate the first restored session
