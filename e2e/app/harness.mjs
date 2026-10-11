@@ -6,7 +6,7 @@
 // Zero dependencies — Node 20+ only — so the same file runs on macOS, Linux
 // and Windows runners.
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   closeSync,
   existsSync,
@@ -52,6 +52,21 @@ export function e2eDataDir(home = homedir()) {
 }
 
 /**
+ * Windows: stops what the test build left running, with everything it
+ * started. A session host whose app was force-killed keeps its terminals,
+ * and a terminal's working folder cannot be deleted while it is open. Only
+ * programs started from the test build's own folder, never a real Hermes.
+ */
+function stopLeftoverTestPrograms() {
+  const bin = join(outDir(), "bin").replace(/'/g, "''");
+  const script =
+    `Get-CimInstance Win32_Process | Where-Object { $_.ExecutablePath -and ` +
+    `$_.ExecutablePath.StartsWith('${bin}', [StringComparison]::OrdinalIgnoreCase) } | ` +
+    `ForEach-Object { taskkill /PID $_.ProcessId /T /F | Out-Null }`;
+  spawnSync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], { stdio: "ignore", timeout: 30_000 });
+}
+
+/**
  * Only for runs that use the real home folder: start from a first-launch
  * state. Refuses any path but the test app's own data folder.
  */
@@ -60,7 +75,16 @@ export function resetE2eDataDir() {
   if (basename(dir) !== E2E_IDENTIFIER || !dir.endsWith(".e2e")) {
     throw new Error(`refusing to reset unexpected directory: ${dir}`);
   }
-  if (existsSync(dir)) rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+  if (existsSync(dir)) {
+    try {
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch (e) {
+      if (platform() !== "win32" || !["EBUSY", "EPERM"].includes(e.code)) throw e;
+      // A terminal of the last run still has a folder in there open.
+      stopLeftoverTestPrograms();
+      rmSync(dir, { recursive: true, force: true, maxRetries: 10, retryDelay: 500 });
+    }
+  }
   // Windows keeps the webview's own storage (localStorage: the UI language,
   // the keyboard rules a scenario emulates) apart, under %LOCALAPPDATA%: a
   // first launch starts without it too, or one scenario's leaks into the next.
