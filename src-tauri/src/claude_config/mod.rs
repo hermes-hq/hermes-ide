@@ -33,20 +33,15 @@ where
     F: FnOnce(&mut Map<String, Value>) -> Result<(), String>,
 {
     // A symlinked config (a dotfiles setup) is written through to its
-    // target, so the link stays a link.
-    let resolved;
-    let path = match fs::symlink_metadata(path) {
-        Ok(m) if m.file_type().is_symlink() => {
-            resolved = fs::canonicalize(path).map_err(|e| {
-                format!(
-                    "{} links to a file that cannot be read: {e}",
-                    path.display()
-                )
-            })?;
-            resolved.as_path()
-        }
-        _ => path,
+    // target, so the link stays a link. A dangling link, or one into a
+    // folder that cannot be written (a read-only store), is replaced by a
+    // regular file instead.
+    let link = path;
+    let resolved = match fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => fs::canonicalize(path).ok(),
+        _ => None,
     };
+    let mut path = resolved.as_deref().unwrap_or(link);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|e| format!("create parent dir: {e}"))?;
     }
@@ -70,21 +65,32 @@ where
 
     let pretty = serde_json::to_string_pretty(&Value::Object(root))
         .map_err(|e| format!("serialize: {e}"))?;
+    let open_tmp = |p: &Path| {
+        OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(p.with_extension("tmp"))
+    };
+    let mut f = match open_tmp(path) {
+        Err(_) if resolved.is_some() => {
+            path = link;
+            open_tmp(link)
+        }
+        f => f,
+    }
+    .map_err(|e| format!("open tmp: {e}"))?;
     let tmp = path.with_extension("tmp");
-    let mut f = OpenOptions::new()
-        .write(true)
-        .create(true)
-        .truncate(true)
-        .open(&tmp)
-        .map_err(|e| format!("open tmp: {e}"))?;
+    let replaces_link = resolved.is_some() && path == link;
     f.write_all(pretty.as_bytes())
         .map_err(|e| format!("write tmp: {e}"))?;
     f.write_all(b"\n")
         .map_err(|e| format!("write tmp newline: {e}"))?;
     f.sync_all().map_err(|e| format!("fsync tmp: {e}"))?;
     drop(f);
-    // Keep the file's permissions (the temporary file got the defaults).
-    if let Ok(meta) = fs::metadata(path) {
+    // Keep the file's permissions (the temporary file got the defaults);
+    // not a read-only target's, when the link is replaced.
+    if let Some(meta) = fs::metadata(path).ok().filter(|_| !replaces_link) {
         fs::set_permissions(&tmp, meta.permissions()).map_err(|e| format!("chmod tmp: {e}"))?;
     }
 
@@ -769,6 +775,48 @@ mod tests {
         assert_eq!(v["added"], Value::Bool(true));
         let mode = fs::metadata(&target).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
+    }
+
+    /// A link whose target is missing, or sits in a folder that cannot be
+    /// written (a read-only store), still takes the edit: the link is
+    /// replaced by a regular file.
+    #[cfg(unix)]
+    #[test]
+    fn atomic_json_write_replaces_a_link_it_cannot_write_through() {
+        use std::os::unix::fs::PermissionsExt;
+        let td = tempdir().unwrap();
+        let add = |link: &Path| {
+            atomic_json_write(link, |root| {
+                root.insert("added".into(), Value::Bool(true));
+                Ok(())
+            })
+        };
+
+        let dangling = td.path().join("dangling.json");
+        std::os::unix::fs::symlink(td.path().join("gone.json"), &dangling).unwrap();
+        add(&dangling).unwrap();
+        let v: Value = serde_json::from_str(&fs::read_to_string(&dangling).unwrap()).unwrap();
+        assert_eq!(v["added"], Value::Bool(true));
+
+        let store = td.path().join("store");
+        fs::create_dir_all(&store).unwrap();
+        let target = store.join("settings.json");
+        fs::write(&target, br#"{"model":"opus"}"#).unwrap();
+        fs::set_permissions(&target, fs::Permissions::from_mode(0o444)).unwrap();
+        fs::set_permissions(&store, fs::Permissions::from_mode(0o555)).unwrap();
+        let link = td.path().join("settings.json");
+        std::os::unix::fs::symlink(&target, &link).unwrap();
+        let out = add(&link);
+        fs::set_permissions(&store, fs::Permissions::from_mode(0o755)).unwrap();
+        out.unwrap();
+        let v: Value = serde_json::from_str(&fs::read_to_string(&link).unwrap()).unwrap();
+        assert_eq!(v["model"], Value::String("opus".into()));
+        assert_eq!(v["added"], Value::Bool(true));
+        assert!(!fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink());
+        assert!(!fs::metadata(&link).unwrap().permissions().readonly());
     }
 
     #[test]

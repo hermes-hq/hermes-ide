@@ -1593,6 +1593,28 @@ fn switch_head_to(repo: &Repository, refname: &str, target: &git2::Commit) -> Re
     repo.set_head(refname).map_err(|e| e.to_string())
 }
 
+/// Create `local_name` tracking the remote branch `remote_name` and switch to
+/// it. A refused switch removes the new branch again, so trying the remote
+/// branch once more does not clash with it.
+fn switch_to_new_tracking_branch(
+    repo: &Repository,
+    remote_name: &str,
+    local_name: &str,
+    commit: &git2::Commit,
+) -> Result<(), String> {
+    let mut local_branch = repo
+        .branch(local_name, commit, false)
+        .map_err(|e| format!("Failed to create tracking branch: {}", e))?;
+    let switched = local_branch
+        .set_upstream(Some(remote_name))
+        .map_err(|e| format!("Failed to set upstream: {}", e))
+        .and_then(|_| switch_head_to(repo, &format!("refs/heads/{}", local_name), commit));
+    if switched.is_err() {
+        let _ = local_branch.delete();
+    }
+    switched
+}
+
 #[tauri::command]
 pub async fn git_checkout_branch(
     app: AppHandle,
@@ -1669,16 +1691,7 @@ pub async fn git_checkout_branch(
                 return Err(worktree::branch_clash_error(local_name, &clash));
             }
 
-            let mut local_branch = repo
-                .branch(local_name, &commit, false)
-                .map_err(|e| format!("Failed to create tracking branch: {}", e))?;
-
-            local_branch
-                .set_upstream(Some(&name))
-                .map_err(|e| format!("Failed to set upstream: {}", e))?;
-
-            let local_refname = format!("refs/heads/{}", local_name);
-            switch_head_to(&repo, &local_refname, &commit)?;
+            switch_to_new_tracking_branch(&repo, &name, local_name, &commit)?;
 
             let _ = app_handle.emit(&format!("branch-changed-{}", session_id_clone), local_name);
             return Ok(GitOperationResult {
@@ -5854,6 +5867,31 @@ mod tests {
             "mine\n"
         );
         assert_eq!(std::fs::read_to_string(d.join("a.txt")).unwrap(), "main\n");
+    }
+
+    #[test]
+    fn a_refused_switch_to_a_remote_branch_leaves_no_local_branch_behind() {
+        let dir = two_branch_repo();
+        let d = dir.path();
+        git_ok(d, &["remote", "add", "origin", d.to_str().unwrap()]);
+        git_ok(d, &["update-ref", "refs/remotes/origin/feature", "feature"]);
+        git_ok(d, &["branch", "-D", "feature"]);
+        std::fs::write(d.join("new.txt"), "mine\n").unwrap();
+        let repo = Repository::open(d).unwrap();
+        let commit = repo
+            .find_reference("refs/remotes/origin/feature")
+            .unwrap()
+            .peel_to_commit()
+            .unwrap();
+        assert!(
+            switch_to_new_tracking_branch(&repo, "origin/feature", "feature", &commit).is_err()
+        );
+        assert_eq!(git_ok(d, &["branch", "--show-current"]), "main");
+        assert!(worktree::local_branch_clash(&repo, "feature").is_none());
+        // With the file gone, the same remote branch switches.
+        std::fs::remove_file(d.join("new.txt")).unwrap();
+        switch_to_new_tracking_branch(&repo, "origin/feature", "feature", &commit).unwrap();
+        assert_eq!(git_ok(d, &["branch", "--show-current"]), "feature");
     }
 
     #[test]

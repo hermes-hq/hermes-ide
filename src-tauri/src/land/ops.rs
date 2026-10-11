@@ -370,17 +370,10 @@ pub fn analyze_into(
     let base_oid = oid(&base_head)?;
     let merge_base = merge_ancestor(&repo, base_oid, head_commit.id(), landed)
         .map_err(|e| format!("'{branch}' and '{base_name}' share no history: {e}"))?;
-    // Commits since the earlier landing, when that is the ancestor.
-    let not_in = if repo
-        .graph_descendant_of(base_oid, merge_base)
-        .unwrap_or(false)
-    {
-        base_oid
-    } else {
-        merge_base
-    };
+    // Every branch commit the base lacks, an earlier squash landing or not:
+    // a pull request pushes them all.
     let (ahead, _) = repo
-        .graph_ahead_behind(head_commit.id(), not_in)
+        .graph_ahead_behind(head_commit.id(), base_oid)
         .map_err(|e| e.to_string())?;
     let mb_tree = repo
         .find_commit(merge_base)
