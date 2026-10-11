@@ -1072,9 +1072,11 @@ export function TaskLauncher({
         // What was typed while the launch ran is the next task: only the launched text is cleared.
         if (latestTask.current.trim() === trimmed) {
           setTask((cur) => (cur.trim() === trimmed ? "" : cur));
-          setAttachments([]);
           setBranchEdited(false);
         }
+        // The files that went out go with it; one attached while it ran is the next task's.
+        const sent = new Set(attachments.map((a) => a.path));
+        setAttachments((cur) => cur.filter((a) => !sent.has(a.path)));
         // The branch it made is taken now: the next one is named past it.
         setProbeAgain((n) => n + 1);
         focusTask();

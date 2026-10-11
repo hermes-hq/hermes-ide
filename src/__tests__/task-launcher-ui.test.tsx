@@ -1186,6 +1186,45 @@ describe("TaskLauncher: attachments", () => {
     expect(onLaunch.mock.calls[0][0].attachments).toBeUndefined();
   });
 
+  async function pasteImage() {
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { files: [new File([new Uint8Array([1])], "image.png", { type: "image/png" })], getData: () => "" } });
+    await act(async () => {
+      task().dispatchEvent(paste);
+    });
+    await settle();
+  }
+
+  it("Launch & next: a file attached while the launch ran stays for the next task, the launched ones go", async () => {
+    let finish: (v: TaskLaunchResult) => void = () => {};
+    const onLaunch = vi.fn((_req: TaskLaunchRequest) => new Promise<TaskLaunchResult>((r) => (finish = r)));
+    await open({ onLaunch });
+    await typeTask("Match this mockup");
+    await pasteImage();
+    fireEvent.keyDown(task(), { key: "Enter", ...modKey });
+    await settle();
+    await pasteImage();
+    await act(async () => finish(true));
+    await settle();
+    expect(onLaunch.mock.calls[0][0].attachments?.map((a) => a.name)).toEqual(["pasted-image-1.png"]);
+    expect(chips()).toEqual(["/fixture-data/attachments/1-a/pasted-image-2.png"]);
+  });
+
+  it("Launch & next: the launched files do not carry over to a task typed while the launch ran", async () => {
+    let finish: (v: TaskLaunchResult) => void = () => {};
+    const onLaunch = vi.fn((_req: TaskLaunchRequest) => new Promise<TaskLaunchResult>((r) => (finish = r)));
+    await open({ onLaunch });
+    await typeTask("Match this mockup");
+    await pasteImage();
+    fireEvent.keyDown(task(), { key: "Enter", ...modKey });
+    await settle();
+    fireEvent.change(task(), { target: { value: "Rename formatDate" } });
+    await act(async () => finish(true));
+    await settle();
+    expect(task().value).toBe("Rename formatDate");
+    expect(chips()).toEqual([]);
+  });
+
   it("the attachments come back with the draft after a close", async () => {
     const dialog = await import("@tauri-apps/plugin-dialog");
     vi.mocked(dialog.open).mockResolvedValueOnce(["/fixture-home/specs/login.md"] as never);
