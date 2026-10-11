@@ -70,7 +70,7 @@ fn validate_worktree_path(path: &str) -> Result<std::path::PathBuf, String> {
 
 /// Resolves the worktree path for a given session+project from the database.
 /// Falls back to looking up the project's path directly if no worktree entry exists.
-/// Returns an error if the resolved directory no longer exists on disk (e.g. deleted externally).
+/// Returns an error if the worktree's folder no longer exists on disk (e.g. deleted externally).
 fn resolve_worktree_path(
     db: &Database,
     session_id: &str,
@@ -86,23 +86,20 @@ fn resolve_worktree_path(
             return Ok(wt.worktree_path);
         }
 
-        // Worktree directory is gone — clean up the stale DB record and
-        // fall back to the project's root path instead of crashing.
-        log::warn!(
-            "Worktree path '{}' no longer exists for session '{}' / project '{}' — \
-             removing stale DB record and falling back to project root.",
+        // The folder is gone. Never fall back to the project folder: the
+        // session's Git panel would then commit, discard and switch branches
+        // in the user's own checkout. The link stays, so reopening the
+        // session can put a Hermes worktree back.
+        log::debug!(
+            "Worktree path '{}' no longer exists for session '{}' / project '{}'",
             wt.worktree_path,
             session_id,
             project_id
         );
-        if let Err(e) = db.delete_session_worktree(&wt.id) {
-            log::warn!(
-                "Failed to clean up stale worktree record '{}': {}",
-                wt.id,
-                e
-            );
-        }
-        // Fall through to project path lookup below
+        return Err(format!(
+            "This session's folder no longer exists: {}",
+            wt.worktree_path
+        ));
     }
     // Fallback: look up the project's path directly
     if let Some(project) = db
@@ -1671,6 +1668,12 @@ fn delete_local_branch(repo: &Repository, name: &str, force: bool) -> Result<(),
     // worktree has checked out (another session's task), which deleting
     // the ref directly would leave on a branch with no commits.
     branch.delete().map_err(|e| {
+        if e.message().contains("HEAD of a linked repository") {
+            return format!(
+                "Could not delete {}: another worktree has it checked out. Close the task that uses it first.",
+                name
+            );
+        }
         format!(
             "Could not delete {}: {}",
             name,
@@ -4708,7 +4711,7 @@ mod tests {
     }
 
     #[test]
-    fn test_resolve_worktree_path_missing_dir_falls_back_to_project() {
+    fn test_resolve_worktree_path_missing_dir_is_an_error_not_the_project() {
         let db = test_db();
 
         // Register a project
@@ -4725,23 +4728,9 @@ mod tests {
         )
         .unwrap();
 
-        // Should gracefully fall back to the project path instead of erroring
-        let result = resolve_worktree_path(&db, "sess1", "proj1");
-        assert!(
-            result.is_ok(),
-            "Expected fallback to project path, got error: {:?}",
-            result.err()
-        );
-        assert_eq!(result.unwrap(), "/some/repo");
-
-        // The stale worktree DB record should have been cleaned up
-        let wt = db
-            .get_worktree_by_session_and_project("sess1", "proj1")
-            .unwrap();
-        assert!(
-            wt.is_none(),
-            "Stale worktree record should have been deleted"
-        );
+        // The session's git commands must not run in the project folder.
+        let err = resolve_worktree_path(&db, "sess1", "proj1").unwrap_err();
+        assert!(err.contains("/nonexistent/hermes-worktrees/abc/wt"), "{err}");
     }
 
     #[test]
@@ -4927,7 +4916,7 @@ mod tests {
     // ── BUG 2 Tests: graceful worktree path handling ──────────────────
 
     #[test]
-    fn test_resolve_worktree_path_missing_dir_cleans_up_db_record() {
+    fn test_resolve_worktree_path_missing_dir_keeps_the_link() {
         let db = test_db();
 
         db.insert_project("proj1", "/some/repo", "Test Project", "[]", "[]")
@@ -4942,28 +4931,15 @@ mod tests {
         )
         .unwrap();
 
-        // Before resolve: worktree record exists
-        let before = db
-            .get_worktree_by_session_and_project("sess1", "proj1")
-            .unwrap();
-        assert!(
-            before.is_some(),
-            "Worktree record should exist before resolve"
-        );
-
-        // Resolve should fall back to project path
-        let result = resolve_worktree_path(&db, "sess1", "proj1");
-        assert!(result.is_ok());
-        assert_eq!(result.unwrap(), "/some/repo");
-
-        // After resolve: worktree record should be cleaned up
+        assert!(resolve_worktree_path(&db, "sess1", "proj1").is_err());
+        // A second call is still an error: the link was not dropped, so it
+        // never quietly turns into the project folder, and reopening the
+        // session can put the worktree back.
+        assert!(resolve_worktree_path(&db, "sess1", "proj1").is_err());
         let after = db
             .get_worktree_by_session_and_project("sess1", "proj1")
             .unwrap();
-        assert!(
-            after.is_none(),
-            "Stale worktree record should have been deleted"
-        );
+        assert!(after.is_some(), "the worktree link should be kept");
     }
 
     #[test]
@@ -5438,7 +5414,8 @@ mod tests {
         git_ok(Path::new(&wt), &["commit", "-q", "-m", "task work"]);
 
         let repo = Repository::open(&root).unwrap();
-        assert!(delete_local_branch(&repo, "task", true).is_err());
+        let err = delete_local_branch(&repo, "task", true).unwrap_err();
+        assert!(err.contains("another worktree has it checked out"), "{err}");
         assert!(repo.find_branch("task", BranchType::Local).is_ok());
         // From the task's worktree: the main checkout's branch is kept too.
         let wt_repo = Repository::open(&wt).unwrap();

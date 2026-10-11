@@ -4,7 +4,8 @@ import { useSession } from "../state/SessionContext";
 import { useI18n } from "../i18n/I18nProvider";
 import { useSessionEvents } from "../agent/contract/sessionEventStore";
 import { lastReportedStatus } from "../agent/status/deriveStatus";
-import { writeToSession } from "../api/sessions";
+import { stopSessionTerminal, writeToSession } from "../api/sessions";
+import { closeAgentSession } from "../api/agent";
 import { utf8ToBase64 } from "../utils/encoding";
 import { getWorktreeUsage } from "../api/git";
 import type { WorktreeUsage } from "../types/git";
@@ -210,6 +211,18 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
   // ── Actions ─────────────────────────────────────────────────────────
   const archiveNow = useCallback(
     async (landId: string | null) => {
+      // A working agent could write a file after the clean check and lose it
+      // when the folder goes: stop it first, so the check sees the last of
+      // its edits. A folder with uncommitted files keeps its agent, since
+      // the check refuses it anyway.
+      if (session && session.phase !== "destroyed" && (session.detected_agent || session.ai_provider)) {
+        const now = await landPreview(sessionId, projectId).catch(() => null);
+        if (now && now.uncommittedFiles === 0) {
+          await (session.mode === "agent" ? closeAgentSession(sessionId) : stopSessionTerminal(sessionId)).catch((e) =>
+            console.warn("[LandSheet] could not stop the agent before archiving:", e),
+          );
+        }
+      }
       const plan = await landArchive(sessionId, projectId, landId, label.current);
       // Closing the session removes its worktree folder (build output
       // included) and keeps the branch and every reference.
@@ -217,7 +230,7 @@ export function LandSheet({ sessionId, projectId, onClose }: LandSheetProps) {
       setArchived(plan);
       return plan;
     },
-    [sessionId, projectId, closeSession],
+    [session, sessionId, projectId, closeSession],
   );
 
   const land = useCallback(

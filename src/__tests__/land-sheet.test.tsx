@@ -133,6 +133,7 @@ function backend(over: Partial<Backend> = {}): Backend {
       case "land_ci_log":
         return { relativePath: ".hermes/ci/test.log", bytes: 12 };
       case "write_to_session":
+      case "stop_session_terminal":
         return null;
       default:
         throw new Error(`unexpected ${cmd}`);
@@ -377,6 +378,21 @@ describe("landing", () => {
     fireEvent.click(document.querySelector(".land-sheet-archive")!);
     await waitFor(() => expect(h.closeSession).toHaveBeenCalledWith(SID));
     expect(calls(b, "land_archive")[0].args).toMatchObject({ landId: null });
+  });
+
+  it("stops a working agent before the clean check, so nothing it writes later is deleted", async () => {
+    const b = backend({ preview: preview({ uncommittedFiles: 0 }) });
+    h.sessions[SID] = { label: "Search", phase: "busy", mode: "terminal", ai_provider: "claude", detected_agent: null } as never;
+    try {
+      await openSheet();
+      fireEvent.click(document.querySelector(".land-sheet-archive")!);
+      fireEvent.click(await waitFor(() => document.querySelector(".land-sheet-archive-yes")!));
+      await waitFor(() => expect(h.closeSession).toHaveBeenCalledWith(SID));
+      const order = b.calls.map((c) => c.cmd).filter((c) => c === "stop_session_terminal" || c === "land_archive");
+      expect(order).toEqual(["stop_session_terminal", "land_archive"]);
+    } finally {
+      delete h.sessions[SID];
+    }
   });
 });
 

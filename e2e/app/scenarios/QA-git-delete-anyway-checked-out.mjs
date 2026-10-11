@@ -100,6 +100,7 @@ try {
   if (outcome.error) {
     check(outcome.error.includes(`Could not delete ${firstWt.branchName}`), `the message names the branch it kept ("${outcome.error}")`);
     check(!/class=|error code|git2|libgit/i.test(outcome.error), "the message is plain words, without library codes");
+    check(/another worktree has it checked out/.test(outcome.error), "the message says why: another worktree has it checked out");
   }
 
   log("step 5: the branch, its commit and the first task's worktree are untouched");
