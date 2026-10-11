@@ -46,7 +46,7 @@ import type { AgentEvent } from "./types";
 import { isInitEvent } from "./types";
 import { emptyState, freezePendingThinking, reduceEvent, withHistory } from "./messageStore";
 import type { AgentSessionState } from "./messageStore";
-import { isPermRequest, type PermRequest } from "../utils/permissionRequest";
+import { isPermRequest, isPermSettled, type PermRequest } from "../utils/permissionRequest";
 import type { AgentErrorKind } from "../api/agent";
 import { peekAgentInitCache } from "./useAgentInit";
 
@@ -179,6 +179,10 @@ export class AgentSessionStore {
         this.notify();
         return;
       }
+      if (isPermSettled(payload)) {
+        this.clearPendingPermRequest(payload.id);
+        return;
+      }
 
       // The init may have fired while this listener was still being
       // registered: the session's own listener cached it, this one missed it.
@@ -194,9 +198,6 @@ export class AgentSessionStore {
       // late-arriving exit events from the old subprocess can be
       // recognised as stale (fix H1).
       const ev = payload as { type?: string; subtype?: string };
-      // A finished turn has no open canUseTool left: the SDK settles any
-      // it was still waiting on (Stop during a prompt) before `result`.
-      if (ev?.type === "result") this.setPermQueue([]);
       if (ev?.type === "system" && ev?.subtype === "init") {
         this.initGeneration += 1;
         this.lastInitAt = Date.now();
@@ -357,13 +358,16 @@ export class AgentSessionStore {
       this.notify();
       return;
     }
+    if (isPermSettled(event)) {
+      this.clearPendingPermRequest(event.id);
+      return;
+    }
     this.snapshot = {
       ...this.snapshot,
       state: reduceEvent(this.snapshot.state, event),
       protocolError: nextProtocolError(this.snapshot.protocolError, event),
     };
     const ev = event as { type?: string; subtype?: string };
-    if (ev?.type === "result") this.setPermQueue([]);
     if (ev?.type === "system" && ev?.subtype === "init") {
       this.initGeneration += 1;
       this.lastInitAt = Date.now();

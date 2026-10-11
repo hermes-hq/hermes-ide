@@ -208,6 +208,22 @@ describe("createCanUseToolHandler — abort signal (REGRESSION: SDK abort hang)"
     expect(permPending.has("perm-1")).toBe(false);
   });
 
+  it("tells the host the request is settled when the abort ends it, and only then", async () => {
+    const { writes, permPending, handler } = makeHarness();
+    const ac = new AbortController();
+    const promise = handler("Bash", { command: "rm" }, { signal: ac.signal });
+    ac.abort();
+    await promise;
+    expect(JSON.parse(writes[1].trimEnd())).toEqual({ type: "_hermes_perm_settled", id: "perm-1" });
+
+    const answered = new AbortController();
+    const second = handler("Bash", { command: "ls" }, { signal: answered.signal });
+    permPending.get("perm-2")!.resolve({ behavior: "allow" });
+    await second;
+    answered.abort();
+    expect(writes).toHaveLength(3);
+  });
+
   it("ignores a late host response after abort (no double-resolve, no stale state)", async () => {
     const { permPending, handler } = makeHarness();
     const ac = new AbortController();

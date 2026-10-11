@@ -232,7 +232,12 @@ export function createCanUseToolHandler({
       if (signal) {
         signal.addEventListener(
           "abort",
-          () => settle({ behavior: "deny", message: "aborted" }),
+          () => {
+            if (settled) return;
+            settle({ behavior: "deny", message: "aborted" });
+            // Tell the host this request is gone, so its card closes.
+            stdout.write(JSON.stringify({ type: "_hermes_perm_settled", id }) + "\n");
+          },
           { once: true },
         );
       }

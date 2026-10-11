@@ -43,6 +43,19 @@ export function isPermRequest(v: unknown): v is PermRequest {
   );
 }
 
+/** Sent by the bridge when a request ends without an answer (its tool
+ *  call was cancelled, e.g. by Stop): the host drops that request. */
+export interface PermSettled {
+  type: "_hermes_perm_settled";
+  id: string;
+}
+
+export function isPermSettled(v: unknown): v is PermSettled {
+  if (!v || typeof v !== "object") return false;
+  const o = v as Record<string, unknown>;
+  return o.type === "_hermes_perm_settled" && typeof o.id === "string";
+}
+
 export function buildPermResponse(id: string, decision: PermissionDecision): PermResponse {
   if (decision.kind === "allow") {
     // Forward both updatedInput and persist when present.  `persist` is

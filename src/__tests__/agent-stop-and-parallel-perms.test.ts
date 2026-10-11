@@ -72,9 +72,22 @@ describe("Stop during a permission prompt", () => {
       type: "user",
       message: { role: "user", content: [{ type: "text", text: "[Request interrupted by user for tool use]" }] },
     });
+    // The bridge settles the cancelled request before the turn's result.
+    fire({ type: "_hermes_perm_settled", id: "perm-1" });
     fire(stoppedResult);
     expect(store.getSnapshot().pendingPermRequest).toBeNull();
     expect(agentViewObservationOf(store.getSnapshot()).kind).not.toBe("needs_approval");
+  });
+
+  it("keeps a background sub-agent's request open when the main turn ends", async () => {
+    const { store, fire } = await makeStore();
+    fire(init);
+    fire(perm("perm-1", "https://example.com"));
+    fire({ type: "result", subtype: "success", is_error: false, uuid: "r2" });
+    expect(store.getSnapshot().pendingPermRequest?.id).toBe("perm-1");
+
+    store.injectEvent({ type: "_hermes_perm_settled", id: "perm-1" } as unknown as AgentEvent);
+    expect(store.getSnapshot().pendingPermRequest).toBeNull();
   });
 });
 
