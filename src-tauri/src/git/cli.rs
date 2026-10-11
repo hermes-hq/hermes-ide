@@ -171,7 +171,8 @@ mod tests {
         // std has no getter for creation flags, so check the source: every
         // git Hermes starts comes from git_command, and on Windows it must
         // pass CREATE_NO_WINDOW or each one flashes a console window.
-        let src = include_str!("cli.rs");
+        // A Windows checkout may have CRLF line ends.
+        let src = include_str!("cli.rs").replace("\r\n", "\n");
         let start = src.find("pub fn git_command()").unwrap();
         let body = &src[start..start + src[start..].find("\n}\n").unwrap()];
         assert!(body.contains("creation_flags(0x0800_0000)"), "{body}");

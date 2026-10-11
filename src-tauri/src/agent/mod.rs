@@ -2563,7 +2563,8 @@ mod tests {
         // std has no getter for creation flags, so check the source: every
         // Agent view close goes through signal_agent_pid, and on Windows its
         // taskkill must pass CREATE_NO_WINDOW and not block on the run.
-        let src = include_str!("mod.rs");
+        // A Windows checkout may have CRLF line ends.
+        let src = include_str!("mod.rs").replace("\r\n", "\n");
         let start = src.find("fn signal_agent_pid(").unwrap();
         let body = &src[start..start + src[start..].find("\n}\n").unwrap()];
         assert!(body.contains("creation_flags(0x0800_0000)"), "{body}");

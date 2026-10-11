@@ -5848,10 +5848,17 @@ mod tests {
         switch_to_feature(d).unwrap();
         assert_eq!(git_ok(d, &["branch", "--show-current"]), "feature");
         assert_eq!(
-            std::fs::read_to_string(d.join("a.txt")).unwrap(),
+            std::fs::read_to_string(d.join("a.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
             "feature\n"
         );
-        assert_eq!(std::fs::read_to_string(d.join("new.txt")).unwrap(), "new\n");
+        assert_eq!(
+            std::fs::read_to_string(d.join("new.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "new\n"
+        );
         assert_eq!(git_ok(d, &["status", "--porcelain"]), "");
     }
 
@@ -5866,7 +5873,12 @@ mod tests {
             std::fs::read_to_string(d.join("new.txt")).unwrap(),
             "mine\n"
         );
-        assert_eq!(std::fs::read_to_string(d.join("a.txt")).unwrap(), "main\n");
+        assert_eq!(
+            std::fs::read_to_string(d.join("a.txt"))
+                .unwrap()
+                .replace("\r\n", "\n"),
+            "main\n"
+        );
     }
 
     #[test]
@@ -5948,7 +5960,8 @@ mod tests {
     fn slow_git_commands_run_off_the_main_thread() {
         // A plain `#[tauri::command] pub fn` runs on the main thread, and a
         // push, a commit's hooks or a worktree checkout would freeze the window.
-        let src = include_str!("mod.rs");
+        // A Windows checkout may have CRLF line ends.
+        let src = include_str!("mod.rs").replace("\r\n", "\n");
         for name in [
             "git_commit",
             "git_push",
