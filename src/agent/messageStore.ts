@@ -128,11 +128,16 @@ export interface AgentSessionState {
    * remember which assistant message they belong to.
    */
   currentStreamMessageId: string | null;
-  /** Running total of `total_cost_usd` across every `result` event seen
-   *  this session.  Drives the masthead cost lozenge.  Note this is the
-   *  *bridge process's* lifetime, which with the long-lived bridge equals
-   *  the user's session.  Reset on workspace restore. */
+  /** Session spend from the `result` events seen this session.  Drives
+   *  the masthead cost lozenge.  Note this is the *bridge process's*
+   *  lifetime, which with the long-lived bridge equals the user's
+   *  session.  Reset on workspace restore. */
   cumulativeCostUsd: number;
+  /** The last non-zero `total_cost_usd` seen.  That field is a running
+   *  total for the query() call, not a per-turn cost, so each result adds
+   *  only what it grew by.  A lower figure means a fresh running total
+   *  (/clear or a new query()), which counts in full. */
+  lastResultCostUsd: number;
   /** Same idea for input tokens. Used by the Usage panel after it opens late. */
   cumulativeInputTokens: number;
   /** Same idea for output tokens — quick "how much have I gotten back?" */
@@ -180,6 +185,7 @@ export function emptyState(): AgentSessionState {
   return {
     compactions: [],
     cumulativeCostUsd: 0,
+    lastResultCostUsd: 0,
     cumulativeInputTokens: 0,
     cumulativeOutputTokens: 0,
     accountInfo: null,
@@ -956,11 +962,18 @@ export function reduceEvent(
     const eventId = typeof event.uuid === "string" ? event.uuid : null;
     const alreadyAccumulated =
       eventId !== null && state.seenResultEventIds.has(eventId);
-    const turnCost = alreadyAccumulated
-      ? 0
-      : typeof event.total_cost_usd === "number"
+    // `total_cost_usd` is the running total so far, so a turn costs what
+    // it grew by.  A zeroed figure (crash / startup error) says nothing.
+    const runningCost =
+      !alreadyAccumulated && typeof event.total_cost_usd === "number" && event.total_cost_usd > 0
         ? event.total_cost_usd
-        : 0;
+        : null;
+    const turnCost =
+      runningCost === null
+        ? 0
+        : runningCost >= state.lastResultCostUsd
+          ? runningCost - state.lastResultCostUsd
+          : runningCost;
     const turnOut = alreadyAccumulated
       ? 0
       : (() => {
@@ -995,6 +1008,7 @@ export function reduceEvent(
       resultEventAt: now,
       seenResultEventIds,
       cumulativeCostUsd: state.cumulativeCostUsd + turnCost,
+      lastResultCostUsd: runningCost ?? state.lastResultCostUsd,
       cumulativeInputTokens: state.cumulativeInputTokens + turnIn,
       cumulativeOutputTokens: state.cumulativeOutputTokens + turnOut,
       // A SUCCESSFUL result clears any prior error — once the user has

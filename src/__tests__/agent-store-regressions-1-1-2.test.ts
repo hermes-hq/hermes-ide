@@ -283,7 +283,8 @@ describe("M1: duplicate result events do not double-count cost", () => {
   it("distinct result events still accumulate correctly", () => {
     let s = emptyState();
     s = reduceEvent(s, resultEvent("r-1", 0.05, 1000));
-    s = reduceEvent(s, resultEvent("r-2", 0.07, 500));
+    // total_cost_usd is the running total: 0.05 + a 0.07 turn.
+    s = reduceEvent(s, resultEvent("r-2", 0.12, 500));
     expect(s.cumulativeCostUsd).toBeCloseTo(0.12);
     expect(s.cumulativeOutputTokens).toBe(1500);
   });
@@ -291,11 +292,41 @@ describe("M1: duplicate result events do not double-count cost", () => {
   it("events without uuid (older bridges) still accumulate (no dedup)", () => {
     let s = emptyState();
     s = reduceEvent(s, resultEvent(null, 0.05, 1000));
-    s = reduceEvent(s, resultEvent(null, 0.05, 1000));
+    s = reduceEvent(s, resultEvent(null, 0.10, 1000));
     // Unidentifiable events fall through to legacy behavior — dedup
     // requires a uuid.  The intent of M1 is to defend against
     // re-emit; bridges that don't tag events keep the prior path.
     expect(s.cumulativeCostUsd).toBeCloseTo(0.10);
+  });
+});
+
+// ─── total_cost_usd is a running total, not a per-turn cost ────────
+describe("result cost is the running total for the query", () => {
+  it("four turns of $0.10 come to $0.40, not the sum of running totals", () => {
+    let s = emptyState();
+    s = reduceEvent(s, resultEvent("t-1", 0.1, 10));
+    s = reduceEvent(s, resultEvent("t-2", 0.2, 10));
+    s = reduceEvent(s, resultEvent("t-3", 0.3, 10));
+    s = reduceEvent(s, resultEvent("t-4", 0.4, 10));
+    expect(s.cumulativeCostUsd).toBeCloseTo(0.4);
+    // Output tokens are per turn and still add up.
+    expect(s.cumulativeOutputTokens).toBe(40);
+  });
+
+  it("a lower total after /clear starts a fresh running total and counts in full", () => {
+    let s = emptyState();
+    s = reduceEvent(s, resultEvent("t-1", 0.3, 10));
+    s = reduceEvent(s, resultEvent("t-2", 0.05, 10)); // after /clear
+    s = reduceEvent(s, resultEvent("t-3", 0.08, 10));
+    expect(s.cumulativeCostUsd).toBeCloseTo(0.38);
+  });
+
+  it("a zeroed crash result neither adds nor resets the running total", () => {
+    let s = emptyState();
+    s = reduceEvent(s, resultEvent("t-1", 0.3, 10));
+    s = reduceEvent(s, resultEvent("t-2", 0, 0));
+    s = reduceEvent(s, resultEvent("t-3", 0.4, 10));
+    expect(s.cumulativeCostUsd).toBeCloseTo(0.4);
   });
 });
 

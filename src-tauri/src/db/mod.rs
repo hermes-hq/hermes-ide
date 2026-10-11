@@ -438,11 +438,20 @@ impl Database {
         Ok(entries)
     }
 
+    /// Each day's totals, read from `token_usage` itself (as
+    /// `get_cost_by_project` does): nothing keeps the `cost_daily` rollup
+    /// up to date.
     pub fn get_cost_daily(&self, days: i64) -> Result<Vec<CostDailyEntry>, String> {
-        let mut stmt = self.conn.prepare(
-            "SELECT date, provider, model, total_input_tokens, total_output_tokens, total_cost_usd, session_count
-             FROM cost_daily WHERE date >= date('now', ?1) ORDER BY date DESC"
-        ).map_err(|e| e.to_string())?;
+        let mut stmt = self
+            .conn
+            .prepare(
+                "SELECT date(recorded_at) AS d, provider, model,
+                    SUM(input_tokens), SUM(output_tokens), COALESCE(SUM(estimated_cost_usd), 0.0),
+                    COUNT(DISTINCT session_id)
+             FROM token_usage WHERE date(recorded_at) >= date('now', ?1)
+             GROUP BY d, provider, model ORDER BY d DESC",
+            )
+            .map_err(|e| e.to_string())?;
 
         let offset = format!("-{} days", days);
         let rows = stmt
@@ -2948,6 +2957,23 @@ mod tests {
     }
 
     // ── delete_session_cache_data ────────────────────────────────────────
+
+    #[test]
+    fn cost_history_is_read_from_the_recorded_usage() {
+        let db = test_db();
+        for sid in ["sess1", "sess2"] {
+            insert_test_session(&db, sid);
+            db.record_token_usage(sid, "anthropic", "claude", 10, 20, 0.25)
+                .unwrap();
+        }
+        let daily = db.get_cost_daily(7).unwrap();
+        assert_eq!(daily.len(), 1, "{daily:?}");
+        assert_eq!(daily[0].provider, "anthropic");
+        assert_eq!(daily[0].total_input_tokens, 20);
+        assert_eq!(daily[0].total_output_tokens, 40);
+        assert!((daily[0].total_cost_usd - 0.5).abs() < 1e-9);
+        assert_eq!(daily[0].session_count, 2);
+    }
 
     #[test]
     fn test_delete_session_cache_data_clears_only_target_session() {
