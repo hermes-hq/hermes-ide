@@ -25,6 +25,7 @@ mod git;
 mod inline_pty;
 mod instance;
 mod land;
+mod launch_attachments;
 mod library;
 mod limits;
 mod menu;
@@ -744,6 +745,8 @@ pub fn run() {
             library::start_updates(app.handle());
             // Worktree hygiene: keeps old worktrees from filling the disk.
             git::hygiene_app::start(app.handle().clone());
+            // Pastes saved for the task launcher: kept a week.
+            launch_attachments::start_pruning(app.handle());
 
             // The agent bridge is NOT warmed at startup: the frontend asks
             // for it (warm_agent_bridge) once an Agent-view session exists,
@@ -837,6 +840,7 @@ pub fn run() {
             task_launcher::task_write_feature_file,
             task_launcher::task_track_prompt,
             task_launcher::task_write_done_when,
+            launch_attachments::save_launch_attachment,
             // Session management
             pty::create_session,
             pty::ssh_list_directory,

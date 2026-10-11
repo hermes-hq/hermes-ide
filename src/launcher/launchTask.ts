@@ -20,6 +20,7 @@ import type { TaskLaunchRequest } from "../components/TaskLauncher";
 import { getAgent } from "../catalog/agentCatalog";
 import { translate } from "../i18n/registry";
 import { launchPrompts } from "../library/delivery";
+import { promptWithAttachments } from "./attachments";
 import {
   agentTakesFirstPrompt,
   appendTaskLaunches,
@@ -134,6 +135,9 @@ function sessionOpts(launch: QueuedLaunch): CreateSessionOpts {
       ? { [projectId]: { branch: agent.branch, createNew: agent.createBranch, ...(agent.createBranch && agent.baseBranch ? { baseBranch: agent.baseBranch } : {}) } }
       : undefined,
     initialPrompt: firstPrompt,
+    ...(agent.mode === "agent" && req.attachments?.some((a) => a.image)
+      ? { initialImages: req.attachments.filter((a) => a.image).map((a) => a.path) }
+      : {}),
     ...(systemPrompt ? { systemPrompt } : {}),
     permissionMode: agent.launch.permissionMode,
     customPrefix: agent.launch.customPrefix || undefined,
@@ -230,6 +234,8 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
       console.warn("[launchTask] could not build the feature track's first prompt:", err);
     }
   }
+  // Attached files and images: their paths follow the task.
+  firstPrompt = promptWithAttachments(firstPrompt, req.attachments);
   const launchId = newLaunchId(deps);
   result.launchId = launchId;
   const plan = (agentIndex: number): QueuedLaunch => ({ req: { ...req, task }, agentIndex, projectId, launchId, firstPrompt });

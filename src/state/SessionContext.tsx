@@ -36,6 +36,7 @@ import {
 } from "../api/sessions";
 import { closeNeedsConfirm } from "./closeConfirm";
 import { deriveSessionLabelFromMessage, isDefaultSessionLabel } from "../utils/autoSessionLabel";
+import { loadImageAttachments } from "../launcher/attachments";
 import { getProjects, getSessionProjects, attachSessionProject } from "../api/projects";
 import { autoAttachInsideProject } from "../utils/autoAttach";
 import { hasAddDirDrift } from "../utils/agentDrift";
@@ -2196,7 +2197,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         claudeAddDirs.current.set(session.id, [...session.workspace_paths]);
         // Task launcher (F15): the task is the conversation's first message,
         // sent once the agent is up.
-        const firstMessage = opts?.initialPrompt?.trim() ? buildUserEnvelope(opts.initialPrompt.trim(), []) : null;
+        // Images attached in the launcher go with it, as images.
+        const firstText = opts?.initialPrompt?.trim() ?? "";
+        const firstImages = opts?.initialImages ?? [];
         spawnAgentSession({
           sessionId: session.id,
           workingDir: session.working_directory,
@@ -2204,6 +2207,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         })
           .then(async (uuid) => {
             claudeUuids.current.set(session.id, uuid);
+            if (!firstText && firstImages.length === 0) return;
+            const firstMessage = buildUserEnvelope(firstText, await loadImageAttachments(firstImages));
             if (!firstMessage) return;
             try {
               await echoUserEnvelope(session.id, firstMessage);

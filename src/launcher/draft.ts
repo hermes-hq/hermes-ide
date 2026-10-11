@@ -9,6 +9,7 @@
 import { comboKey } from "../agent/capabilities/choice";
 import type { LaunchChoice } from "../agent/capabilities/types";
 import type { SessionMode } from "../types/session";
+import type { LaunchAttachment } from "./attachments";
 
 export interface LauncherDraft {
   task: string;
@@ -21,6 +22,8 @@ export interface LauncherDraft {
   expanded: boolean;
   /** Terminal or Agent view, when the agent offers both. */
   viewMode?: SessionMode;
+  /** Files and images attached to the task. */
+  attachments?: LaunchAttachment[];
 }
 
 /** Worth keeping: something was typed or chosen (an untouched sheet is not a draft). */

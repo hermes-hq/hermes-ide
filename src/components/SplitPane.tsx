@@ -1,5 +1,6 @@
 import "../styles/components/SplitPane.css";
 import { Suspense, useEffect, useRef, useState, useCallback } from "react";
+import { isOverFileDropTarget } from "../utils/fileDropTarget";
 import { lazyView } from "../utils/lazyView";
 import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
@@ -173,7 +174,8 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
       const dpr = window.devicePixelRatio || 1;
       const x = event.payload.position.x / dpr;
       const y = event.payload.position.y / dpr;
-      const isOver = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+      // A drop on the task launcher over this pane belongs to the launcher.
+      const isOver = x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom && !(isFileDrag && isOverFileDropTarget(x, y));
 
       if (type === "enter" || type === "over") {
         if (isFileDrag) {
