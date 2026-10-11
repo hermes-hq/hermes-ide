@@ -294,7 +294,7 @@ describe("Agent view provider", () => {
       { type: "usage", at: 2, source: "agent-view", inputTokens: 1000, outputTokens: 200, costUsd: 0.25, confidence: "exact" },
     ]);
     expect(step(3)).toEqual([]);
-    store.injectEvent({ ...(RESULT_OK as object), uuid: "u2", total_cost_usd: 0.5, usage: { input_tokens: 10, output_tokens: 20 } } as unknown as AgentEvent);
+    store.injectEvent({ ...(RESULT_OK as object), uuid: "u2", total_cost_usd: 0.75, usage: { input_tokens: 10, output_tokens: 20 } } as unknown as AgentEvent);
     expect(step(4)).toEqual([
       { type: "usage", at: 4, source: "agent-view", inputTokens: 1010, outputTokens: 220, costUsd: 0.75, confidence: "exact" },
     ]);
