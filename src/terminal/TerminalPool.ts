@@ -10,7 +10,7 @@
  */
 
 import { listen } from "@tauri-apps/api/event";
-import { writeToSession } from "../api/sessions";
+import { writeToSession, resizeSession } from "../api/sessions";
 import { noteUserInput } from "../agent/status/userInput";
 import { suggest } from "./intelligence/suggestionEngine";
 import { resolveIntent, getIntentSuggestions } from "./intentCommands";
@@ -95,6 +95,10 @@ export function updateSettings(settings: Record<string, string>): void {
         if (proposed && Number.isFinite(proposed.cols) && Number.isFinite(proposed.rows) && proposed.cols >= 10 && proposed.rows >= 2) {
           entry.fitAddon.fit();
           entry.terminal.refresh(0, entry.terminal.rows - 1);
+          // A new font changes the column/row count without resizing the
+          // viewport, so nothing else tells the PTY.
+          resizeSession(sessionId, entry.terminal.rows, entry.terminal.cols)
+            .catch((err) => console.warn("[TerminalPool] Failed to resize session:", err));
         }
       } catch { /* ignore */ }
     }
