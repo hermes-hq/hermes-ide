@@ -53,7 +53,7 @@ import {
   getCursorPosition,
   cleanSelection,
   estimateInitialDimensions,
-  getFocusedSessionId,
+  getKeyboardFocusedSessionId,
   refreshShellForeground,
   pasteIntoTerminal,
   type PoolEntry,
@@ -106,7 +106,7 @@ export function updateSettings(settings: Record<string, string>): void {
 // On macOS, WKWebView consumes Ctrl+C at the native level before JavaScript
 // receives the keydown event. The Rust menu system intercepts it as a menu
 // accelerator and emits "native-sigint". We listen here and forward \x03
-// to the active terminal's PTY.
+// to the PTY of the terminal that holds keyboard focus.
 
 let sigintListenerReady = false;
 
@@ -114,7 +114,9 @@ export function setupNativeSigintListener(): void {
   if (sigintListenerReady) return;
   sigintListenerReady = true;
   listen("native-sigint", () => {
-    const sessionId = getFocusedSessionId();
+    // Not the last attached terminal: in split panes that may be another
+    // pane, and focus may be outside every terminal.
+    const sessionId = getKeyboardFocusedSessionId();
     if (!sessionId) return;
     handleTerminalInput(sessionId, "\x03");
   }).catch((err) => {

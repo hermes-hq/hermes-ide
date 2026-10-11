@@ -75,6 +75,18 @@ const heldOutput = new Map<string, Uint8Array[]>();
 let _focusedSessionId: string | null = null;
 export function getFocusedSessionId(): string | null { return _focusedSessionId; }
 
+/** The session whose terminal holds keyboard focus right now, or null when
+ *  focus is elsewhere (another pane, an input). With nothing focused at all
+ *  (the web view lost focus to a native dialog), the last focused terminal. */
+export function getKeyboardFocusedSessionId(): string | null {
+  const active = document.activeElement;
+  if (!active || active === document.body) return _focusedSessionId;
+  for (const [id, entry] of pool) {
+    if (entry.attached && entry.container.contains(active)) return id;
+  }
+  return null;
+}
+
 // Current settings cache
 export let currentSettings: Record<string, string> = {};
 
@@ -508,6 +520,27 @@ export function isWebglAvailable(): boolean {
 
 // ─── Attach / Detach / Destroy ───────────────────────────────────────
 
+/** Make `sessionId` the focused terminal: stop polling for the previously
+ *  focused terminal, start for this one. */
+function setFocusedSession(sessionId: string, entry: PoolEntry): void {
+  if (_focusedSessionId && _focusedSessionId !== sessionId) {
+    const prev = pool.get(_focusedSessionId);
+    if (prev?.shellFgPollTimer) {
+      clearInterval(prev.shellFgPollTimer);
+      prev.shellFgPollTimer = null;
+    }
+  }
+  _focusedSessionId = sessionId;
+  if (!entry.shellFgPollTimer) {
+    // Check now, not only 300 ms from now: the value may be stale from the
+    // last time this terminal was focused.
+    refreshShellForeground(sessionId).catch(() => { /* keep last known value */ });
+    entry.shellFgPollTimer = setInterval(() => {
+      refreshShellForeground(sessionId).catch(() => { /* IPC failure — keep last known value */ });
+    }, 300);
+  }
+}
+
 export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = true): void {
   const entry = pool.get(sessionId);
   if (!entry) return;
@@ -549,24 +582,7 @@ export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = 
 
   entry.viewport = viewport;
   entry.attached = true;
-
-  // Stop polling for the previously focused terminal, start for this one.
-  if (_focusedSessionId && _focusedSessionId !== sessionId) {
-    const prev = pool.get(_focusedSessionId);
-    if (prev?.shellFgPollTimer) {
-      clearInterval(prev.shellFgPollTimer);
-      prev.shellFgPollTimer = null;
-    }
-  }
-  _focusedSessionId = sessionId;
-  if (!entry.shellFgPollTimer) {
-    // Check now, not only 300 ms from now: the value may be stale from the
-    // last time this terminal was focused.
-    refreshShellForeground(sessionId).catch(() => { /* keep last known value */ });
-    entry.shellFgPollTimer = setInterval(() => {
-      refreshShellForeground(sessionId).catch(() => { /* IPC failure — keep last known value */ });
-    }, 300);
-  }
+  setFocusedSession(sessionId, entry);
 
   // Fit and focus after paint.
   // Double-rAF ensures CSS flex layout has distributed space to this pane
@@ -599,6 +615,7 @@ export function focusTerminal(sessionId: string): void {
   const entry = pool.get(sessionId);
   if (!entry || !entry.attached || !entry.opened) return;
   if (dialogHoldsKeyboard(entry.container)) return;
+  setFocusedSession(sessionId, entry);
   entry.terminal.focus();
   // WKWebView workaround: xterm.focus() may silently fail after a native dialog
   // steals focus. Directly find and focus the hidden textarea as a fallback.
