@@ -760,7 +760,8 @@ fn commit_author<'a>(
     }
 }
 
-#[tauri::command]
+// Off the main thread (`async`): `git commit` runs the repository's hooks.
+#[tauri::command(async)]
 pub fn git_commit(
     state: State<'_, AppState>,
     session_id: String,
@@ -790,7 +791,49 @@ pub fn git_commit(
     })
 }
 
-#[tauri::command]
+/// Push the checked-out branch to `remote_name`. A ref the server refuses
+/// (a protected branch, a pre-receive or update hook) does not fail
+/// `Remote::push`: libgit2 reports it only through `push_update_reference`,
+/// so those refusals are collected and returned as the error.
+fn push_head(repo: &Repository, remote_name: &str) -> Result<(), String> {
+    let mut remote_obj = repo
+        .find_remote(remote_name)
+        .map_err(|e| format!("Remote '{}' not found: {}", remote_name, e))?;
+
+    let head = repo.head().map_err(|e| e.to_string())?;
+    let refspec = head
+        .name()
+        .ok_or_else(|| "HEAD is not a symbolic reference".to_string())?;
+
+    let mut rejected: Vec<String> = Vec::new();
+    {
+        let mut callbacks = make_callbacks();
+        callbacks.push_update_reference(|refname, status| {
+            if let Some(msg) = status {
+                rejected.push(format!("{}: {}", refname, msg));
+            }
+            Ok(())
+        });
+        let mut push_opts = PushOptions::new();
+        push_opts.remote_callbacks(callbacks);
+
+        remote_obj
+            .push(&[refspec], Some(&mut push_opts))
+            .map_err(|e| format!("Push failed: {}", e))?;
+    }
+
+    if !rejected.is_empty() {
+        return Err(format!(
+            "Push rejected by {}: {}",
+            remote_name,
+            rejected.join("; ")
+        ));
+    }
+    Ok(())
+}
+
+// Off the main thread (`async`): a push waits on the network and sign-in.
+#[tauri::command(async)]
 pub fn git_push(
     state: State<'_, AppState>,
     session_id: String,
@@ -805,29 +848,23 @@ pub fn git_push(
     drop(db);
     let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
     let remote_name = remote.as_deref().unwrap_or("origin");
-
-    let mut remote_obj = repo
-        .find_remote(remote_name)
-        .map_err(|e| format!("Remote '{}' not found: {}", remote_name, e))?;
-
-    let head = repo.head().map_err(|e| e.to_string())?;
-    let refspec = head
-        .name()
-        .ok_or_else(|| "HEAD is not a symbolic reference".to_string())?;
-
-    let callbacks = make_callbacks();
-    let mut push_opts = PushOptions::new();
-    push_opts.remote_callbacks(callbacks);
-
-    remote_obj
-        .push(&[refspec], Some(&mut push_opts))
-        .map_err(|e| format!("Push failed: {}", e))?;
+    push_head(&repo, remote_name)?;
 
     Ok(GitOperationResult {
         success: true,
         message: format!("Pushed to {}", remote_name),
         error: None,
     })
+}
+
+/// Pull needs a branch. On a detached HEAD (a tag or commit checked out)
+/// the branch name below reads "HEAD", which fetches the remote's default
+/// branch and fast-forwards or merges it into the checked-out commit.
+fn ensure_on_branch(repo: &Repository) -> Result<(), String> {
+    if repo.head_detached().unwrap_or(false) {
+        return Err("Cannot pull: not on a branch. Switch to a branch first.".to_string());
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -856,6 +893,7 @@ pub async fn git_pull(
                 repo_state
             ));
         }
+        ensure_on_branch(&repo)?;
 
         let remote_name = remote.as_deref().unwrap_or("origin");
 
@@ -1541,6 +1579,20 @@ pub fn git_create_branch(
     })
 }
 
+/// Move HEAD to `refname`, whose commit is `target`. The files are checked
+/// out first: once HEAD has moved, libgit2 compares against the new branch
+/// and takes every file that differs for a local edit, so the old branch's
+/// files stayed behind, staged as a revert. SAFE refuses (and HEAD stays put)
+/// rather than overwrite an edit or an untracked file in the way.
+fn switch_head_to(repo: &Repository, refname: &str, target: &git2::Commit) -> Result<(), String> {
+    repo.checkout_tree(
+        target.as_object(),
+        Some(git2::build::CheckoutBuilder::new().safe()),
+    )
+    .map_err(|e| e.to_string())?;
+    repo.set_head(refname).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn git_checkout_branch(
     app: AppHandle,
@@ -1597,10 +1649,9 @@ pub async fn git_checkout_branch(
 
         // Try local branch first
         let refname = format!("refs/heads/{}", name);
-        if repo.find_reference(&refname).is_ok() {
-            repo.set_head(&refname).map_err(|e| e.to_string())?;
-            repo.checkout_head(Some(git2::build::CheckoutBuilder::default().safe()))
-                .map_err(|e| e.to_string())?;
+        if let Ok(local_ref) = repo.find_reference(&refname) {
+            let commit = local_ref.peel_to_commit().map_err(|e| e.to_string())?;
+            switch_head_to(&repo, &refname, &commit)?;
             let _ = app_handle.emit(&format!("branch-changed-{}", session_id_clone), &name);
             return Ok(GitOperationResult {
                 success: true,
@@ -1627,9 +1678,7 @@ pub async fn git_checkout_branch(
                 .map_err(|e| format!("Failed to set upstream: {}", e))?;
 
             let local_refname = format!("refs/heads/{}", local_name);
-            repo.set_head(&local_refname).map_err(|e| e.to_string())?;
-            repo.checkout_head(Some(git2::build::CheckoutBuilder::default().safe()))
-                .map_err(|e| e.to_string())?;
+            switch_head_to(&repo, &local_refname, &commit)?;
 
             let _ = app_handle.emit(&format!("branch-changed-{}", session_id_clone), local_name);
             return Ok(GitOperationResult {
@@ -1929,7 +1978,8 @@ pub fn git_stash_list(
     Ok(entries)
 }
 
-#[tauri::command]
+// Off the main thread (`async`): stashing untracked files can take a while.
+#[tauri::command(async)]
 pub fn git_stash_save(
     state: State<'_, AppState>,
     session_id: String,
@@ -2851,7 +2901,8 @@ pub fn search_project(
 
 // ─── Worktree IPC Commands ──────────────────────────────────────────
 
-#[tauri::command]
+// Off the main thread (`async`): `git worktree add` checks out every file.
+#[tauri::command(async)]
 #[allow(clippy::too_many_arguments)] // Tauri command: one argument per IPC field
 pub fn git_create_worktree(
     app: AppHandle,
@@ -5748,5 +5799,133 @@ mod tests {
         let ch = worktree_changes_at(sup.to_str().unwrap()).unwrap();
         assert!(ch.files.is_empty());
         assert!(!ch.has_changes);
+    }
+
+    /// main has a.txt = "main"; feature changes it and adds new.txt.
+    fn two_branch_repo() -> tempfile::TempDir {
+        let dir = tempfile::tempdir().unwrap();
+        let d = dir.path();
+        git_ok(d, &["init", "-b", "main"]);
+        std::fs::write(d.join("a.txt"), "main\n").unwrap();
+        git_ok(d, &["add", "."]);
+        git_ok(d, &["commit", "-m", "main"]);
+        git_ok(d, &["checkout", "-b", "feature"]);
+        std::fs::write(d.join("a.txt"), "feature\n").unwrap();
+        std::fs::write(d.join("new.txt"), "new\n").unwrap();
+        git_ok(d, &["add", "."]);
+        git_ok(d, &["commit", "-m", "feature"]);
+        git_ok(d, &["checkout", "main"]);
+        dir
+    }
+
+    fn switch_to_feature(dir: &Path) -> Result<(), String> {
+        let repo = Repository::open(dir).unwrap();
+        let commit = repo
+            .find_reference("refs/heads/feature")
+            .unwrap()
+            .peel_to_commit()
+            .unwrap();
+        switch_head_to(&repo, "refs/heads/feature", &commit)
+    }
+
+    #[test]
+    fn switching_branches_brings_the_branch_s_files_and_leaves_nothing_staged() {
+        let dir = two_branch_repo();
+        let d = dir.path();
+        switch_to_feature(d).unwrap();
+        assert_eq!(git_ok(d, &["branch", "--show-current"]), "feature");
+        assert_eq!(
+            std::fs::read_to_string(d.join("a.txt")).unwrap(),
+            "feature\n"
+        );
+        assert_eq!(std::fs::read_to_string(d.join("new.txt")).unwrap(), "new\n");
+        assert_eq!(git_ok(d, &["status", "--porcelain"]), "");
+    }
+
+    #[test]
+    fn an_untracked_file_in_the_way_refuses_the_switch_and_head_stays() {
+        let dir = two_branch_repo();
+        let d = dir.path();
+        std::fs::write(d.join("new.txt"), "mine\n").unwrap();
+        assert!(switch_to_feature(d).is_err());
+        assert_eq!(git_ok(d, &["branch", "--show-current"]), "main");
+        assert_eq!(
+            std::fs::read_to_string(d.join("new.txt")).unwrap(),
+            "mine\n"
+        );
+        assert_eq!(std::fs::read_to_string(d.join("a.txt")).unwrap(), "main\n");
+    }
+
+    #[test]
+    fn a_push_the_remote_refuses_is_an_error_not_pushed() {
+        let dir = tempfile::tempdir().unwrap();
+        let remote = dir.path().join("remote.git");
+        let local = dir.path().join("local");
+        git_ok(
+            dir.path(),
+            &["init", "--bare", "-b", "main", remote.to_str().unwrap()],
+        );
+        git_ok(dir.path(), &["init", "-b", "main", local.to_str().unwrap()]);
+        std::fs::write(local.join("a.txt"), "a\n").unwrap();
+        git_ok(&local, &["add", "."]);
+        git_ok(&local, &["commit", "-m", "a"]);
+        git_ok(
+            &local,
+            &["remote", "add", "origin", remote.to_str().unwrap()],
+        );
+        let repo = Repository::open(&local).unwrap();
+        // The first push goes through.
+        push_head(&repo, "origin").unwrap();
+        std::fs::write(local.join("a.txt"), "b\n").unwrap();
+        git_ok(&local, &["commit", "-am", "b"]);
+        // The remote refuses to update main (its ref is locked, the way a
+        // server-side hook or protected branch refuses it): the transport
+        // reports it per ref and `Remote::push` itself returns Ok.
+        std::fs::write(remote.join("refs/heads/main.lock"), "").unwrap();
+        let err = push_head(&repo, "origin").unwrap_err();
+        assert!(err.contains("refs/heads/main"), "got: {err}");
+        assert_ne!(
+            git_ok(&remote, &["rev-parse", "main"]),
+            git_ok(&local, &["rev-parse", "main"])
+        );
+        std::fs::remove_file(remote.join("refs/heads/main.lock")).unwrap();
+        push_head(&repo, "origin").unwrap();
+        assert_eq!(
+            git_ok(&remote, &["rev-parse", "main"]),
+            git_ok(&local, &["rev-parse", "main"])
+        );
+    }
+
+    #[test]
+    fn pull_is_refused_on_a_detached_head() {
+        let dir = two_branch_repo();
+        let d = dir.path();
+        assert_eq!(ensure_on_branch(&Repository::open(d).unwrap()), Ok(()));
+        git_ok(d, &["checkout", "--detach", "feature"]);
+        let err = ensure_on_branch(&Repository::open(d).unwrap()).unwrap_err();
+        assert!(err.contains("not on a branch"), "got: {err}");
+    }
+
+    #[test]
+    fn slow_git_commands_run_off_the_main_thread() {
+        // A plain `#[tauri::command] pub fn` runs on the main thread, and a
+        // push, a commit's hooks or a worktree checkout would freeze the window.
+        let src = include_str!("mod.rs");
+        for name in [
+            "git_commit",
+            "git_push",
+            "git_stash_save",
+            "git_create_worktree",
+        ] {
+            let decl = format!("\npub fn {}(", name);
+            let at = src
+                .find(&decl)
+                .unwrap_or_else(|| panic!("{name} not found"));
+            let attrs = &src[src[..at].rfind("\n\n").unwrap()..at];
+            assert!(
+                attrs.contains("#[tauri::command(async)]"),
+                "{name} is not async:{attrs}"
+            );
+        }
     }
 }

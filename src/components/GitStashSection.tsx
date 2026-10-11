@@ -127,10 +127,14 @@ export function GitStashSection({
     }
   }, [sessionId, projectId]);
 
-  // Fetch stash list on mount
+  // Fetch stash list on mount, and again whenever the count changes: an agent
+  // or another worktree may have stashed, which renumbers every entry, and
+  // the actions below go by position. A Drop confirm open on an old position
+  // is closed so it cannot land on a different stash.
   useEffect(() => {
+    setConfirmDrop(null);
     loadStashes();
-  }, [loadStashes]);
+  }, [loadStashes, stashCount]);
 
   // Re-fetch when section expands
   const handleToggle = useCallback(() => {

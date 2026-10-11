@@ -17,6 +17,13 @@ use std::process::Command;
 pub fn git_command() -> Command {
     let mut cmd = Command::new("git");
     force_c_locale(&mut cmd);
+    // The release app has no console, so Windows would open one for each
+    // git.exe it starts, flashing over the window and taking focus.
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        cmd.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
     cmd
 }
 
@@ -157,5 +164,16 @@ mod tests {
         );
         let native = run(german(Command::new("git")));
         eprintln!("git under a German locale, uncorrected: {native}");
+    }
+
+    #[test]
+    fn git_command_starts_git_without_a_console_window_on_windows() {
+        // std has no getter for creation flags, so check the source: every
+        // git Hermes starts comes from git_command, and on Windows it must
+        // pass CREATE_NO_WINDOW or each one flashes a console window.
+        let src = include_str!("cli.rs");
+        let start = src.find("pub fn git_command()").unwrap();
+        let body = &src[start..start + src[start..].find("\n}\n").unwrap()];
+        assert!(body.contains("creation_flags(0x0800_0000)"), "{body}");
     }
 }
