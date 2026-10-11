@@ -228,7 +228,11 @@ async function taskSetupWith({ work, repo, git, fake, undoPath }, tag, evidenceD
   const cleanup = async () => {
     if (app.isRunning()) await app.stop();
     undoPath?.();
-    rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    try {
+      rmSync(work, { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
+    } catch {
+      /* best effort: on Windows a git process can still hold a file for a moment */
+    }
   };
   return { work, repo, git, fake, app, bridge, sid, wt, hi, cleanup };
 }
