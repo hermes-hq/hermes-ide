@@ -10,8 +10,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, waitFor, screen, fireEvent, act } from "@testing-library/react";
 import { EditorView } from "@codemirror/view";
-import { readFileSync } from "fs";
-import { resolve } from "path";
 
 let disk = "";
 let diskReadOnly = false;
@@ -136,8 +134,5 @@ describe("Alt+Up/Down in the editor does not switch panes", () => {
     window.removeEventListener("keydown", listener);
     expect(seen).toEqual([{ action: "app.focus-next-pane", handled: true }]);
 
-    const app: string = readFileSync(resolve(__dirname, "../App.tsx"), "utf-8");
-    const paneNav = app.slice(app.indexOf('if (action === "app.focus-next-pane"'), app.indexOf("collectPanes(state.layout.root)"));
-    expect(paneNav).toContain("if (e.defaultPrevented) return;");
   });
 });

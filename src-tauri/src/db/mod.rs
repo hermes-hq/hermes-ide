@@ -2411,6 +2411,14 @@ mod tests {
         assert_eq!(lone, vec![other_session]);
     }
 
+    /// The backend refuses `set_setting` for a key missing from the
+    /// allowlist and most callers swallow that error: the Library's
+    /// carried-pins marker never saved, so unpinned entries came back.
+    #[test]
+    fn the_librarys_carried_pins_marker_is_an_allowed_setting() {
+        assert!(VALID_SETTING_KEYS.contains(&"pinned_templates_library"));
+    }
+
     #[test]
     fn importing_settings_adds_to_my_prompts_instead_of_replacing_them() {
         let db = test_db();

@@ -207,25 +207,17 @@ pub fn worktree_patch(repo: &Path, base: &str) -> Result<String, String> {
     let index = dir.path().join("index");
     let index_str = index.to_string_lossy().to_string();
     let env: [(&str, &str); 1] = [("GIT_INDEX_FILE", index_str.as_str())];
-    // Start from a copy of the real index (its stat data spares git from
-    // hashing every unchanged file; HEAD's tree has none), or HEAD's tree,
-    // then record every worktree path in the private index as intent-to-add
-    // (`-N`): that lists new files without hashing anything, so the diff
-    // below, which compares the base tree to the worktree itself, writes no
-    // objects into the repository and leaves its real index alone.
-    // Additions, edits, deletions and renames all show; ignored files never
-    // do.
-    let real_index = git(repo, &["rev-parse", "--git-path", "index"], &[])
-        .ok()
-        .map(|p| repo.join(p.trim()));
-    let copied = real_index.is_some_and(|p| std::fs::copy(p, &index).is_ok());
-    if !copied || git(repo, &["add", "-N", "-A", "--", "."], &env).is_err() {
-        let _ = std::fs::remove_file(&index);
-        if git(repo, &["rev-parse", "--verify", "--quiet", "HEAD"], &[]).is_ok() {
-            git(repo, &["read-tree", "HEAD"], &env)?;
-        }
-        git(repo, &["add", "-N", "-A", "--", "."], &env)?;
+    // Start from HEAD's tree, then record every worktree path in the
+    // private index as intent-to-add (`-N`): that lists new files without
+    // hashing anything, so the diff below, which compares the base tree to
+    // the worktree itself, writes no objects into the repository and leaves
+    // its real index alone. Additions, edits, deletions and renames all
+    // show; ignored files never do. (Not a copy of the real index: its stat
+    // data can hide a same-size edit made right after a commit.)
+    if git(repo, &["rev-parse", "--verify", "--quiet", "HEAD"], &[]).is_ok() {
+        git(repo, &["read-tree", "HEAD"], &env)?;
     }
+    git(repo, &["add", "-N", "-A", "--", "."], &env)?;
     git(
         repo,
         &[
@@ -879,35 +871,37 @@ diff --git a/tool.bin b/tool.bin\nnew file mode 100644\nindex 0..5\nBinary files
         );
     }
 
-    /// The private index starts from the real one, so git trusts its stat
-    /// data and reads no file that did not change (on a large repository,
-    /// hashing every file took seconds). An unreadable, unchanged file
-    /// proves it: reading it would fail.
-    #[cfg(unix)]
+    /// A same-size edit right after a commit (an agent changing one
+    /// character) still shows: the private index copy must not make git
+    /// trust the real index's stat data for a file written in its moment.
+    /// Pinned to one instant (file, index entry and index alike) so it does
+    /// not depend on the file system's time resolution.
     #[test]
-    fn the_diff_reads_no_unchanged_file() {
-        use std::os::unix::fs::PermissionsExt;
+    fn a_same_size_edit_right_after_a_commit_shows() {
         let (_dir, repo) = fixture();
-        // chmod moves ctime; only mtime and size should count here.
+        // Rewriting a file moves its ctime; only mtime and size count here.
         run(&repo, &["config", "core.trustctime", "false"]);
-        let locked = repo.join("locked.txt");
-        fs::write(&locked, "secret\n").unwrap();
-        // An old mtime, so the index entry is not "racily clean" (re-read).
-        let ok = Command::new("touch")
-            .args(["-t", "202001010000"])
-            .arg(&locked)
-            .status()
-            .unwrap();
-        assert!(ok.success());
-        run(&repo, &["add", "locked.txt"]);
-        run(&repo, &["commit", "-q", "-m", "locked"]);
+        let moment = std::time::UNIX_EPOCH + std::time::Duration::from_secs(1_700_000_000);
+        let pin = |p: &Path| {
+            fs::File::options()
+                .write(true)
+                .open(p)
+                .unwrap()
+                .set_modified(moment)
+                .unwrap()
+        };
+        let app = repo.join("app.js");
+        fs::write(&app, "const b = 2;\n").unwrap();
+        pin(&app);
+        run(&repo, &["add", "app.js"]);
+        run(&repo, &["commit", "-q", "-m", "app"]);
         run(&repo, &["branch", "-f", "main", "HEAD"]);
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o000)).unwrap();
-        fs::write(repo.join("README.md"), "# fixture\nmore\n").unwrap();
-        let diff = review_diff(repo.to_string_lossy().to_string());
-        fs::set_permissions(&locked, fs::Permissions::from_mode(0o644)).unwrap();
-        let paths: Vec<String> = diff.unwrap().files.into_iter().map(|f| f.path).collect();
-        assert_eq!(paths, vec!["README.md"]);
+        fs::write(&app, "const b = 3;\n").unwrap();
+        pin(&app);
+        pin(&repo.join(".git").join("index"));
+        let diff = review_diff(repo.to_string_lossy().to_string()).unwrap();
+        let paths: Vec<&str> = diff.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["app.js"]);
     }
 
     #[test]

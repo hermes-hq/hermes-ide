@@ -36,7 +36,7 @@
 ### Git and review
 
 - Merging a task locally a second time from the same branch no longer reports a false conflict or lists changes that already landed.
-- Opening the Review Desk on a large project no longer freezes the app, and the diff loads much faster.
+- Opening the Review Desk on a large project no longer freezes the app while the changes load.
 - Files with accented or non-Latin names now show their real names in the Review Desk and in review notes sent to the agent.
 - Review Desk line counts now include lines that begin with dashes or plus signs, such as Markdown separators or SQL comments.
 

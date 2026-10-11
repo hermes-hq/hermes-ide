@@ -92,9 +92,13 @@ where
     Ok(())
 }
 
-/// The user's home folder.  Not `$HOME`: Windows does not set it, so the
-/// platform lookup (USERPROFILE / the known folder there) is used.
+/// The user's home folder, found the way Claude Code finds it: `$HOME` when
+/// it is set, else the platform lookup (Windows usually sets no `HOME`, so
+/// USERPROFILE / the known folder there).
 fn home_dir() -> Result<PathBuf, String> {
+    if let Some(home) = std::env::var_os("HOME").filter(|h| !h.is_empty()) {
+        return Ok(PathBuf::from(home));
+    }
     crate::platform::home_dir().ok_or_else(|| "home folder not found".to_string())
 }
 
