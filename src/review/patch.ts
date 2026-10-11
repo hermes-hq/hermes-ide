@@ -37,17 +37,36 @@ export interface ParsedFile {
   readonly raw: string;
 }
 
+const ESCAPES: Record<string, number> = { n: 10, t: 9, '"': 34, "\\": 92 };
+
+/** git quotes unusual paths in C style; non-ASCII bytes come as octal
+ *  (`caf\303\251.txt`), so decode to bytes, then UTF-8. */
 function unquote(raw: string): string {
   const t = raw.trim();
-  if (t.length >= 2 && t.startsWith('"') && t.endsWith('"')) {
-    return t
-      .slice(1, -1)
-      .replace(/\\n/g, "\n")
-      .replace(/\\t/g, "\t")
-      .replace(/\\"/g, '"')
-      .replace(/\\\\/g, "\\");
+  if (!(t.length >= 2 && t.startsWith('"') && t.endsWith('"'))) return t;
+  const inner = new TextEncoder().encode(t.slice(1, -1));
+  const out: number[] = [];
+  for (let i = 0; i < inner.length; i++) {
+    const c = inner[i];
+    if (c !== 92 || i + 1 >= inner.length) {
+      out.push(c);
+      continue;
+    }
+    const oct = String.fromCharCode(inner[i + 1], inner[i + 2] ?? 0, inner[i + 3] ?? 0);
+    if (/^[0-3][0-7]{2}$/.test(oct)) {
+      out.push(parseInt(oct, 8));
+      i += 3;
+      continue;
+    }
+    const next = String.fromCharCode(inner[i + 1]);
+    if (next in ESCAPES) {
+      out.push(ESCAPES[next]);
+    } else {
+      out.push(c, inner[i + 1]);
+    }
+    i++;
   }
-  return t;
+  return new TextDecoder().decode(new Uint8Array(out));
 }
 
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@(.*)$/;

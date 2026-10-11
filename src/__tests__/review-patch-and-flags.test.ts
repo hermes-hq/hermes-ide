@@ -87,6 +87,14 @@ describe("parsePatch", () => {
     const quoted = 'diff --git "a/sp ace.txt" "b/sp ace.txt"\n--- "a/sp ace.txt"\n+++ "b/sp ace.txt"\n@@ -1 +1 @@\n-a\n+b\n';
     expect(parsePatch(quoted)[0].path).toBe("sp ace.txt");
   });
+
+  it("decodes non-ASCII paths git quotes as octal bytes", () => {
+    const quoted = 'diff --git "a/caf\\303\\251.txt" "b/caf\\303\\251.txt"\n--- "a/caf\\303\\251.txt"\n+++ "b/caf\\303\\251.txt"\n@@ -1 +1 @@\n-a\n+b\n';
+    expect(parsePatch(quoted)[0].path).toBe("caf\u00e9.txt");
+    // An escaped backslash before digits is a backslash, not a byte.
+    const slash = 'diff --git "a/a\\\\303" "b/a\\\\303"\n--- "a/a\\\\303"\n+++ "b/a\\\\303"\n@@ -1 +1 @@\n-a\n+b\n';
+    expect(parsePatch(slash)[0].path).toBe("a\\303");
+  });
 });
 
 describe("riskFlagsFor", () => {
