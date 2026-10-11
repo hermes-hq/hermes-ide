@@ -139,9 +139,10 @@ fn rev_ok(repo: &Path, rev: &str) -> bool {
     .is_ok()
 }
 
-/// The base of the review: the merge-base of the default branch and HEAD.
-/// On the default branch itself (or with none to be found) it is HEAD, so
-/// the review shows the uncommitted work.
+/// The base of the review: the merge-base of the branch the task was cut
+/// from (as recorded when its worktree was made, else the default branch)
+/// and HEAD. On the default branch itself (or with none to be found) it is
+/// HEAD, so the review shows the uncommitted work.
 pub fn review_base(repo: &Path) -> Result<(String, String, String, Option<String>), String> {
     let head = match git(repo, &["rev-parse", "HEAD"], &[]) {
         Ok(h) => h.trim().to_string(),
@@ -159,6 +160,14 @@ pub fn review_base(repo: &Path) -> Result<(String, String, String, Option<String
         .map(|b| b.trim().to_string())
         .filter(|b| !b.is_empty());
     let mut candidates: Vec<String> = Vec::new();
+    // The recorded base first, as Land merges into it: against the default
+    // branch, the base branch's own changes would show as the task's.
+    if let Some(b) = branch
+        .as_deref()
+        .and_then(|b| crate::git::worktree::recorded_base_branch(&repo.to_string_lossy(), b))
+    {
+        candidates.push(b);
+    }
     if let Ok(origin_head) = git(
         repo,
         &["symbolic-ref", "-q", "refs/remotes/origin/HEAD"],
@@ -560,6 +569,28 @@ mod tests {
         run(&repo, &["commit", "-q", "-m", "base"]);
         run(&repo, &["checkout", "-q", "-b", "hermes/task"]);
         (dir, repo)
+    }
+
+    #[test]
+    fn a_task_cut_from_another_branch_is_reviewed_against_that_branch() {
+        let (_dir, repo) = fixture();
+        run(&repo, &["checkout", "-q", "-b", "develop", "main"]);
+        fs::write(repo.join("dev.txt"), "develop's own\n").unwrap();
+        run(&repo, &["add", "-A"]);
+        run(&repo, &["commit", "-q", "-m", "develop work"]);
+        run(&repo, &["checkout", "-q", "-b", "hermes/dev-task"]);
+        crate::git::worktree::record_base_branch(
+            &repo.to_string_lossy(),
+            "hermes/dev-task",
+            "develop",
+        )
+        .unwrap();
+        fs::write(repo.join("agent.txt"), "the agent's\n").unwrap();
+
+        let diff = review_diff(repo.to_string_lossy().to_string()).unwrap();
+        assert_eq!(diff.base_ref, "develop");
+        let paths: Vec<&str> = diff.files.iter().map(|f| f.path.as_str()).collect();
+        assert_eq!(paths, vec!["agent.txt"]);
     }
 
     #[test]
