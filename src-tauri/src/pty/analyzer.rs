@@ -11,7 +11,9 @@ use crate::pty::patterns::*;
 /// (an echoed keystroke is a chunk of its own), so a line ends only at a
 /// newline, and a carriage return, a backspace or a cursor move goes back
 /// over what the line already has (a shell redrawing its prompt, a
-/// progress bar) instead of starting a new line. A full-screen program's
+/// progress bar) instead of starting a new line. A cursor move up goes
+/// back over lines already written (an inline TUI such as Claude Code
+/// erasing its last frame to draw the next one). A full-screen program's
 /// screen (the alternate screen) is not history and is left out.
 struct SnapshotLines {
     parser: vte::Parser,
@@ -31,6 +33,8 @@ impl Default for SnapshotLines {
 struct SnapshotScreen {
     done: String,
     line: Vec<char>,
+    /// Lines under the cursor after a move up, the nearest last.
+    below: Vec<Vec<char>>,
     col: usize,
     alternate: bool,
 }
@@ -45,13 +49,19 @@ impl SnapshotLines {
 
     fn text(&self) -> String {
         let s = &self.screen;
-        let current: String = s.line.iter().collect();
-        let current = current.trim_end();
-        if current.is_empty() {
-            s.done.clone()
-        } else {
-            format!("{}{}\n", s.done, current)
+        let mut rows: Vec<String> = std::iter::once(&s.line)
+            .chain(s.below.iter().rev())
+            .map(|r| r.iter().collect::<String>().trim_end().to_string())
+            .collect();
+        while rows.last().is_some_and(|r| r.is_empty()) {
+            rows.pop();
         }
+        let mut text = s.done.clone();
+        for row in rows {
+            text.push_str(&row);
+            text.push('\n');
+        }
+        text
     }
 
     fn clear(&mut self) {
@@ -96,6 +106,29 @@ impl SnapshotScreen {
             self.done.drain(..drain);
         }
     }
+
+    /// The cursor one row up: the last line written is taken back out of
+    /// `done` to be written over. At the first line it stays.
+    fn up(&mut self) {
+        let Some(rest) = self.done.strip_suffix('\n') else {
+            return;
+        };
+        let start = rest.rfind('\n').map_or(0, |i| i + 1);
+        let above: Vec<char> = rest[start..].chars().collect();
+        self.done.truncate(start);
+        self.below.push(std::mem::replace(&mut self.line, above));
+    }
+
+    /// The cursor one row down, onto a line under it. Under the last line
+    /// it stays: nothing is written there yet.
+    fn down(&mut self) {
+        if let Some(next) = self.below.pop() {
+            let col = self.col;
+            self.commit();
+            self.line = next;
+            self.col = col;
+        }
+    }
 }
 
 impl vte::Perform for SnapshotScreen {
@@ -110,7 +143,14 @@ impl vte::Perform for SnapshotScreen {
             return;
         }
         match byte {
-            b'\n' => self.commit(),
+            b'\n' => {
+                if self.below.is_empty() {
+                    self.commit();
+                } else {
+                    self.down();
+                    self.col = 0;
+                }
+            }
             b'\r' => self.col = 0,
             0x08 => self.col = self.col.saturating_sub(1),
             b'\t' => {
@@ -161,6 +201,30 @@ impl vte::Perform for SnapshotScreen {
                 }
                 _ => self.line.clear(),
             },
+            // Cursor up (A) and to the start of a previous line (F), down
+            // (B) and to the start of a next line (E).
+            'A' | 'F' => {
+                for _ in 0..n {
+                    self.up();
+                }
+                if action == 'F' {
+                    self.col = 0;
+                }
+            }
+            'B' | 'E' => {
+                for _ in 0..n {
+                    self.down();
+                }
+                if action == 'E' {
+                    self.col = 0;
+                }
+            }
+            // Erase below the cursor: the rest of the line and every line
+            // under it. (Erasing the whole screen is left alone.)
+            'J' if first == 0 => {
+                self.line.truncate(self.col);
+                self.below.clear();
+            }
             'D' => self.col = self.col.saturating_sub(n),
             'C' => self.col = (self.col + n).min(SnapshotLines::MAX_LINE),
             'G' => self.col = (n - 1).min(SnapshotLines::MAX_LINE),
@@ -1179,6 +1243,44 @@ mod tests {
         );
         // A private-marker sequence (`CSI > ... K`) is not an erase.
         assert_eq!(snapshot_of(&[b"keep me\x1b[>2K"]), "keep me\n");
+    }
+
+    /// An inline TUI (Claude Code's Ink UI, on the main screen) redraws its
+    /// frame by erasing it line by line upwards and writing the new one.
+    #[test]
+    fn the_snapshot_keeps_only_the_last_frame_of_an_inline_redraw() {
+        let mut reads: Vec<Vec<u8>> = vec![b"$ claude\r\n".to_vec()];
+        for i in 0..6 {
+            let mut r = Vec::new();
+            if i > 0 {
+                // Ink's eraseLines(3): the frame's two lines and the empty
+                // one after its trailing newline.
+                r.extend_from_slice(b"\x1b[2K\x1b[1A\x1b[2K\x1b[1A\x1b[2K\x1b[G");
+            }
+            r.extend_from_slice(format!("* Thinking {i}\r\n> input box\r\n").as_bytes());
+            reads.push(r);
+        }
+        let refs: Vec<&[u8]> = reads.iter().map(|r| r.as_slice()).collect();
+        assert_eq!(snapshot_of(&refs), "$ claude\n* Thinking 5\n> input box\n");
+    }
+
+    #[test]
+    fn the_snapshot_moves_up_and_down_over_lines_already_written() {
+        // Up two rows, one line changed in place, back down two rows: the
+        // line below is still there.
+        assert_eq!(
+            snapshot_of(&[b"one\r\ntwo\r\nthree\r\n\x1b[2ATWO\x1b[2B\rfour\r\n"]),
+            "one\nTWO\nthree\nfour\n"
+        );
+        // Previous line (F) goes to its start; next line (E) too.
+        assert_eq!(snapshot_of(&[b"abc\r\ndef\x1b[Fx\x1b[Ey"]), "xbc\nyef\n");
+        // Erase below (J) drops the rows under the cursor.
+        assert_eq!(
+            snapshot_of(&[b"one\r\ntwo\r\nthree\r\x1b[2A\x1b[2C\x1b[J"]),
+            "on\n"
+        );
+        // Up past the first line stays on it.
+        assert_eq!(snapshot_of(&[b"abc\r\ndef\r\x1b[5Ax"]), "xbc\ndef\n");
     }
 
     #[test]
