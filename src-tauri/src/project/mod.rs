@@ -83,7 +83,7 @@ pub fn create_project(
             .to_string()
     });
 
-    let id = Uuid::new_v4().to_string();
+    let new_id = Uuid::new_v4().to_string();
 
     // Run surface scan immediately to get languages/frameworks
     let scan_result = cartography::surface_scan(&resolved_path);
@@ -94,8 +94,9 @@ pub fn create_project(
         serde_json::to_string(&scan_result.frameworks).unwrap_or_else(|_| "[]".to_string());
 
     let db = state.db.lock().map_err(|e| e.to_string())?;
-    db.insert_project(
-        &id,
+    // A folder that is already a project keeps its id.
+    let id = db.insert_project(
+        &new_id,
         &resolved_path,
         &project_name,
         &languages_json,

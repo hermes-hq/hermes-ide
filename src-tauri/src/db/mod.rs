@@ -1115,6 +1115,8 @@ impl Database {
 
     // ─── Project Operations ────────────────────────────────────────
 
+    /// Returns the project's id: `id` for a new path, the existing row's id
+    /// when the path is already a project.
     pub fn insert_project(
         &self,
         id: &str,
@@ -1122,18 +1124,19 @@ impl Database {
         name: &str,
         languages: &str,
         frameworks: &str,
-    ) -> Result<(), String> {
+    ) -> Result<String, String> {
         self.conn
-            .execute(
+            .query_row(
                 "INSERT INTO realms (id, path, name, languages, frameworks)
              VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(path) DO UPDATE SET
                 name = excluded.name, languages = excluded.languages,
-                frameworks = excluded.frameworks, updated_at = datetime('now')",
+                frameworks = excluded.frameworks, updated_at = datetime('now')
+             RETURNING id",
                 params![id, path, name, languages, frameworks],
+                |row| row.get(0),
             )
-            .map_err(|e| e.to_string())?;
-        Ok(())
+            .map_err(|e| e.to_string())
     }
 
     pub fn get_all_projects(&self) -> Result<Vec<crate::project::Project>, String> {
@@ -2449,6 +2452,22 @@ mod tests {
             .collect();
         apply_imported_settings(&db, &imported).unwrap();
         assert_eq!(db.get_setting("my_prompts").unwrap().as_deref(), Some(list));
+    }
+
+    #[test]
+    fn adding_a_folder_that_is_already_a_project_returns_its_id() {
+        let db = test_db();
+        let first = db
+            .insert_project("p1", "/work/one", "one", "[]", "[]")
+            .unwrap();
+        assert_eq!(first, "p1");
+        let again = db
+            .insert_project("p2", "/work/one", "renamed", "[\"rust\"]", "[]")
+            .unwrap();
+        assert_eq!(again, "p1");
+        let project = db.get_project(&again).unwrap().expect("the project");
+        assert_eq!(project.name, "renamed");
+        assert!(db.get_project("p2").unwrap().is_none());
     }
 
     #[test]
