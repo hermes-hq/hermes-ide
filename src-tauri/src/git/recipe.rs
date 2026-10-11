@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::AppState;
@@ -69,6 +69,8 @@ const NON_SECRET_KEYS: &[&str] = &[
 const MAX_LINE_CHARS: usize = 2000;
 const MAX_WALK_ENTRIES: usize = 50_000;
 const PORT_SEARCH_SPAN: u16 = 100;
+/// How long a setup command's output is still read after it exits.
+const PIPE_GRACE: Duration = Duration::from_secs(2);
 const REDACTED: &str = "••••••";
 
 // ─── The recipe file ─────────────────────────────────────────────────
@@ -558,9 +560,9 @@ impl PortBook {
     }
 }
 
-fn port_is_free(port: u16) -> bool {
-    std::net::TcpListener::bind(("127.0.0.1", port)).is_ok()
-}
+// Nothing listens on the port on 127.0.0.1 or ::1. Binding 127.0.0.1
+// alone misses a server on ::, ::1 or 0.0.0.0 on macOS and Windows.
+use super::fast_setup::port_is_free;
 
 lazy_static::lazy_static! {
     static ref PORTS: Mutex<PortBook> = Mutex::new(PortBook::default());
@@ -615,27 +617,37 @@ fn kill_tree(pid: u32) {
         .status();
 }
 
+/// Setup lines are sh syntax: the user's login shell runs them only when it
+/// is a POSIX one (fish is not).
+#[cfg(unix)]
+fn is_posix_shell(shell: &str) -> bool {
+    let known = ["sh", "bash", "zsh", "dash", "ksh"];
+    Path::new(shell)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .is_some_and(|n| known.contains(&n))
+}
+
 /// The shell a setup command runs in: the user's login shell when it is a
-/// POSIX-like one (so its profile's PATH applies), else `/bin/sh`.
+/// POSIX one (so its profile's PATH applies), else `/bin/sh` with the PATH
+/// the user's shell sets up.
 #[cfg(unix)]
 fn shell_command(cmd: &str) -> Command {
     use std::os::unix::process::CommandExt;
     let user_shell = crate::pty::detect_shell();
-    let known = ["sh", "bash", "zsh", "dash", "ksh", "fish"];
-    let is_known = Path::new(&user_shell)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| known.contains(&n));
-    let shell = if is_known {
-        user_shell
+    let (shell, path) = if is_posix_shell(&user_shell) {
+        (user_shell, std::env::var_os("PATH"))
     } else {
-        "/bin/sh".to_string()
+        (
+            "/bin/sh".to_string(),
+            Some(crate::done_when::check_path_var()),
+        )
     };
     let mut c = Command::new(shell);
     c.args(["-l", "-c", cmd]);
     c.process_group(0);
     // A GUI app starts with a short PATH: add the usual tool folders.
-    let mut paths: Vec<PathBuf> = std::env::var_os("PATH")
+    let mut paths: Vec<PathBuf> = path
         .map(|p| std::env::split_paths(&p).collect())
         .unwrap_or_default();
     for dir in crate::platform::well_known_path_dirs() {
@@ -746,21 +758,36 @@ pub fn run_setup(
             kill_tree(child.id());
         }
         let (tx, rx) = mpsc::channel();
-        let readers = [
-            child.stdout.take().map(|s| pump(s, "stdout", tx.clone())),
-            child.stderr.take().map(|s| pump(s, "stderr", tx.clone())),
-        ];
+        if let Some(s) = child.stdout.take() {
+            pump(s, "stdout", tx.clone());
+        }
+        if let Some(s) = child.stderr.take() {
+            pump(s, "stderr", tx.clone());
+        }
         drop(tx);
-        for line in rx {
-            emit(LogLine {
-                stream: line.stream,
-                text: redactor.redact(&line.text),
-            });
-        }
-        for r in readers.into_iter().flatten() {
-            let _ = r.join();
-        }
-        let status = child.wait();
+        // Wait for the command, not for its pipes: a server it left running
+        // in the background holds them open. Read what is left for a short
+        // while after it exits, then move on.
+        let mut grace_until: Option<Instant> = None;
+        let status = loop {
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(line) => emit(LogLine {
+                    stream: line.stream,
+                    text: redactor.redact(&line.text),
+                }),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break child.wait(),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            match grace_until {
+                Some(until) if Instant::now() >= until => break child.wait(),
+                Some(_) => {}
+                None => match child.try_wait() {
+                    Ok(Some(_)) => grace_until = Some(Instant::now() + PIPE_GRACE),
+                    Ok(None) => {}
+                    Err(e) => break Err(e),
+                },
+            }
+        };
         *control.pid.lock().unwrap_or_else(|e| e.into_inner()) = None;
         if control.is_stopped() {
             return SetupEnd::Stopped;
@@ -1536,6 +1563,54 @@ mod tests {
         assert!(
             started.elapsed().as_secs() < 30,
             "the command was killed, not waited for"
+        );
+    }
+
+    #[test]
+    fn a_port_a_server_holds_on_ipv6_loopback_is_not_handed_out() {
+        // Dev servers often listen on :: or ::1, where binding 127.0.0.1
+        // alone does not see them.
+        let Ok(server) = std::net::TcpListener::bind(("::1", 0)) else {
+            eprintln!("no IPv6 loopback on this machine: nothing to check");
+            return;
+        };
+        let port = server.local_addr().unwrap().port();
+        assert!(!port_is_free(port), "a server on [::1]:{port} holds it");
+        drop(server);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn setup_lines_run_in_a_posix_shell_never_in_fish() {
+        assert!(is_posix_shell("/bin/zsh"));
+        assert!(is_posix_shell("/usr/local/bin/bash"));
+        assert!(!is_posix_shell("/opt/homebrew/bin/fish"));
+        assert!(!is_posix_shell("/usr/bin/nu"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_that_leaves_a_server_running_does_not_hold_setup_up() {
+        // The background job keeps the command's output pipes open after
+        // the command itself has exited.
+        let tmp = TempDir::new().unwrap();
+        let started = Instant::now();
+        let mut lines = Vec::new();
+        let end = run_setup(
+            &strings(&["sleep 20 & echo started", "echo next"]),
+            tmp.path(),
+            &[],
+            &Redactor::default(),
+            &RunControl::default(),
+            &mut |l| lines.push(l.text),
+        );
+        assert_eq!(end, SetupEnd::Done, "{lines:?}");
+        assert!(lines.contains(&"started".to_string()), "{lines:?}");
+        assert!(lines.contains(&"next".to_string()), "{lines:?}");
+        assert!(
+            started.elapsed().as_secs() < 15,
+            "setup waited for the background job: {:?}",
+            started.elapsed()
         );
     }
 }

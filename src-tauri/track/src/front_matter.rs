@@ -234,13 +234,19 @@ fn one_of<T: Copy>(
         })
 }
 
+/// The opening `---`, after a byte order mark some Windows editors write
+/// (the frontend's reader skips it too). The mark stays in the file.
+fn opens(first: &str) -> bool {
+    first.strip_prefix('\u{feff}').unwrap_or(first).trim() == "---"
+}
+
 /// Read feature.md. Errors carry the 1-based line.
 pub fn parse(text: &str) -> Result<Parsed, FrontMatterError> {
     let lines: Vec<&str> = text
         .split('\n')
         .map(|l| l.strip_suffix('\r').unwrap_or(l))
         .collect();
-    if lines.is_empty() || lines[0].trim() != "---" {
+    if lines.is_empty() || !opens(lines[0]) {
         return Err(err("feature.md must start with ---", 1));
     }
     let close = lines
@@ -356,7 +362,7 @@ pub fn list_value(text: &str, key: &str) -> Vec<String> {
         .split('\n')
         .map(|l| l.strip_suffix('\r').unwrap_or(l))
         .collect();
-    if lines.is_empty() || lines[0].trim() != "---" {
+    if lines.is_empty() || !opens(lines[0]) {
         return Vec::new();
     }
     let Some(close) = (1..lines.len()).find(|&i| lines[i].trim() == "---") else {
@@ -514,6 +520,21 @@ mod tests {
             out,
             "---\r\nslug: a\r\ntrack: Light\r\ngate: waiting\r\n---\r\nx\r\n"
         );
+    }
+
+    #[test]
+    fn a_byte_order_mark_before_the_fence_is_read_and_kept() {
+        // Some Windows editors save one; the frontend's reader skips it.
+        let text = "\u{feff}---\nslug: a\ntrack: Full\ngate: waiting\ndone_when: [x]\n---\nbody\n";
+        assert_eq!(parse(text).unwrap().meta.gate, Gate::Waiting);
+        assert_eq!(list_value(text, "done_when"), vec!["x"]);
+        let out = set_keys(text, &[("gate", "approved")]).unwrap();
+        assert_eq!(
+            out,
+            "\u{feff}---\nslug: a\ntrack: Full\ngate: approved\ndone_when: [x]\n---\nbody\n"
+        );
+        let out = set_list(text, "done_when", &["y".to_string()]).unwrap();
+        assert!(out.starts_with("\u{feff}---\n"), "{out:?}");
     }
 
     #[test]

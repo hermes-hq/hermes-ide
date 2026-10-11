@@ -97,12 +97,23 @@ export function acceptDoneWhenRecord(payload: unknown): CheckRecord | null {
   return record;
 }
 
+/** Sessions whose checks run now. The backend refuses a second run of a
+ *  session while one is in flight, so a run asked for meanwhile waits in
+ *  `queued` (the latest one) and starts once the first one ends. */
+const inFlight = new Set<string>();
+const queued = new Map<string, { trigger: RunTrigger; turn: number | null }>();
+
 /** Run a session's checks now (turn end, a person's request, before Land). */
 export async function runChecksNow(
   sessionId: string,
   trigger: RunTrigger,
   turn: number | null = null,
 ): Promise<CheckRecord | null> {
+  if (inFlight.has(sessionId)) {
+    queued.set(sessionId, { trigger, turn });
+    return null;
+  }
+  inFlight.add(sessionId);
   const run = deps?.run ?? runDoneWhen;
   const timer = setTimeout(() => setDoneWhenRunning(sessionId, true), RUNNING_AFTER_MS);
   try {
@@ -115,7 +126,11 @@ export async function runChecksNow(
     return null;
   } finally {
     clearTimeout(timer);
-    setDoneWhenRunning(sessionId, false);
+    inFlight.delete(sessionId);
+    const next = queued.get(sessionId);
+    queued.delete(sessionId);
+    if (next) void runChecksNow(sessionId, next.trigger, next.turn);
+    else setDoneWhenRunning(sessionId, false);
   }
 }
 
@@ -176,6 +191,7 @@ export function startDoneWhen(input: DoneWhenDeps): Promise<Unlisten> {
     input.listen<unknown>("session-removed", (msg) => {
       if (typeof msg.payload !== "string") return;
       forgetDoneWhen(msg.payload);
+      queued.delete(msg.payload);
       for (const item of listInboxItems()) {
         if (item.sessionId === msg.payload && item.source === DONE_WHEN_INBOX_SOURCE) resolveInboxItem(item.id);
       }
@@ -190,4 +206,6 @@ export function startDoneWhen(input: DoneWhenDeps): Promise<Unlisten> {
 export function _resetDoneWhenControllerForTest(): void {
   deps = null;
   started = null;
+  inFlight.clear();
+  queued.clear();
 }

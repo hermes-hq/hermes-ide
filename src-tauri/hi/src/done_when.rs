@@ -271,6 +271,8 @@ fn toml_bracket_depth(s: &str) -> i32 {
 fn parse_toml(text: &str) -> Result<BTreeMap<String, TomlEntry>, ReadError> {
     let mut root: BTreeMap<String, TomlEntry> = BTreeMap::new();
     let mut current: Option<String> = None;
+    // A byte order mark (some Windows editors write one) is not content.
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let lines: Vec<&str> = text
         .split('\n')
         .map(|l| l.strip_suffix('\r').unwrap_or(l))
@@ -554,6 +556,7 @@ fn fm_one_of(fields: &FmFields, key: &str, allowed: &[&str]) -> Result<(), ReadE
 /// Read a feature.md's front matter, validating it the way the frontend's
 /// reader does.
 pub fn feature_front_matter(text: &str) -> Result<FeatureMeta, ReadError> {
+    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
     let lines: Vec<&str> = text
         .split('\n')
         .map(|l| l.strip_suffix('\r').unwrap_or(l))

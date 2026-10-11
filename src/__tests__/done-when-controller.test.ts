@@ -234,6 +234,26 @@ describe("Done-When controller", () => {
     expect(getSessionEventSnapshot("s3").version).toBe(before);
   });
 
+  it("a turn that ends while checks run is checked once they finish, and the chip keeps 'checking'", async () => {
+    let resolve!: (o: RunOutcome) => void;
+    run.mockImplementationOnce(() => new Promise<RunOutcome>((r) => (resolve = r)));
+    // The backend refuses a second run while one is in flight.
+    run.mockResolvedValue({ skipped: "running", record: null });
+    vi.useFakeTimers();
+    const first = runChecksNow("s1", "turn_end", 1);
+    await vi.advanceTimersByTimeAsync(200);
+    expect(getDoneWhenSnapshot("s1").running).toBe(true);
+    await runChecksNow("s1", "turn_end", 2);
+    expect(getDoneWhenSnapshot("s1").running).toBe(true);
+    run.mockResolvedValue({ skipped: null, record: record({ turn: 2, state: "passed" }) });
+    resolve({ skipped: null, record: record({ turn: 1 }) });
+    await first;
+    await vi.waitFor(() => expect(run).toHaveBeenLastCalledWith("s1", "turn_end", 2));
+    await vi.waitFor(() => expect(getDoneWhenSnapshot("s1").last?.turn).toBe(2));
+    expect(run.mock.calls.filter((c) => c[2] === 2)).toHaveLength(1);
+    expect(getDoneWhenSnapshot("s1").running).toBe(false);
+  });
+
   it("a run that fails to start leaves the chip as it was", async () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     run.mockRejectedValueOnce(new Error("no session s1"));

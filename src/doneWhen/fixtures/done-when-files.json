@@ -54,6 +54,13 @@
    ]
   },
   {
+   "name": "a byte order mark before the first line",
+   "text": "\ufeffdone_when = [\"npm test\"]\n",
+   "doneWhen": [
+    "npm test"
+   ]
+  },
+  {
    "name": "setup as a string",
    "text": "setup = \"npm ci\"",
    "error": {
@@ -218,6 +225,14 @@
   {
    "name": "CRLF",
    "text": "---\r\nslug: a\r\ntrack: Full\r\ndone_when:\r\n- make test\r\n---\r\n",
+   "slug": "a",
+   "doneWhen": [
+    "make test"
+   ]
+  },
+  {
+   "name": "a byte order mark before the opening fence",
+   "text": "\ufeff---\nslug: a\ntrack: Full\nphase: questions\ngate: waiting\ndone_when: [make test]\n---\n",
    "slug": "a",
    "doneWhen": [
     "make test"
