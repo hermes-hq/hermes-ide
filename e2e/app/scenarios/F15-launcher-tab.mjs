@@ -7,8 +7,9 @@
 //   run 2  - ⌘N / Ctrl+Shift+N opens the launcher with the task field focused
 //            (nothing is focused by the script).
 //          - a real mouse click puts the OS focus in the task field; then,
-//            with real key presses only: Tab reaches "From library" (the
-//            prompt library, under the task field), Tab the agent chip, Tab
+//            with real key presses only: Tab reaches "Attach…" (under the
+//            task field), Tab "From library" (the prompt library), Tab the
+//            agent chip, Tab
 //            Tab Tab the approval chip; Return opens its menu on the current mode;
 //            Tab moves to Plan first and Return picks it, which closes the
 //            menu and gives the task field the keyboard; Return launches.
@@ -61,6 +62,7 @@ const focusNow = (bridge) =>
     const el = document.activeElement;
     if (!el) return "none";
     if (el.classList.contains("task-launcher-task")) return "task";
+    if (el.classList.contains("task-launcher-attach")) return "attach";
     if (el.classList.contains("task-launcher-from-library")) return "from-library";
     if (el.getAttribute("data-chip")) return "chip:" + el.getAttribute("data-chip");
     if (el.getAttribute("data-mode")) return "mode:" + el.getAttribute("data-mode");
@@ -80,7 +82,7 @@ async function expectFocus(bridge, want, what) {
   const got = await bridge
     .waitFor(`focus on ${want}`, `
       const el = document.activeElement;
-      const now = !el ? "none" : el.classList.contains("task-launcher-task") ? "task" : el.getAttribute("data-chip") ? "chip:" + el.getAttribute("data-chip") : el.getAttribute("data-mode") ? "mode:" + el.getAttribute("data-mode") : "other";
+      const now = !el ? "none" : el.classList.contains("task-launcher-task") ? "task" : el.classList.contains("task-launcher-attach") ? "attach" : el.classList.contains("task-launcher-from-library") ? "from-library" : el.getAttribute("data-chip") ? "chip:" + el.getAttribute("data-chip") : el.getAttribute("data-mode") ? "mode:" + el.getAttribute("data-mode") : "other";
       return now === ${JSON.stringify(want)} ? now : false;
     `, { timeoutMs: 3_000 })
     .catch(async () => focusNow(bridge));
@@ -109,7 +111,9 @@ try {
 
   log("real keys: Tab to the chips, Return, Tab, Return, Escape, Shift+Tab back, Return");
   await press(pid, "tab", await taskFieldCenter(bridge));
-  await expectFocus(bridge, "from-library", "Tab from the task field reaches From library, under it");
+  await expectFocus(bridge, "attach", "Tab from the task field reaches Attach…, under it");
+  await press(pid, "tab");
+  await expectFocus(bridge, "from-library", "the next Tab reaches From library");
   await press(pid, "tab");
   await expectFocus(bridge, "chip:agent", "the next Tab reaches the first chip");
   const tabs = CONTROL === "one-tab-short" ? 2 : 3;
