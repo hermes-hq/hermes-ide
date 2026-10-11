@@ -1635,46 +1635,47 @@ pub fn git_delete_branch(
     let project_path = resolve_worktree_path(&db, &session_id, &project_id)?;
     drop(db);
     let repo = Repository::open(&project_path).map_err(|e| e.to_string())?;
-
-    // Prevent deleting current branch
-    let current = repo
-        .head()
-        .ok()
-        .and_then(|h| h.shorthand().map(|s| s.to_string()));
-    if current.as_deref() == Some(&name) {
-        return Err("Cannot delete the currently checked out branch".to_string());
-    }
-
-    let mut branch = repo
-        .find_branch(&name, BranchType::Local)
-        .map_err(|e| format!("Branch '{}' not found: {}", name, e))?;
-
-    if force {
-        // Force delete: rename away then delete ref directly
-        let refname = format!("refs/heads/{}", name);
-        let mut reference = repo.find_reference(&refname).map_err(|e| e.to_string())?;
-        reference
-            .delete()
-            .map_err(|e| format!("Failed to force delete '{}': {}", name, e))?;
-    } else {
-        // Like `git branch -d`: a branch whose commits no other branch has
-        // is kept, and the person is asked (BRANCH_UNMERGED).
-        if let Some(unmerged) = safety::unmerged_commits(&repo, &name)? {
-            return Err(unmerged.error());
-        }
-        branch.delete().map_err(|e| {
-            format!(
-                "Could not delete {}: {}",
-                name,
-                worktree::plain_git2_error(&e)
-            )
-        })?;
-    }
+    delete_local_branch(&repo, &name, force)?;
 
     Ok(GitOperationResult {
         success: true,
         message: format!("Deleted branch '{}'", name),
         error: None,
+    })
+}
+
+/// Deletes the local branch `name`. Without `force`, a branch whose commits
+/// no other branch has is kept (BRANCH_UNMERGED).
+fn delete_local_branch(repo: &Repository, name: &str, force: bool) -> Result<(), String> {
+    // Prevent deleting current branch
+    let current = repo
+        .head()
+        .ok()
+        .and_then(|h| h.shorthand().map(|s| s.to_string()));
+    if current.as_deref() == Some(name) {
+        return Err("Cannot delete the currently checked out branch".to_string());
+    }
+
+    let mut branch = repo
+        .find_branch(name, BranchType::Local)
+        .map_err(|e| format!("Branch '{}' not found: {}", name, e))?;
+
+    // Like `git branch -d`: a branch whose commits no other branch has
+    // is kept, and the person is asked (BRANCH_UNMERGED).
+    if !force {
+        if let Some(unmerged) = safety::unmerged_commits(repo, name)? {
+            return Err(unmerged.error());
+        }
+    }
+    // Even forced, through the branch API: it refuses a branch another
+    // worktree has checked out (another session's task), which deleting
+    // the ref directly would leave on a branch with no commits.
+    branch.delete().map_err(|e| {
+        format!(
+            "Could not delete {}: {}",
+            name,
+            worktree::plain_git2_error(&e)
+        )
     })
 }
 
@@ -5426,6 +5427,28 @@ mod tests {
             root_s,
             wt.to_str().unwrap().to_string(),
         )
+    }
+
+    #[test]
+    fn delete_anyway_keeps_a_branch_another_worktree_has_checked_out() {
+        let (_t, _db, root, wt) = project_with_leftover();
+        // The task has a commit of its own, so it is unmerged.
+        std::fs::write(Path::new(&wt).join("task.txt"), "task\n").unwrap();
+        git_ok(Path::new(&wt), &["add", "."]);
+        git_ok(Path::new(&wt), &["commit", "-q", "-m", "task work"]);
+
+        let repo = Repository::open(&root).unwrap();
+        assert!(delete_local_branch(&repo, "task", true).is_err());
+        assert!(repo.find_branch("task", BranchType::Local).is_ok());
+        // From the task's worktree: the main checkout's branch is kept too.
+        let wt_repo = Repository::open(&wt).unwrap();
+        assert!(delete_local_branch(&wt_repo, "main", true).is_err());
+        assert!(repo.find_branch("main", BranchType::Local).is_ok());
+
+        // A branch no worktree has checked out is still deleted.
+        git_ok(Path::new(&root), &["branch", "spare", "task"]);
+        delete_local_branch(&repo, "spare", true).unwrap();
+        assert!(repo.find_branch("spare", BranchType::Local).is_err());
     }
 
     #[test]

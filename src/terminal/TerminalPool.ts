@@ -10,7 +10,7 @@
  */
 
 import { listen } from "@tauri-apps/api/event";
-import { writeToSession } from "../api/sessions";
+import { writeToSession, resizeSession } from "../api/sessions";
 import { noteUserInput } from "../agent/status/userInput";
 import { suggest } from "./intelligence/suggestionEngine";
 import { resolveIntent, getIntentSuggestions } from "./intentCommands";
@@ -53,7 +53,7 @@ import {
   getCursorPosition,
   cleanSelection,
   estimateInitialDimensions,
-  getFocusedSessionId,
+  getKeyboardFocusedSessionId,
   refreshShellForeground,
   pasteIntoTerminal,
   type PoolEntry,
@@ -95,6 +95,10 @@ export function updateSettings(settings: Record<string, string>): void {
         if (proposed && Number.isFinite(proposed.cols) && Number.isFinite(proposed.rows) && proposed.cols >= 10 && proposed.rows >= 2) {
           entry.fitAddon.fit();
           entry.terminal.refresh(0, entry.terminal.rows - 1);
+          // A new font changes the column/row count without resizing the
+          // viewport, so nothing else tells the PTY.
+          resizeSession(sessionId, entry.terminal.rows, entry.terminal.cols)
+            .catch((err) => console.warn("[TerminalPool] Failed to resize session:", err));
         }
       } catch { /* ignore */ }
     }
@@ -106,7 +110,7 @@ export function updateSettings(settings: Record<string, string>): void {
 // On macOS, WKWebView consumes Ctrl+C at the native level before JavaScript
 // receives the keydown event. The Rust menu system intercepts it as a menu
 // accelerator and emits "native-sigint". We listen here and forward \x03
-// to the active terminal's PTY.
+// to the PTY of the terminal that holds keyboard focus.
 
 let sigintListenerReady = false;
 
@@ -114,7 +118,9 @@ export function setupNativeSigintListener(): void {
   if (sigintListenerReady) return;
   sigintListenerReady = true;
   listen("native-sigint", () => {
-    const sessionId = getFocusedSessionId();
+    // Not the last attached terminal: in split panes that may be another
+    // pane, and focus may be outside every terminal.
+    const sessionId = getKeyboardFocusedSessionId();
     if (!sessionId) return;
     handleTerminalInput(sessionId, "\x03");
   }).catch((err) => {
@@ -188,9 +194,11 @@ function handleTerminalInput(sessionId: string, data: string): void {
       clearGhostText(sessionId);
       // Fall through to normal Enter handling (buffer update + PTY write)
     }
-    // Escape — dismiss overlay
+    // Escape — dismiss overlay and its ghost text (a ghost left behind would
+    // make the next Tab run the dismissed suggestion)
     if (data === "\x1b" || data === "\x1b\x1b") {
       dismissSuggestions(sessionId);
+      clearGhostText(sessionId);
       return; // CONSUME
     }
     // Ctrl-C — dismiss overlay, then pass through to PTY

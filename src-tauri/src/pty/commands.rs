@@ -2302,54 +2302,36 @@ pub fn write_to_session(
 
     // ── Direct SIGINT delivery (macOS/Unix) ──
     //
-    // Writing \x03 to the PTY master should cause the line discipline to
-    // generate SIGINT for the foreground process group.  However, on macOS
-    // with posix_spawn-based PTY sessions the signal sometimes doesn't
-    // reach the child.  As a reliable fallback we:
-    //   1. Try tcgetpgrp() on the slave device to find the foreground pgrp.
-    //   2. If that fails (it does from a non-session-leader process), send
-    //      SIGINT to every child of the shell using sysctl/proc enumeration.
+    // Writing \x03 to the PTY master makes the line discipline generate
+    // SIGINT for the foreground process group. The shell's own group also
+    // gets one directly (see `ctrl_c_groups`).
     #[cfg(unix)]
     if bytes.contains(&0x03) {
-        // Diagnostic: check termios on the slave to see if ISIG is enabled
-        // Send SIGINT to the shell's child processes directly.
-        // The shell's PID is known; we enumerate its children via sysctl
-        // and send SIGINT to each child's process group.
         if let Some(shell_pid) = session.transport.pid() {
-            // macOS: only the shell's own group. The trampoline gives the
-            // shell its controlling terminal (#214), so the line discipline
-            // interrupts a cooked-mode program itself, and a signal sent to
-            // a raw-mode program (an agent's TUI) would kill it instead of
-            // letting it handle the Ctrl+C it reads. That is also what macOS
-            // always got here: the child scan never listed a single child
-            // until it read proc_listchildpids' count correctly.
-            let child_pids = if cfg!(target_os = "macos") {
-                Vec::new()
-            } else {
-                enumerate_child_pids(shell_pid)
-            };
-            if !child_pids.is_empty() {
-                for &cpid in &child_pids {
-                    if cpid > 0 && cpid <= i32::MAX as u32 {
-                        unsafe {
-                            // Send to the child's process group (covers the child
-                            // and any of its own children)
-                            libc::kill(-(cpid as i32), libc::SIGINT);
-                        }
-                    }
-                }
-            } else {
-                // No children found — the shell is at the prompt.
-                // Send to the shell's own process group so it sees the interrupt.
-                if shell_pid > 0 && shell_pid <= i32::MAX as u32 {
-                    unsafe {
-                        libc::kill(-(shell_pid as i32), libc::SIGINT);
-                    }
+            for group in ctrl_c_groups(shell_pid) {
+                unsafe {
+                    libc::kill(-group, libc::SIGINT);
                 }
             }
         }
     }
     Ok(())
+}
+
+/// The process groups a Ctrl+C written to a session also signals directly:
+/// only the shell's own. The shell has its controlling terminal (on macOS
+/// through the trampoline, #214; on Linux from the PTY spawn), so the line
+/// discipline interrupts a cooked-mode foreground program itself. A signal
+/// sent to a raw-mode program (an agent's TUI) would kill it instead of
+/// letting it handle the Ctrl+C it reads, and one sent to every child of the
+/// shell would also kill its background jobs (`npm run dev &`).
+#[cfg(unix)]
+fn ctrl_c_groups(shell_pid: u32) -> Vec<i32> {
+    i32::try_from(shell_pid)
+        .ok()
+        .filter(|&pid| pid > 0)
+        .into_iter()
+        .collect()
 }
 
 /// Check whether the shell is the foreground process in the PTY.
@@ -3112,6 +3094,32 @@ pub fn close_session(
         }
     }
 
+    Ok(())
+}
+
+/// Stop a session's terminal and keep the session: its row, its worktrees
+/// (with their uncommitted files) and its place in the saved workspace.
+/// For Convert to agent, which starts the same session again in Agent
+/// view; `close_session` would remove the session and delete its worktree.
+#[tauri::command]
+pub fn stop_session_terminal(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut pty_session) = mgr.sessions.remove(&session_id) else {
+        return Ok(());
+    };
+    drop(mgr);
+    // Ended first, so the threads watching it stop; the reader still says
+    // so when the terminal closes, and the app ignores that for a session
+    // it is converting.
+    if let Ok(mut s) = pty_session.session.lock() {
+        s.phase = SessionPhase::Destroyed;
+    }
+    pty_session.transport.kill().ok();
+    crate::pty::shell_integration::cleanup(&pty_session.shell_integration);
+    let mut transport = pty_session.transport;
+    thread::spawn(move || {
+        transport.wait();
+    });
     Ok(())
 }
 
@@ -5435,6 +5443,26 @@ mod foreground_tests {
         let _ = shell.wait();
         assert!(running, "a shell running a program does not");
         assert!(!super::shell_holds_prompt(None));
+    }
+
+    /// Ctrl+C never signals a job of the shell directly: a background job
+    /// leads its own process group, which a terminal would leave alone.
+    #[cfg(unix)]
+    #[test]
+    fn ctrl_c_signals_only_the_shells_own_group_not_its_jobs() {
+        use std::os::unix::process::CommandExt;
+        let mut job = Command::new("sleep")
+            .arg("30")
+            .process_group(0)
+            .spawn()
+            .unwrap();
+        let shell = std::process::id();
+        let listed = eventually(|| !super::enumerate_child_pids(shell).is_empty());
+        let groups = super::ctrl_c_groups(shell);
+        let _ = job.kill();
+        let _ = job.wait();
+        assert!(listed, "the job never showed up as a child");
+        assert_eq!(groups, vec![shell as i32]);
     }
 
     /// The process-table scan hosted terminals rely on (the session host

@@ -37,6 +37,12 @@ export function useLaunchAttachmentInput(setAttachments: SetAttachments) {
     (e: ClipboardEvent<HTMLTextAreaElement>) => {
       const files = Array.from(e.clipboardData?.files ?? []);
       if (files.length === 0) return;
+      // Text with only the clipboard's own picture of it (cells copied from a
+      // spreadsheet show up as an "image.png" too): the text is what was meant.
+      // An image copied from a browser carries just its address as text: the image is.
+      const text = (e.clipboardData?.getData("text/plain") ?? "").trim();
+      const onlyAddress = /^(https?|file|data|blob):\S+$/i.test(text);
+      if (text && !onlyAddress && files.every((f) => !f.name || f.name === "image.png")) return;
       e.preventDefault();
       void (async () => {
         for (const file of files) {

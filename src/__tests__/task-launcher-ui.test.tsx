@@ -67,7 +67,7 @@ vi.mock("../api/settings", () => ({
   getSettings: vi.fn(async () => Object.fromEntries(h.settings)),
 }));
 
-import { TaskLauncher, type TaskLaunchRequest, type TaskLaunchResult } from "../components/TaskLauncher";
+import { TaskLauncher, type TaskLauncherControl, type TaskLaunchRequest, type TaskLaunchResult } from "../components/TaskLauncher";
 import { I18nProvider } from "../i18n/I18nProvider";
 import { __resetDoctorForTest } from "../launcher/doctorStore";
 import { fakeCapabilityCommands } from "./fakes/capabilityCommands";
@@ -1165,6 +1165,32 @@ describe("TaskLauncher: attachments", () => {
     expect(chips()).toEqual([]);
   });
 
+  it("cells copied from a spreadsheet (text plus a picture of them) paste as text", async () => {
+    await open();
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    const file = new File([new Uint8Array([1])], "image.png", { type: "image/png" });
+    Object.defineProperty(paste, "clipboardData", { value: { files: [file], getData: (type: string) => (type === "text/plain" ? "Q1\t120\nQ2\t140" : "") } });
+    await act(async () => {
+      task().dispatchEvent(paste);
+    });
+    await settle();
+    expect(paste.defaultPrevented).toBe(false);
+    expect(chips()).toEqual([]);
+  });
+
+  it("an image copied from a browser (its address as text) still attaches", async () => {
+    await open();
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    const file = new File([new Uint8Array([1])], "image.png", { type: "image/png" });
+    Object.defineProperty(paste, "clipboardData", { value: { files: [file], getData: (type: string) => (type === "text/plain" ? "https://example.com/mockup.png" : "") } });
+    await act(async () => {
+      task().dispatchEvent(paste);
+    });
+    await settle();
+    expect(paste.defaultPrevented).toBe(true);
+    expect(chips()).toEqual(["/fixture-data/attachments/1-a/pasted-image-1.png"]);
+  });
+
   it("Attach… adds the picked files where they are; × removes one; a launch without any sends none", async () => {
     const dialog = await import("@tauri-apps/plugin-dialog");
     vi.mocked(dialog.open).mockResolvedValueOnce(["/fixture-home/specs/login.md", "/fixture-home/shots/broken.jpg"] as never);
@@ -1186,6 +1212,57 @@ describe("TaskLauncher: attachments", () => {
     expect(onLaunch.mock.calls[0][0].attachments).toBeUndefined();
   });
 
+  async function pasteImage() {
+    const paste = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(paste, "clipboardData", { value: { files: [new File([new Uint8Array([1])], "image.png", { type: "image/png" })], getData: () => "" } });
+    await act(async () => {
+      task().dispatchEvent(paste);
+    });
+    await settle();
+  }
+
+  it("Launch & next: a file attached while the launch ran stays for the next task, the launched ones go", async () => {
+    let finish: (v: TaskLaunchResult) => void = () => {};
+    const onLaunch = vi.fn((_req: TaskLaunchRequest) => new Promise<TaskLaunchResult>((r) => (finish = r)));
+    await open({ onLaunch });
+    await typeTask("Match this mockup");
+    await pasteImage();
+    fireEvent.keyDown(task(), { key: "Enter", ...modKey });
+    await settle();
+    await pasteImage();
+    await act(async () => finish(true));
+    await settle();
+    expect(onLaunch.mock.calls[0][0].attachments?.map((a) => a.name)).toEqual(["pasted-image-1.png"]);
+    expect(chips()).toEqual(["/fixture-data/attachments/1-a/pasted-image-2.png"]);
+  });
+
+  it("Launch & next: the launched files do not carry over to a task typed while the launch ran", async () => {
+    let finish: (v: TaskLaunchResult) => void = () => {};
+    const onLaunch = vi.fn((_req: TaskLaunchRequest) => new Promise<TaskLaunchResult>((r) => (finish = r)));
+    await open({ onLaunch });
+    await typeTask("Match this mockup");
+    await pasteImage();
+    fireEvent.keyDown(task(), { key: "Enter", ...modKey });
+    await settle();
+    fireEvent.change(task(), { target: { value: "Rename formatDate" } });
+    await act(async () => finish(true));
+    await settle();
+    expect(task().value).toBe("Rename formatDate");
+    expect(chips()).toEqual([]);
+  });
+
+  it("the welcome's Keep as draft keeps the attachments too", async () => {
+    const controlRef: { current: TaskLauncherControl | null } = { current: null };
+    const first = await open({ inline: true, controlRef });
+    await typeTask("Match this mockup");
+    await pasteImage();
+    act(() => controlRef.current?.keepAsDraft());
+    first.ui.unmount();
+    await open();
+    expect(task()).toHaveValue("Match this mockup");
+    expect(chips()).toEqual(["/fixture-data/attachments/1-a/pasted-image-1.png"]);
+  });
+
   it("the attachments come back with the draft after a close", async () => {
     const dialog = await import("@tauri-apps/plugin-dialog");
     vi.mocked(dialog.open).mockResolvedValueOnce(["/fixture-home/specs/login.md"] as never);
@@ -1195,5 +1272,30 @@ describe("TaskLauncher: attachments", () => {
     first.ui.unmount();
     await open();
     expect(chips()).toEqual(["/fixture-home/specs/login.md"]);
+  });
+});
+
+describe("TaskLauncher: Also on, a second time on the same branch", () => {
+  it("an existing branch whose second-agent branch is already there: the second agent gets the next free name", async () => {
+    h.probe.set(REPO, { git_root: REPO, branch_exists: false, local_branches: ["main", "develop", "feature/inbox", "feature/inbox-codex"], worktree_toml: null, current_branch: "main" });
+    const { onLaunch } = await open();
+    await typeTask("Polish the inbox");
+    fireEvent.click(chip("where"));
+    fireEvent.click(document.querySelector('.task-launcher-menu [data-where="existing-branch"]') as HTMLElement);
+    await settle();
+    choose(".task-launcher-menu .task-launcher-existing", "feature/inbox");
+    await settle();
+    closeMenus();
+    fireEvent.keyDown(task(), { key: ".", ...modKey });
+    await settle();
+    fireEvent.click(document.querySelector(".task-launcher-also-toggle") as HTMLElement);
+    await settle();
+    expect(blocks()).toEqual([]);
+    await launchWithEnter();
+    expect(onLaunch).toHaveBeenCalledTimes(1);
+    expect(onLaunch.mock.calls[0][0].agents.map((a) => [a.id, a.branch, a.createBranch])).toEqual([
+      ["claude", "feature/inbox", false],
+      ["codex", "feature/inbox-codex-2", true],
+    ]);
   });
 });

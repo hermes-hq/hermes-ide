@@ -862,6 +862,7 @@ pub fn run() {
             pty::nudge_project_context,
             pty::resize_session,
             pty::close_session,
+            pty::stop_session_terminal,
             pty::save_all_snapshots,
             pty::get_sessions,
             pty::get_session_detail,

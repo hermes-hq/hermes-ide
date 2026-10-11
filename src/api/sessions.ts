@@ -168,6 +168,12 @@ export function closeSession(sessionId: string): Promise<void> {
   return invoke("close_session", { sessionId });
 }
 
+/** Stop the session's terminal and keep the session and its worktrees
+ *  (Convert to agent starts it again in Agent view). */
+export function stopSessionTerminal(sessionId: string): Promise<void> {
+  return invoke("stop_session_terminal", { sessionId });
+}
+
 export function getSessions(): Promise<SessionData[]> {
   return invoke<SessionData[]>("get_sessions");
 }

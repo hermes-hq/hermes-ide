@@ -74,7 +74,7 @@ import {
   isAddedAccount,
   parseTaskLaunches,
   pickDefaultAgent,
-  secondAgentBranch,
+  freeSecondAgentBranch,
   shortTaskId,
   taskBranch,
   taskLabel,
@@ -875,12 +875,12 @@ export function TaskLauncher({
     const list = [mk(main, mainBranch, hasAgentView(effective.agentId) ? viewMode : "terminal")];
     if (effective.alsoOn) {
       // The second agent always gets its own new branch (two agents never share a checkout).
-      const alsoBranch = secondAgentBranch(where.kind === "existing-branch" ? where.branch : mainBranch || taskBranch(task, fallbackId), effective.alsoOn.agentId);
+      const alsoBranch = freeSecondAgentBranch(where.kind === "existing-branch" ? where.branch : mainBranch || taskBranch(task, fallbackId), effective.alsoOn.agentId, localBranches);
       const also: LaunchChoice = { ...effective.alsoOn, where: { kind: "new-worktree", baseBranch: where.kind === "new-worktree" ? where.baseBranch : where.kind === "existing-branch" ? where.branch : "", branch: alsoBranch } };
       list.push(mk(also, alsoBranch, "terminal"));
     }
     return list;
-  }, [effective, branch, viewMode, capsOf, where, task, backend, fallbackId, plainFolder]);
+  }, [effective, branch, viewMode, capsOf, where, task, backend, fallbackId, plainFolder, localBranches]);
 
   /** Whether the account an agent runs on is signed in, as the capability backend says (undefined: not known). */
   const accountSignedIn = useCallback(
@@ -1072,9 +1072,11 @@ export function TaskLauncher({
         // What was typed while the launch ran is the next task: only the launched text is cleared.
         if (latestTask.current.trim() === trimmed) {
           setTask((cur) => (cur.trim() === trimmed ? "" : cur));
-          setAttachments([]);
           setBranchEdited(false);
         }
+        // The files that went out go with it; one attached while it ran is the next task's.
+        const sent = new Set(attachments.map((a) => a.path));
+        setAttachments((cur) => cur.filter((a) => !sent.has(a.path)));
         // The branch it made is taken now: the next one is named past it.
         setProbeAgain((n) => n + 1);
         focusTask();
@@ -1257,7 +1259,7 @@ export function TaskLauncher({
     controlRef.current = {
       launch: () => launch(false),
       keepAsDraft: () => {
-        if (choice) saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode });
+        if (choice) saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode, ...(attachments.length > 0 ? { attachments } : {}) });
       },
     };
   }

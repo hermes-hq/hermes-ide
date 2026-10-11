@@ -530,6 +530,9 @@ features:
       QA-git-19:
         text: "A New Session in a repository with no commits goes ahead without isolation and says why"
         scenarios: [QA-git-empty-repo-session.mjs]
+      QA-git-20:
+        text: "Delete anyway never deletes a branch another task's worktree has checked out: it is refused in words and the branch and worktree stay"
+        scenarios: [QA-git-delete-anyway-checked-out.mjs]
   FIX-overlay-focus:
     # A bug fix, not new 2.0 work. Negative control (run by hand): a build of
     # main before the fix ends in RESULT: FAIL (the keyboard ends on <body>,
@@ -1825,6 +1828,12 @@ features:
       QA-HOST-14:
         text: "A shell at its prompt closes without asking and the start screen lists it at once; a shell running a command still asks"
         scenarios: [QA-close-idle-shell.mjs]
+      QA-HOST-15:
+        text: "Convert to agent keeps the session in the sidebar, in Agent view, and keeps its worktree with every uncommitted file"
+        scenarios: [QA-host-convert-keeps-session.mjs]
+      QA-HOST-16:
+        text: "On macOS, Ctrl+C with split panes interrupts the command in the pane that has focus and leaves the other pane alone"
+        scenarios: [QA-host-mac-ctrl-c-split.mjs@darwin]
   QA-launcher:
     # Bug fixes from the QA pass over the task launcher, its accounts,
     # presets and queue, the first-run welcome and the overlays (not new
