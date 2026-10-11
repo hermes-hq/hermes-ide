@@ -1472,7 +1472,7 @@ fn cmd_check(args: &[String]) -> i32 {
     // At a terminal the checks stay in the terminal's process group so
     // Ctrl-C stops them; run for Hermes (--json) they get a group of their
     // own, so a timeout ends everything they started.
-    let report = done_when::check(&cwd, feature.as_deref(), &trigger, run_budget, json);
+    let report = run_checks(&cwd, feature.as_deref(), &trigger, run_budget, json);
     if json {
         let v = report.to_json(done_when::OUTPUT_TAIL_BYTES);
         println!("{}", serde_json::to_string(&v).unwrap_or_default());
@@ -1485,6 +1485,30 @@ fn cmd_check(args: &[String]) -> i32 {
         }
     }
     check_exit_code(report.state)
+}
+
+/// Run the checks of the checkout at `cwd`. At a turn end the Stop hook's
+/// rule applies too (track_holds_checks): nothing is checked, so an agent
+/// without the hook is not failed for a plan that has no code yet.
+fn run_checks(
+    cwd: &Path,
+    feature: Option<&str>,
+    trigger: &str,
+    budget: Duration,
+    own_group: bool,
+) -> done_when::Report {
+    if trigger == "turn_end" && track_holds_checks(cwd, feature).is_some() {
+        return done_when::Report {
+            state: done_when::State::None,
+            trigger: trigger.to_string(),
+            source: None,
+            error: None,
+            commands: Vec::new(),
+            started_at: done_when::now_ms(),
+            duration_ms: 0,
+        };
+    }
+    done_when::check(cwd, feature, trigger, budget, own_group)
 }
 
 /// Why the Stop hook must not hold the agent to the checks now: the
@@ -1683,6 +1707,28 @@ mod tests {
         // A Quick track never holds them back.
         feature::create(root, "quick", Track::Quick, "", "").unwrap();
         assert_eq!(track_holds_checks(root, Some("quick")), None);
+    }
+
+    #[test]
+    fn a_turn_end_in_a_planning_phase_runs_no_checks_but_a_manual_run_does() {
+        use hermes_track::{feature, Track};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/hermes/demo\n").unwrap();
+        std::fs::create_dir_all(root.join(".hermes")).unwrap();
+        std::fs::write(
+            root.join(".hermes/worktree.toml"),
+            "done_when = [\"exit 1\"]\n",
+        )
+        .unwrap();
+        feature::create(root, "demo", Track::Full, "", "").unwrap();
+        let budget = Duration::from_secs(30);
+        let held = run_checks(root, None, "turn_end", budget, true);
+        assert_eq!(held.state, done_when::State::None);
+        assert!(held.commands.is_empty());
+        let manual = run_checks(root, None, "manual", budget, true);
+        assert_eq!(manual.state, done_when::State::Failed);
     }
 
     fn write_exe(dir: &Path, name: &str) -> PathBuf {
