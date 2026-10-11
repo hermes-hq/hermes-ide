@@ -16,7 +16,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getSessionEventSnapshot, subscribeSessionEvents } from "../agent/contract/sessionEventStore";
 import { TURN_LEDGER_EVENT, type TurnLedgerEvent } from "../agent/turns/turnLedgerApi";
 import { lastReportedStatus } from "../agent/status/deriveStatus";
-import { raiseInboxItem } from "../agent/contract/inbox";
+import { raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import { listAllWorktrees } from "../api/git";
 import type { CreateSessionOpts, SessionData } from "../types/session";
 import type { QueuedLaunch } from "../launcher/launchTask";
@@ -127,6 +127,7 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
         caps: getFleetCaps,
         interrupt: (sessionId) => invoke<boolean>("interrupt_session_agent", { sessionId }),
         raise: raiseInboxItem,
+        resolve: resolveInboxItem,
         describe: (trip) => describeTrip(trip, tRef.current),
       }),
     [],

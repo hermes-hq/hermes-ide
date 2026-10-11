@@ -79,6 +79,8 @@ const raised = new Map<string, Map<string, string>>();
 const ownApprovals = new Map<string, number>();
 /** Reverts in flight: the echo of our own revert must not re-trigger. */
 const reverting = new Set<string>();
+/** The guard's error item per feature, open until the person's own approval lands. */
+const guardItems = new Map<string, string>();
 let deps: TrackStoreDeps = {
   sessions: () => [],
   revertGate: () => Promise.resolve(),
@@ -254,12 +256,14 @@ function guardGates(prevState: TrackWorktreeState | undefined, next: TrackWorktr
     if (reverting.has(key)) continue;
     const prev = prevState?.features.find((p) => p.slug === f.slug);
     if (prev?.meta?.gate === "approved" && prev.meta.phase === f.meta.phase) continue;
-    if (consumeOwnApproval(next.worktreePath, f.slug)) continue;
-    const hit = detectAgentApproval(prev, f, attached, (id) => getSessionEventSnapshot(id));
+    const hit = consumeOwnApproval(next.worktreePath, f.slug) ? null : detectAgentApproval(prev, f, attached, (id) => getSessionEventSnapshot(id));
+    const alerted = guardItems.get(key);
+    if (alerted !== undefined) resolveInboxItem(alerted);
+    guardItems.delete(key);
     if (!hit) continue;
     reverting.add(key);
     const message = `${f.slug}: the agent approved its own gate during its turn; reverted to waiting`;
-    raiseInboxItem({ kind: "error", sessionId: hit.sessionId, detail: message, source: TRACK_SOURCE });
+    guardItems.set(key, raiseInboxItem({ kind: "error", sessionId: hit.sessionId, detail: message, source: TRACK_SOURCE }).id);
     deps.onAlert?.(message);
     void deps.revertGate(next.worktreePath, f.slug, hit.phase).catch((e) => {
       reverting.delete(key);
@@ -351,6 +355,7 @@ export function _resetTrackStoreForTest(now?: () => number): void {
   raised.clear();
   ownApprovals.clear();
   reverting.clear();
+  guardItems.clear();
   clock = now ?? (() => Date.now());
   deps = { sessions: () => [], revertGate: () => Promise.resolve(), readFile: () => Promise.resolve("") };
 }
