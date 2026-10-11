@@ -52,7 +52,9 @@ struct HostSession {
     id: String,
     pid: u32,
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// Locked on its own: a write blocks while the program leaves its input
+    /// unread, and output must keep flowing meanwhile.
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     child: Box<dyn Child + Send + Sync>,
     ring: Ring,
     client: Option<Out>,
@@ -337,10 +339,14 @@ fn serve(
         match frame {
             Frame::Data(bytes) => {
                 if let Some(sess) = &attached {
-                    let mut s = sess.lock().unwrap_or_else(|e| e.into_inner());
-                    if !s.exited {
-                        if let Err(e) = s.writer.write_all(&bytes).and_then(|_| s.writer.flush()) {
-                            log(&format!("input to {} failed: {e}", s.id));
+                    let target = {
+                        let s = sess.lock().unwrap_or_else(|e| e.into_inner());
+                        (!s.exited).then(|| (s.id.clone(), Arc::clone(&s.writer)))
+                    };
+                    if let Some((id, writer)) = target {
+                        let mut w = writer.lock().unwrap_or_else(|e| e.into_inner());
+                        if let Err(e) = w.write_all(&bytes).and_then(|_| w.flush()) {
+                            log(&format!("input to {id} failed: {e}"));
                         }
                     }
                 }
@@ -555,7 +561,7 @@ fn spawn_session(
         id: id.clone(),
         pid,
         master: pair.master,
-        writer,
+        writer: Arc::new(Mutex::new(writer)),
         child,
         ring: Ring::new(cfg.ring_bytes),
         client: None,

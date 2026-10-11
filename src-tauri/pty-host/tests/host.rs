@@ -623,3 +623,36 @@ fn the_host_says_when_a_command_holds_the_terminal() {
     writer.write_all(b"\x03").unwrap();
     wait_for(&mut c, false);
 }
+
+#[test]
+fn a_paste_while_a_command_prints_does_not_freeze_the_session_or_the_host() {
+    // A paste of more than about 1 KB fills the terminal's input queue while
+    // the running command never reads it: the write blocks. It used to block
+    // with the session locked, so output stopped, the command stalled on
+    // its own output and never finished, and every other request hung.
+    let host = Host::start(60_000, 60_000);
+    let mut c = host.connect().unwrap();
+    c.spawn(
+        "busy",
+        sh("sleep 1; seq 1 200000; echo FINISHED"),
+        env_min(),
+        "/",
+        24,
+        80,
+    )
+    .unwrap();
+    let mut attached = host.connect().unwrap().attach("busy", 24, 80).unwrap();
+    attached
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    let mut reader = attached.take_reader().unwrap();
+    let mut writer = attached.writer();
+    let paste = "echo pasted line number one two three\n".repeat(80);
+    assert!(paste.len() > 3000);
+    let output =
+        std::thread::spawn(move || read_until(&mut reader, "FINISHED", Duration::from_secs(20)));
+    writer.write_all(paste.as_bytes()).unwrap();
+    std::thread::sleep(Duration::from_millis(1500));
+    c.list().expect("the host still answers");
+    output.join().expect("the command finished");
+}
