@@ -116,6 +116,10 @@ pub struct LaunchInput<'a> {
     /// agent, so Hermes must not set one (the vendor's `rate_limits` then
     /// never reach Hermes, and a limit has no reset time).
     pub user_status_line: bool,
+    /// The user has a `notify` program of their own in Codex's config, so
+    /// Hermes must not set one (one setting: ours would replace theirs; the
+    /// Stop hook still tells the turn's end).
+    pub user_notify: bool,
     /// Absolute path of the `hi` helper.
     pub hi: &'a Path,
     /// The session's launch folder (`<app data>/launch/<session id>`).
@@ -541,6 +545,22 @@ fn claude_settings_files(cwd: &str, profile_env: Option<(&str, &str)>) -> Vec<Pa
     files
 }
 
+/// Whether a TOML document sets `key` at its top level (before any table).
+fn toml_sets_top_level_key(text: &str, key: &str) -> bool {
+    for line in text.lines().map(str::trim) {
+        if line.starts_with('[') && line.ends_with(']') {
+            return false;
+        }
+        if line
+            .strip_prefix(key)
+            .is_some_and(|rest| rest.trim_start().starts_with('='))
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// The per-launch defaults file for the `env_file` method (Gemini's
 /// settings shape, lowest precedence). Its hooks run in a sanitized
 /// environment, so the Hermes variables travel in each hook's `env`. The
@@ -957,6 +977,15 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
     {
         signals.args.push("-c".to_string());
         signals.args.push(format!("hooks.state={state}"));
+    }
+    if input.user_notify {
+        if let Some(at) = signals
+            .args
+            .windows(2)
+            .position(|w| w[0] == "-c" && w[1].starts_with("notify="))
+        {
+            signals.args.drain(at..at + 2);
+        }
     }
     env.extend(signals.env.iter().map(|(k, v)| (k.clone(), v.clone())));
 
@@ -1605,6 +1634,10 @@ pub(crate) fn prepare_helper_launch(
         seed_prompt: s.seed_prompt.as_deref(),
         user_status_line: limits_via_status_line(agent)
             && settings_set_status_line(&claude_settings_files(&s.working_directory, profile_env)),
+        user_notify: agent.terminal.signals.hook_flags.as_deref() == Some("toml_config")
+            && crate::agent_caps::report::codex_home(s.agent_launch.profile_env.as_ref())
+                .and_then(|home| std::fs::read_to_string(home.join("config.toml")).ok())
+                .is_some_and(|text| toml_sets_top_level_key(&text, "notify")),
         hi: &hi,
         session_dir: &session_dir,
         new_session_id: &new_session_id,
@@ -3781,6 +3814,7 @@ pub(crate) mod tests {
             resume_id,
             seed_prompt: None,
             user_status_line: false,
+            user_notify: false,
             hi,
             session_dir,
             new_session_id: "11111111-2222-4333-8444-555555555555",
@@ -4794,6 +4828,31 @@ pub(crate) mod tests {
         claude.hook_trust = Some(trust);
         let plan = plan_launch(&claude).unwrap();
         assert!(!plan.spec.args.iter().any(|a| a.contains("hooks.state")));
+    }
+
+    /// A Codex user's own `notify` program is kept: Hermes sets none then.
+    #[test]
+    fn codex_keeps_the_users_own_notify_program() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let mut codex = input("codex", None, hi, dir);
+        codex.user_notify = true;
+        let args = plan_launch(&codex).unwrap().spec.args;
+        assert!(!args.iter().any(|a| a.starts_with("notify=")), "{args:?}");
+        assert!(
+            args.iter().any(|a| a.starts_with("hooks.Stop=")),
+            "{args:?}"
+        );
+        assert!(args.windows(2).all(|w| !(w[0] == "-c" && w[1] == "-c")));
+
+        assert!(toml_sets_top_level_key(
+            "model = \"o3\"\nnotify = [\"bash\", \"-lc\", \"afplay x\"]\n",
+            "notify"
+        ));
+        assert!(!toml_sets_top_level_key(
+            "# notify = [\"x\"]\nnotify_extra = 1\n[profiles.work]\nnotify = [\"y\"]\n",
+            "notify"
+        ));
     }
 
     #[test]
