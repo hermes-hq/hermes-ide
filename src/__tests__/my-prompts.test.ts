@@ -168,4 +168,23 @@ describe("files", () => {
     ]);
     expect(back.added[0].text).toBe("Write notes for {{version}}");
   });
+
+  it("keeps a file prompt that only shares a name, under the next free title", () => {
+    const here: import("../library/myPrompts").MyPrompt[] = [
+      { id: "mine-1", kind: "prompt", title: "Review", description: "", text: "Review this diff.", createdAt: 1, updatedAt: 1 },
+      { id: "mine-2", kind: "prompt", title: "Review (2)", description: "", text: "Something else.", createdAt: 1, updatedAt: 1 },
+    ];
+    const file: import("../library/myPrompts").MyPrompt[] = [
+      { id: "f-1", kind: "prompt", title: "Review", description: "", text: "Review this diff.", createdAt: 1, updatedAt: 1 },
+      { id: "f-2", kind: "prompt", title: "review", description: "", text: "Review it for security.", createdAt: 1, updatedAt: 1 },
+      { id: "f-3", kind: "prompt", title: "Review", description: "", text: "Review it for security.", createdAt: 1, updatedAt: 1 },
+      { id: "f-4", kind: "persona", title: "Review", description: "", text: "You review code.", createdAt: 1, updatedAt: 1 },
+    ];
+    const back = m.fromBundle(m.toBundle(file, "2.2.6"), here, (tpl) => tpl.fields.task, undefined, 7);
+    expect(back.skipped).toBe(2);
+    expect(back.added.map((x) => [x.kind, x.title, x.text])).toEqual([
+      ["prompt", "review (3)", "Review it for security."],
+      ["persona", "Review", "You review code."],
+    ]);
+  });
 });

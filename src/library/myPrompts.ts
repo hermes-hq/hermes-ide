@@ -316,18 +316,26 @@ export function fromBundle(
   folder?: string,
   now = Date.now(),
 ): { added: MyPrompt[]; skipped: number } {
-  const taken = new Set(existing.map((m) => `${m.kind}:${m.title.toLowerCase()}`));
+  // A file item with the same kind, title and text as one already here is a
+  // true duplicate and skipped; one that only shares the title is kept under
+  // the next free "Title (2)" so nothing in the file is lost (#224).
+  const key = (kind: MyKind, title: string) => `${kind}:${title.trim().toLowerCase()}`;
+  const titles = new Set(existing.map((m) => key(m.kind, m.title)));
+  const texts = new Set(existing.map((m) => `${key(m.kind, m.title)}\n${m.text}`));
   const migrated = migrateLegacy({ templates: bundle.templates ?? [], roles: bundle.roles ?? [], styles: bundle.styles ?? [], pinned: [] }, templateText, now);
   const added: MyPrompt[] = [];
   let skipped = 0;
   migrated.forEach((m, i) => {
-    const k = `${m.kind}:${m.title.toLowerCase()}`;
-    if (taken.has(k)) {
+    if (texts.has(`${key(m.kind, m.title)}\n${m.text}`)) {
       skipped++;
       return;
     }
-    taken.add(k);
-    added.push({ ...m, id: `mine-${now}-${i}`, ...(m.kind === "prompt" && !m.folder && folder ? { folder } : {}) });
+    let title = m.title;
+    for (let n = 2; titles.has(key(m.kind, title)); n++) title = `${m.title} (${n})`;
+    titles.add(key(m.kind, title));
+    texts.add(`${key(m.kind, title)}\n${m.text}`);
+    texts.add(`${key(m.kind, m.title)}\n${m.text}`);
+    added.push({ ...m, title, id: `mine-${now}-${i}`, ...(m.kind === "prompt" && !m.folder && folder ? { folder } : {}) });
   });
   return { added, skipped };
 }

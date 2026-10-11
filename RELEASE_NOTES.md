@@ -1,5 +1,5 @@
-# Hermes IDE 2.2.6
+# Hermes IDE 2.2.7
 
 ## Fixes
 
-- Pressing Ctrl-C to stop a program in a terminal now interrupts it once: bash reports the right exit code afterwards, and the next command you type is no longer cut short on Linux.
+- Importing a prompts file no longer drops a prompt whose name matches one you already have but whose text is different: it is added as "Name (2)". Only exact duplicates are skipped.
