@@ -19,7 +19,16 @@
 - Pushing, committing with slow hooks, stashing and starting an isolated task no longer freeze the whole window while they run.
 - On Windows, Git actions no longer flash a console window or steal focus from the terminal.
 - Pull now refuses with a clear message when no branch is checked out, instead of moving the checked-out commit.
+- After merging a task locally, you can still open a pull request for its branch.
 - Feature files and worktree settings saved with a byte order mark, common with some Windows editors, can now be approved, skipped and checked.
+
+### Editor and Agent view
+
+- Editing a file whose line endings are mixed no longer rewrites every line to a single ending style.
+- Saving while an autosave is still finishing no longer shows a false "changed on disk" warning.
+- A permission prompt from a sub-agent working in the background no longer disappears when the main reply finishes.
+- On Windows, closing an Agent view session or changing its model, permission mode or effort no longer flashes a console window.
+- Permission rules and MCP servers save again when your Claude settings file is a link into a read-only folder.
 
 ### Spend and limits
 
