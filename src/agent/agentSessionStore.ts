@@ -198,9 +198,6 @@ export class AgentSessionStore {
       // late-arriving exit events from the old subprocess can be
       // recognised as stale (fix H1).
       const ev = payload as { type?: string; subtype?: string };
-      // A finished turn has no open canUseTool left: the SDK settles any
-      // it was still waiting on (Stop during a prompt) before `result`.
-      if (ev?.type === "result") this.setPermQueue([]);
       if (ev?.type === "system" && ev?.subtype === "init") {
         this.initGeneration += 1;
         this.lastInitAt = Date.now();
@@ -371,7 +368,6 @@ export class AgentSessionStore {
       protocolError: nextProtocolError(this.snapshot.protocolError, event),
     };
     const ev = event as { type?: string; subtype?: string };
-    if (ev?.type === "result") this.setPermQueue([]);
     if (ev?.type === "system" && ev?.subtype === "init") {
       this.initGeneration += 1;
       this.lastInitAt = Date.now();
