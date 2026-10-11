@@ -338,9 +338,12 @@ mod tests {
         // Another data folder is another instance.
         let other = tempfile::tempdir().unwrap();
         assert!(claim_data_dir(other.path(), none).unwrap().is_some());
-        // Once the first one is gone, the folder is free again.
+        // Once the first one is gone, the folder is free again. With a short
+        // wait: a test elsewhere that starts a process can hold a copy of the
+        // lock file for the moment between its fork and its exec.
         drop(first);
-        assert!(claim_data_dir(dir.path(), none).unwrap().is_some());
+        let moment = std::time::Duration::from_secs(2);
+        assert!(claim_data_dir(dir.path(), moment).unwrap().is_some());
     }
 
     fn prod_under(base: &Path) -> PathBuf {
