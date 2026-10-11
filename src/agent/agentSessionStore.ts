@@ -66,7 +66,9 @@ export interface AgentViewSnapshot {
   /** Permission request waiting on the user, or null when none.  Kept
    *  in the store rather than the dispatcher's local React state so a
    *  session switch doesn't lose the request and leave the bridge
-   *  hanging on `canUseTool`. */
+   *  hanging on `canUseTool`.  The oldest of the open requests:
+   *  parallel tool calls can each ask at once, and every one must be
+   *  answered before the turn can go on. */
   pendingPermRequest: PermRequest | null;
   /** The last line of agent output Hermes could not read (not JSON, or too
    *  long), since the agent last started. Null when the stream is clean. */
@@ -141,6 +143,9 @@ export class AgentSessionStore {
    *  reordering of a respawn) and ignored. */
   private initGeneration = 0;
   private lastInitAt = 0;
+  /** Every open permission request, oldest first.  The snapshot shows
+   *  the head; answering one removes it by id and shows the next. */
+  private permQueue: PermRequest[] = [];
 
   constructor(public readonly sessionId: string, listen: ListenFn) {
     // The agent's init fires once, right after it starts, and Tauri does
@@ -168,7 +173,7 @@ export class AgentSessionStore {
       // floor — the bridge's canUseTool would otherwise hang until
       // session close.
       if (isPermRequest(payload)) {
-        this.snapshot = { ...this.snapshot, pendingPermRequest: payload };
+        this.enqueuePermRequest(payload);
         // Don't fold perm-request envelopes into the message stream —
         // they're metadata, not chat content.  Notify and exit.
         this.notify();
@@ -189,9 +194,13 @@ export class AgentSessionStore {
       // late-arriving exit events from the old subprocess can be
       // recognised as stale (fix H1).
       const ev = payload as { type?: string; subtype?: string };
+      // A finished turn has no open canUseTool left: the SDK settles any
+      // it was still waiting on (Stop during a prompt) before `result`.
+      if (ev?.type === "result") this.setPermQueue([]);
       if (ev?.type === "system" && ev?.subtype === "init") {
         this.initGeneration += 1;
         this.lastInitAt = Date.now();
+        this.permQueue = [];
         // Bridge respawn: clear any pending permission request from the
         // dead bridge.  Otherwise the modal would still be showing the
         // old request id, and clicking allow/deny would write a
@@ -258,6 +267,18 @@ export class AgentSessionStore {
     if (notify) this.notify();
   }
 
+  private setPermQueue(queue: PermRequest[]) {
+    this.permQueue = queue;
+    const head = queue[0] ?? null;
+    if (head === this.snapshot.pendingPermRequest) return;
+    this.snapshot = { ...this.snapshot, pendingPermRequest: head };
+  }
+
+  private enqueuePermRequest(req: PermRequest, front = false) {
+    const rest = this.permQueue.filter((r) => r.id !== req.id);
+    this.setPermQueue(front ? [req, ...rest] : [...rest, req]);
+  }
+
   private collect(un: Unlisten) {
     if (this.destroyed) {
       // Race: destroy() called before listen() resolved — clean up now.
@@ -290,15 +311,25 @@ export class AgentSessionStore {
   /** Cleared when the user resolves a perm request (allow / deny) so
    *  the modal disappears.  Also fired by the dispatcher BEFORE the
    *  envelope is sent so a stalled IPC can't keep the modal clickable
-   *  for a double-decision (fix H6). */
-  clearPendingPermRequest = () => {
-    if (this.snapshot.pendingPermRequest === null) return;
-    this.snapshot = { ...this.snapshot, pendingPermRequest: null };
+   *  for a double-decision (fix H6).  Removes the request with `id`
+   *  (the shown one when omitted); the next open request shows. */
+  clearPendingPermRequest = (id?: string) => {
+    const target = id ?? this.snapshot.pendingPermRequest?.id;
+    if (target === undefined || !this.permQueue.some((r) => r.id === target)) return;
+    this.setPermQueue(this.permQueue.filter((r) => r.id !== target));
+    this.notify();
+  };
+
+  /** Puts back a request whose answer could not be sent, in front, so
+   *  the user decides it again before the others. */
+  restorePendingPermRequest = (req: PermRequest) => {
+    this.enqueuePermRequest(req, true);
     this.notify();
   };
 
   /** Wholesale reset — used when respawning into a fresh session. */
   reset = () => {
+    this.permQueue = [];
     this.snapshot = {
       state: emptyState(),
       stderr: "",
@@ -322,7 +353,7 @@ export class AgentSessionStore {
   /** Test hook: feed an event directly without going through Tauri. */
   injectEvent = (event: AgentEvent) => {
     if (isPermRequest(event)) {
-      this.snapshot = { ...this.snapshot, pendingPermRequest: event };
+      this.enqueuePermRequest(event);
       this.notify();
       return;
     }
@@ -332,6 +363,7 @@ export class AgentSessionStore {
       protocolError: nextProtocolError(this.snapshot.protocolError, event),
     };
     const ev = event as { type?: string; subtype?: string };
+    if (ev?.type === "result") this.setPermQueue([]);
     if (ev?.type === "system" && ev?.subtype === "init") {
       this.initGeneration += 1;
       this.lastInitAt = Date.now();

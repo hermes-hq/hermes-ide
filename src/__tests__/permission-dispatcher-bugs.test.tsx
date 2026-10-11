@@ -349,10 +349,19 @@ describe("InteractivePermissionDispatcher — sendError state across requests (B
         );
       });
 
-      // The dispatcher renders request B.  But sendError lives in
-      // dispatcher-local React state, NOT keyed by request.id, so the
-      // banner is STILL on screen attributing the error to request B.
-      // Expected: banner cleared when the request identity changes.
+      // Request A is still open, so it stays on screen with its own
+      // banner; B waits behind it (both must be answered).
+      expect(view.container.textContent).toContain("echo A");
+      expect(view.container.querySelector(".agent-perm-error")).not.toBeNull();
+
+      // Answering A shows B.  sendError is keyed by request id, so the
+      // banner from A must not be attributed to B.
+      await act(async () => {
+        (view.container.querySelector(".perm-link-deny") as HTMLButtonElement).click();
+        await Promise.resolve();
+        await Promise.resolve();
+      });
+      expect(view.container.textContent).toContain("/completely/different");
       expect(view.container.querySelector(".agent-perm-error")).toBeNull();
     },
   );

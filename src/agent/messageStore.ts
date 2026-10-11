@@ -169,6 +169,11 @@ export interface AgentSessionState {
   resultEventAt: number | null;
   /** Context compactions, oldest first (F14). */
   compactions: CompactionMark[];
+  /** True once the SDK's "[Request interrupted by user" note arrived in
+   *  the current turn.  The `result` that ends a stopped turn comes as
+   *  `error_during_execution`; the user asked for it, so it is not an
+   *  error.  Cleared on every `result`. */
+  stoppedByUser: boolean;
 }
 
 export function emptyState(): AgentSessionState {
@@ -195,6 +200,7 @@ export function emptyState(): AgentSessionState {
     currentStreamMessageId: null,
     seenResultEventIds: new Set(),
     resultEventAt: null,
+    stoppedByUser: false,
   };
 }
 
@@ -335,6 +341,16 @@ function mergeAssistantBlocks(
   }
 
   return out ?? existing;
+}
+
+/** The note the SDK writes as a user message when Stop interrupts a turn
+ *  ("[Request interrupted by user]" or "... for tool use]").  The user never
+ *  typed it; history.rs drops it from restored transcripts too. */
+const INTERRUPT_NOTE_PREFIX = "[Request interrupted by user";
+
+function isInterruptNote(block: ContentBlock): boolean {
+  const b = block as { type?: string; text?: unknown };
+  return b.type === "text" && typeof b.text === "string" && b.text.trimStart().startsWith(INTERRUPT_NOTE_PREFIX);
 }
 
 function appendUserMessage(
@@ -876,7 +892,9 @@ export function reduceEvent(
   if (isUserEvent(event)) {
     const blocks = Array.isArray(event.message.content) ? event.message.content : [];
     const hasToolResults = blocks.some((b) => isToolResultBlock(b));
-    const hasNonToolResult = blocks.some((b) => !isToolResultBlock(b));
+    const nonToolResults = blocks.filter((b) => !isToolResultBlock(b));
+    const interruptNote = nonToolResults.length > 0 && nonToolResults.every(isInterruptNote);
+    const hasNonToolResult = nonToolResults.length > 0 && !interruptNote;
 
     let nextToolResults = state.toolResults;
     let nextMessages = state.messages;
@@ -891,10 +909,13 @@ export function reduceEvent(
       nextMessages = appendUserMessage(state.messages, event);
     }
 
+    const stoppedByUser = state.stoppedByUser || interruptNote;
+
     if (
       nextToolResults === state.toolResults &&
       nextMessages === state.messages &&
-      nextRunning === state.runningToolUseIds
+      nextRunning === state.runningToolUseIds &&
+      stoppedByUser === state.stoppedByUser
     ) {
       return state;
     }
@@ -903,6 +924,7 @@ export function reduceEvent(
       toolResults: nextToolResults,
       messages: nextMessages,
       runningToolUseIds: nextRunning,
+      stoppedByUser,
     };
   }
 
@@ -957,13 +979,19 @@ export function reduceEvent(
       eventId !== null && !alreadyAccumulated
         ? appendCappedResultId(state.seenResultEventIds, eventId)
         : state.seenResultEventIds;
+    // A turn the user stopped ends as `error_during_execution`: a normal
+    // end of turn, not a failure banner or an errored session.
+    const result =
+      state.stoppedByUser && event.is_error && event.subtype === "error_during_execution"
+        ? { ...event, is_error: false }
+        : event;
     // H4 (turn end): clear runningToolUseIds — Claude's contract
     // says any tool_use issued in this turn has its tool_result
     // emitted before the result event, so an entry left here is an
     // orphan that would hang the activity indicator forever.
     return {
       ...state,
-      resultEvent: event,
+      resultEvent: result,
       resultEventAt: now,
       seenResultEventIds,
       cumulativeCostUsd: state.cumulativeCostUsd + turnCost,
@@ -975,9 +1003,10 @@ export function reduceEvent(
       // results) leave `lastError` untouched so the banner stays put
       // until the next FULL turn lands; the result event itself is
       // what gates banner visibility via `selectFatalError`.
-      lastError: event.is_error
-        ? event.result ?? `Agent returned ${event.subtype}`
+      lastError: result.is_error
+        ? result.result ?? `Agent returned ${result.subtype}`
         : null,
+      stoppedByUser: false,
       streamingMessageId: null,
       runningToolUseIds:
         state.runningToolUseIds.size === 0
