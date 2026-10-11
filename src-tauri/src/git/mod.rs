@@ -5819,6 +5819,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path();
         git_ok(d, &["init", "-b", "main"]);
+        // The runner's global line-end conversion (Windows) would make the
+        // checkout below and git status disagree about what changed.
+        git_ok(d, &["config", "core.autocrlf", "false"]);
         std::fs::write(d.join("a.txt"), "main\n").unwrap();
         git_ok(d, &["add", "."]);
         git_ok(d, &["commit", "-m", "main"]);
