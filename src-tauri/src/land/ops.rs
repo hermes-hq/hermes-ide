@@ -292,7 +292,44 @@ pub fn analyze(
     repo_path: &Path,
     skip: &dyn Fn(&str) -> bool,
 ) -> Result<Analysis, String> {
-    analyze_into(worktree, repo_path, skip, None)
+    analyze_into(worktree, repo_path, skip, None, None)
+}
+
+/// An earlier squash landing of the branch: the branch commit that landed
+/// and the squash commit it became on the base.
+#[derive(Debug, Clone, Copy)]
+pub struct Landed<'a> {
+    pub head: &'a str,
+    pub merged: &'a str,
+}
+
+/// What a three-way merge of `head` into `base` starts from: the
+/// merge-base, unless `landed` is newer. A squash commit is never an
+/// ancestor of the branch, so after a landing the merge-base stays at the
+/// fork point and what landed would merge (and conflict) again; the commit
+/// that landed is then the ancestor, while the base still holds the squash
+/// and the branch still holds that commit.
+fn merge_ancestor(
+    repo: &Repository,
+    base: Oid,
+    head: Oid,
+    landed: Option<Landed>,
+) -> Result<Oid, git2::Error> {
+    let mb = repo.merge_base(base, head)?;
+    let has = |descendant: Oid, ancestor: Oid| {
+        descendant == ancestor
+            || repo
+                .graph_descendant_of(descendant, ancestor)
+                .unwrap_or(false)
+    };
+    if let Some((landed, merged)) =
+        landed.and_then(|l| Some((oid(l.head).ok()?, oid(l.merged).ok()?)))
+    {
+        if has(base, merged) && has(head, landed) && !has(mb, merged) {
+            return Ok(landed);
+        }
+    }
+    Ok(mb)
 }
 
 /// `analyze`, landing into `base` (the branch the task was started from, or
@@ -302,6 +339,7 @@ pub fn analyze_into(
     repo_path: &Path,
     skip: &dyn Fn(&str) -> bool,
     base: Option<&str>,
+    landed: Option<Landed>,
 ) -> Result<Analysis, String> {
     let (branch, head) = current_branch(worktree)?;
     let snapshot = snapshot_tree(worktree, skip)?;
@@ -330,11 +368,19 @@ pub fn analyze_into(
     let base_head = branch_head(repo_path, &base_name)
         .ok_or_else(|| format!("Branch '{base_name}' has no commit"))?;
     let base_oid = oid(&base_head)?;
-    let merge_base = repo
-        .merge_base(base_oid, head_commit.id())
+    let merge_base = merge_ancestor(&repo, base_oid, head_commit.id(), landed)
         .map_err(|e| format!("'{branch}' and '{base_name}' share no history: {e}"))?;
+    // Commits since the earlier landing, when that is the ancestor.
+    let not_in = if repo
+        .graph_descendant_of(base_oid, merge_base)
+        .unwrap_or(false)
+    {
+        base_oid
+    } else {
+        merge_base
+    };
     let (ahead, _) = repo
-        .graph_ahead_behind(head_commit.id(), base_oid)
+        .graph_ahead_behind(head_commit.id(), not_in)
         .map_err(|e| e.to_string())?;
     let mb_tree = repo
         .find_commit(merge_base)
@@ -390,7 +436,9 @@ fn merge_check(
     mb_tree: &Tree,
     work_tree: &Tree,
 ) -> Result<MergeCheck, String> {
-    if merge_base == base {
+    // The base has nothing the ancestor lacks (it has not moved since the
+    // fork, or since an earlier landing of exactly this tree).
+    if merge_base == base || mb_tree.id() == base_tree.id() {
         return Ok(if work_tree.id() == base_tree.id() {
             MergeCheck::NothingToMerge
         } else {
@@ -459,6 +507,7 @@ pub fn squash_merge(
     base: &str,
     head: &str,
     message: &str,
+    landed: Option<Landed>,
 ) -> Result<SquashOutcome, String> {
     let repo = open(repo_path)?;
     let base_head = branch_head(repo_path, base).ok_or_else(|| format!("No branch '{base}'"))?;
@@ -466,19 +515,18 @@ pub fn squash_merge(
         .find_commit(oid(&base_head)?)
         .map_err(|e| e.to_string())?;
     let head_commit = repo.find_commit(oid(head)?).map_err(|e| e.to_string())?;
-    let mb = repo
-        .merge_base(base_commit.id(), head_commit.id())
+    let mb = merge_ancestor(&repo, base_commit.id(), head_commit.id(), landed)
         .map_err(|e| format!("No shared history: {e}"))?;
     let base_tree = base_commit.tree().map_err(|e| e.to_string())?;
     let head_tree = head_commit.tree().map_err(|e| e.to_string())?;
-    let fast_forward = mb == base_commit.id();
+    let mb_tree = repo
+        .find_commit(mb)
+        .and_then(|c| c.tree())
+        .map_err(|e| e.to_string())?;
+    let fast_forward = mb == base_commit.id() || mb_tree.id() == base_tree.id();
     let tree_id = if fast_forward {
         head_tree.id()
     } else {
-        let mb_tree = repo
-            .find_commit(mb)
-            .and_then(|c| c.tree())
-            .map_err(|e| e.to_string())?;
         match merge_result(&repo, &mb_tree, &base_tree, &head_tree)? {
             (Some(tree), _) => tree,
             (None, files) => return Ok(SquashOutcome::Conflict { files }),
@@ -819,7 +867,7 @@ pub(crate) mod tests {
         sh(&wt, &["commit", "-q", "-am", "two"]);
         let before = sh(&repo, &["rev-parse", "main"]);
         let head = sh(&wt, &["rev-parse", "HEAD"]);
-        let out = squash_merge(&repo, "main", &head, "Land task").unwrap();
+        let out = squash_merge(&repo, "main", &head, "Land task", None).unwrap();
         let SquashOutcome::Merged {
             commit,
             fast_forward,
@@ -855,7 +903,7 @@ pub(crate) mod tests {
         let before = sh(&repo, &["rev-parse", "main"]);
         let head = sh(&wt, &["rev-parse", "HEAD"]);
         assert_eq!(
-            squash_merge(&repo, "main", &head, "x").unwrap(),
+            squash_merge(&repo, "main", &head, "x", None).unwrap(),
             SquashOutcome::Conflict {
                 files: vec!["a.txt".into()]
             }
@@ -877,7 +925,7 @@ pub(crate) mod tests {
         let head = sh(&wt, &["rev-parse", "HEAD"]);
         let before = sh(&repo, &["rev-parse", "release"]);
         let SquashOutcome::Merged { commit, .. } =
-            squash_merge(&repo, "release", &head, "Land").unwrap()
+            squash_merge(&repo, "release", &head, "Land", None).unwrap()
         else {
             panic!()
         };
@@ -897,7 +945,7 @@ pub(crate) mod tests {
         let head = sh(&wt, &["rev-parse", "HEAD"]);
         let before = sh(&repo, &["rev-parse", "main"]);
         let SquashOutcome::Merged { commit, .. } =
-            squash_merge(&repo, "main", &head, "Land").unwrap()
+            squash_merge(&repo, "main", &head, "Land", None).unwrap()
         else {
             panic!()
         };
@@ -908,7 +956,7 @@ pub(crate) mod tests {
 
         // Land again, then main moves on: revert keeps the later work.
         let SquashOutcome::Merged { commit, .. } =
-            squash_merge(&repo, "main", &head, "Land").unwrap()
+            squash_merge(&repo, "main", &head, "Land", None).unwrap()
         else {
             panic!()
         };
@@ -1049,7 +1097,7 @@ pub(crate) mod tests {
         );
         assert_eq!(commits_not_in(&repo, "develop", "main"), 1);
         assert_eq!(commits_not_in(&repo, "main", "develop"), 0);
-        let a = analyze_into(&wt, &repo, &none, Some("develop")).unwrap();
+        let a = analyze_into(&wt, &repo, &none, Some("develop"), None).unwrap();
         assert_eq!(a.base.unwrap().name, "develop");
         assert!(local_branches(&repo).contains(&"develop".to_string()));
     }
@@ -1080,7 +1128,7 @@ pub(crate) mod tests {
         // And if it got that far, the refusal says the same, never "stash".
         let head = sh(&wt, &["rev-parse", "HEAD"]);
         let before = sh(&repo, &["rev-parse", "main"]);
-        let err = squash_merge(&repo, "main", &head, "Land").unwrap_err();
+        let err = squash_merge(&repo, "main", &head, "Land", None).unwrap_err();
         assert_eq!(
             err,
             "a.txt has uncommitted changes in the project folder (main)"

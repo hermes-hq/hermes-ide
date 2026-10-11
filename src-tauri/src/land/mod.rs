@@ -164,17 +164,34 @@ pub struct LandPreview {
     pub base_mismatch: Option<BaseMismatch>,
 }
 
+/// The session's newest local merge that was not undone (used only while
+/// the base still holds it; see `ops::Landed`).
+fn last_landed(landings: &[LandRecord]) -> Option<ops::Landed<'_>> {
+    landings
+        .iter()
+        .rev()
+        .filter(|r| r.mode == LandMode::Merge && !r.undone)
+        .find_map(|r| {
+            Some(ops::Landed {
+                head: r.branch_after.as_deref()?,
+                merged: r.merged_commit.as_deref()?,
+            })
+        })
+}
+
 fn preview(
     app_data: &Path,
     session_id: &str,
     t: &Target,
     base: Option<&str>,
 ) -> Result<LandPreview, String> {
+    let landings = record::list_for_session(app_data, session_id);
     let analysis = ops::analyze_into(
         &t.worktree_path,
         &t.repo_path,
         &noise,
         base.or(t.recorded_base.as_deref()),
+        last_landed(&landings),
     )?;
     let remote = ops::pick_remote(&t.repo_path, &analysis.branch);
     let base_mismatch = match (&t.recorded_base, &analysis.base) {
@@ -197,7 +214,7 @@ fn preview(
         remote,
         worktree_toml: read_capped(&t.worktree_path.join(".hermes").join("worktree.toml")),
         features: feature_files(&t.worktree_path),
-        landings: record::list_for_session(app_data, session_id),
+        landings,
         worktree_path: t.worktree_path.to_string_lossy().to_string(),
         repo_path: t.repo_path.to_string_lossy().to_string(),
         shared: t.shared,
@@ -294,11 +311,14 @@ fn execute(
     if subject(&req.message).is_empty() {
         return Err("Write a commit message first".into());
     }
+    let landings = record::list_for_session(app_data, session_id);
+    let landed = last_landed(&landings);
     let a = ops::analyze_into(
         &t.worktree_path,
         &t.repo_path,
         &noise,
         req.base.as_deref().or(t.recorded_base.as_deref()),
+        landed,
     )?;
     let base = a.base.as_ref().map(|b| b.name.clone());
     let has_work = a.uncommitted_files > 0 || a.commits_ahead > 0;
@@ -416,7 +436,7 @@ fn execute(
     match req.mode {
         LandMode::Merge => {
             let base = base.unwrap_or_default();
-            match ops::squash_merge(&t.repo_path, &base, &landed_head, &req.message) {
+            match ops::squash_merge(&t.repo_path, &base, &landed_head, &req.message, landed) {
                 Ok(ops::SquashOutcome::Merged { commit, .. }) => {
                     rec.merged_commit = Some(commit);
                 }
@@ -1021,6 +1041,55 @@ mod tests {
         assert_eq!(undone.steps.len(), 2, "{:?}", undone.steps);
         assert!(record::load(data.path(), "s1-1").unwrap().undone);
         assert!(undo(data.path(), &mut rec, "s2", None, &mut no_link).is_err());
+    }
+
+    #[test]
+    fn landing_again_from_the_same_branch_merges_only_what_is_new() {
+        let (_t, repo, wt) = repo_with_task();
+        let data = TempDir::new().unwrap();
+        let target = target_for(&repo, &wt);
+        let land = |message: &str| {
+            execute(
+                data.path(),
+                "s1",
+                "p1",
+                &target,
+                &req(LandMode::Merge, message),
+                None,
+            )
+            .unwrap()
+        };
+        fs::write(wt.join("a.txt"), "one\nTWO\nthree\n").unwrap();
+        fs::write(wt.join("b.txt"), "b\n").unwrap();
+        assert_eq!(land("first").status, LandStatus::Landed);
+        // The squash is not an ancestor of the task branch; the agent edits
+        // the line it just landed again and adds a file.
+        fs::write(wt.join("a.txt"), "one\nTWO!\nthree\n").unwrap();
+        fs::write(wt.join("c.txt"), "c\n").unwrap();
+        let p = preview(data.path(), "s1", &target, None).unwrap();
+        assert_eq!(p.analysis.merge, ops::MergeCheck::FastForward);
+        assert_eq!(p.analysis.changed_files, vec!["a.txt", "c.txt"]);
+        let out = land("second");
+        assert_eq!(out.status, LandStatus::Landed, "{:?}", out.conflict_files);
+        assert_eq!(
+            fs::read_to_string(repo.join("a.txt")).unwrap(),
+            "one\nTWO!\nthree\n"
+        );
+        // Main moved on in another file since: still only the new work
+        // merges, and main's commit stays.
+        fs::write(repo.join("d.txt"), "main\n").unwrap();
+        sh(&repo, &["add", "d.txt"]);
+        sh(&repo, &["commit", "-q", "-m", "main work"]);
+        fs::write(wt.join("a.txt"), "one\nTWO!!\nthree\n").unwrap();
+        let p = preview(data.path(), "s1", &target, None).unwrap();
+        assert_eq!(p.analysis.merge, ops::MergeCheck::Clean);
+        assert_eq!(p.analysis.changed_files, vec!["a.txt"]);
+        assert_eq!(land("third").status, LandStatus::Landed);
+        assert_eq!(
+            fs::read_to_string(repo.join("a.txt")).unwrap(),
+            "one\nTWO!!\nthree\n"
+        );
+        assert!(repo.join("d.txt").exists() && repo.join("c.txt").exists());
     }
 
     #[test]
