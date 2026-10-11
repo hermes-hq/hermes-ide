@@ -93,12 +93,15 @@ await runLauncherQa(
       `the bundle lists its tiers (${JSON.stringify(lock.tiers)})`,
     );
     // The import is linear in rows. CI with 1,570 rows (debug build): 356-473
-    // ms on Linux, 506-817 on macOS, 488-1347 on Windows, so at most 0.86 ms
-    // a row; the budget is 1 ms a row (2,570 ms at 2,570 rows).
-    const importBudget = lock.rows;
+    // ms on Linux, 506-817 on macOS, 488-1347 on Windows. At 3,634 rows the
+    // Windows runners took 4,2xx and 5,270 ms (up to 1.45 ms a row), so the
+    // budget is 2 ms a row there and 1 ms a row elsewhere: room for a slow
+    // runner, still far below what a quadratic import would take.
+    const msPerRow = process.platform === "win32" ? 2 : 1;
+    const importBudget = lock.rows * msPerRow;
     check(
       typeof status.importMs === "number" && status.importMs <= importBudget,
-      `the first-open import took ${status.importMs} ms (budget ${importBudget} ms on a CI runner, 1 ms a row in the debug test build)`,
+      `the first-open import took ${status.importMs} ms (budget ${importBudget} ms on a CI runner, ${msPerRow} ms a row in the debug test build)`,
     );
 
     await bridge.waitFor(
