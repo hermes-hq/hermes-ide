@@ -1098,6 +1098,7 @@ export const ruPack: LanguagePack = {
     "fleet.queueRunning": "Запущено {running} из {cap}",
     "fleet.queueMemory": "{used} из {cap} МБ",
     "fleet.queueWaiting": "Запустится, когда освободится место",
+    "fleet.queueFailed": "Не запустилась — «Запустить сейчас», чтобы попробовать снова",
     "fleet.queueStartNow": "Запустить сейчас",
     "fleet.queueRemove": "Убрать",
     "fleet.capOff": "Выкл.",

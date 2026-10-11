@@ -1134,6 +1134,7 @@ export const hiPack: LanguagePack = {
     "fleet.queueRunning": "{cap} में से {running} चल रहे हैं",
     "fleet.queueMemory": "{cap} MB में से {used}",
     "fleet.queueWaiting": "जगह ख़ाली होते ही शुरू होगा",
+    "fleet.queueFailed": "शुरू नहीं हुआ — फिर से आज़माने के लिए “अभी शुरू करें” दबाएँ",
     "fleet.queueStartNow": "अभी शुरू करें",
     "fleet.queueRemove": "हटाएँ",
     "fleet.capOff": "बंद",

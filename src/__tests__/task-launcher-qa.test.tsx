@@ -58,6 +58,7 @@ import { __resetDoctorForTest } from "../launcher/doctorStore";
 import { fakeCapabilityCommands } from "./fakes/capabilityCommands";
 import { __resetOffersForTest, clearLauncherDraft, setPendingSuggestion } from "../launcher/draft";
 import { isMac } from "../utils/platform";
+import { _resetTaskQueueForTest, enqueueTask } from "../fleet/taskQueue";
 import type { AgentCapabilities, LaunchChoice } from "../agent/capabilities/types";
 
 function doctorRow(id: string, name: string, over: Partial<DoctorRow> = {}): DoctorRow {
@@ -182,6 +183,20 @@ describe("Launch & next and the keyboard", () => {
     await settle();
     expect(task().value).toBe("");
     expect(document.activeElement).toBe(task());
+  });
+
+  it("a task waiting in the queue keeps its branch: the next task gets the next free one", async () => {
+    enqueueTask(
+      { aiProvider: "claude", workingDirectory: REPO, branchSelections: { p1: { branch: "hermes/fix-the-flaky-login-test-on", createNew: true } } },
+      "Fix the flaky login test on CI",
+    );
+    try {
+      await open();
+      await typeTask("Fix the flaky login test on Windows");
+      expect(chip("where")).toHaveTextContent("hermes/fix-the-flaky-login-test-on-2");
+    } finally {
+      _resetTaskQueueForTest();
+    }
   });
 
   it("gives the task field the keyboard back when the focused control goes away (SOLO-02)", async () => {

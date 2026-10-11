@@ -1098,6 +1098,7 @@ export const frPack: LanguagePack = {
     "fleet.queueRunning": "{running} sur {cap} en cours",
     "fleet.queueMemory": "{used} sur {cap} Mo",
     "fleet.queueWaiting": "Démarre dès qu'une place se libère",
+    "fleet.queueFailed": "N'a pas démarré — « Démarrer maintenant » pour réessayer",
     "fleet.queueStartNow": "Démarrer maintenant",
     "fleet.queueRemove": "Retirer",
     "fleet.capOff": "Désactivé",

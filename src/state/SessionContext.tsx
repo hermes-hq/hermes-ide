@@ -1268,6 +1268,8 @@ interface SessionContextValue {
    *  out from under it and we need the SDK to re-read it.  Returns
    *  true on a successful respawn. */
   respawnAgent: (sessionId: string) => Promise<boolean>;
+  /** The saved workspace is restored (or there was none to restore). */
+  workspaceReady: boolean;
 }
 
 // The context object lives in its own module (see sessionContextObject.ts).
@@ -3117,7 +3119,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   }, [createSession]);
 
   return (
-    <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace, convertSessionMode, switchAgentModel, switchAgentPermissionMode, switchAgentEffort, submitAgentMessage, sendAgentEnvelope, respawnAgent: (sessionId) => respawnAgent(sessionId, {}) }}>
+    <SessionContext.Provider value={{ state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace, convertSessionMode, switchAgentModel, switchAgentPermissionMode, switchAgentEffort, submitAgentMessage, sendAgentEnvelope, respawnAgent: (sessionId) => respawnAgent(sessionId, {}), workspaceReady }}>
       {children}
       {pendingDirtyClose && (
         <Suspense fallback={null}>

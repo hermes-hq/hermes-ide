@@ -1098,6 +1098,7 @@ export const zhCNPack: LanguagePack = {
     "fleet.queueRunning": "{running} / {cap} 正在运行",
     "fleet.queueMemory": "{used} / {cap} MB",
     "fleet.queueWaiting": "有空位时开始",
+    "fleet.queueFailed": "未能启动 — 点击“立即开始”重试",
     "fleet.queueStartNow": "立即开始",
     "fleet.queueRemove": "移除",
     "fleet.capOff": "关闭",

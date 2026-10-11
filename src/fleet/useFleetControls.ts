@@ -30,13 +30,14 @@ import { applyAgentLoad, fetchAgentLoad, getAllLoads, loadPollDelay, subscribeAg
 import {
   enqueueTask,
   hasFreeSlot,
-  listQueuedTasks,
   occupiesSlot,
   publishOccupancy,
   queueEnabled,
   registerTaskStarter,
   removeTask,
+  requeueFailedTask,
   subscribeTaskQueue,
+  waitingTasks,
   type Occupancy,
   type QueuedTask,
 } from "./taskQueue";
@@ -98,6 +99,12 @@ export function describeTrip(trip: CapTrip, t: Translate): string {
 export interface FleetControlsOptions {
   /** The `fleetControls` flag: when off, nothing here runs. */
   readonly enabled: boolean;
+  /**
+   * The saved workspace is restored: until then (and until the caps are
+   * read) no task leaves the queue on its own, since the sessions being
+   * restored hold slots the list does not show yet. Default true.
+   */
+  readonly ready?: boolean;
   readonly sessions: readonly SessionData[];
   /** Start a queued task exactly as the New Session wizard (or the ⌘N launcher, `task.launch`) would have. */
   readonly startTask: (opts: CreateSessionOpts, task: QueuedTask) => Promise<{ id: string } | null>;
@@ -111,11 +118,21 @@ export interface FleetControls {
    * True when it was queued.
    */
   readonly queueIfFull: (opts: CreateSessionOpts, label: string, launch?: QueuedLaunch) => boolean;
+  /**
+   * A session started outside the queue (the ⌘N launcher's first agent)
+   * holds its slot before the list shows it: the next agent of the same
+   * launch must see it taken.
+   */
+  readonly noteStarted: (sessionId: string) => void;
 }
 
-export function useFleetControls({ enabled, sessions, startTask, t }: FleetControlsOptions): FleetControls {
+export function useFleetControls({ enabled, ready = true, sessions, startTask, t }: FleetControlsOptions): FleetControls {
   const sessionsRef = useRef(sessions);
   sessionsRef.current = sessions;
+  const readyRef = useRef(ready);
+  readyRef.current = ready;
+  // Before the caps are read there is no cap: nothing may start as uncapped.
+  const capsLoadedRef = useRef(false);
   const tRef = useRef(t);
   tRef.current = t;
   const indexRef = useRef<WorktreeIndex>(EMPTY_WORKTREE_INDEX);
@@ -149,11 +166,16 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
     inFlightRef.current++;
     // The new session holds its slot from the moment it exists (see
     // STARTUP_GRACE_MS); until then it is counted as starting.
+    // A start that fails keeps the task (its text, choice and attachments).
     startTask(task.opts, task)
       .then((session) => {
         if (session) pendingIdsRef.current.add(session.id);
+        else requeueFailedTask(task);
       })
-      .catch((err) => console.warn("[fleet] a queued task did not start:", err))
+      .catch((err) => {
+        console.warn("[fleet] a queued task did not start:", err);
+        requeueFailedTask(task);
+      })
       .finally(() => {
         inFlightRef.current--;
       });
@@ -170,8 +192,9 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
       for (;;) {
         const occupancy = computeOccupancy(sessionsRef.current, Date.now());
         publishOccupancy(occupancy);
-        const next = listQueuedTasks()[0];
+        const next = waitingTasks()[0];
         if (!next) return;
+        if (!readyRef.current || !capsLoadedRef.current) return;
         if (queueEnabled(caps) && !hasFreeSlot(occupancy, caps, starting())) return;
         removeTask(next.id);
         launch(next);
@@ -191,7 +214,7 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
     if (!enabled || !opts.aiProvider) return false;
     const caps = getFleetCaps();
     if (!queueEnabled(caps)) return false;
-    const waiting = listQueuedTasks().length > 0;
+    const waiting = waitingTasks().length > 0;
     if (!waiting && hasFreeSlot(computeOccupancy(sessionsRef.current, Date.now()), caps, starting())) return false;
     enqueueTask(opts, label, launch);
     return true;
@@ -200,6 +223,7 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
   useEffect(() => {
     if (!enabled) return;
     void loadFleetCaps().then(() => {
+      capsLoadedRef.current = true;
       watcher.check();
       pumpQueue();
     });
@@ -282,7 +306,7 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
   // Session phases and startup states change without an event.
   useEffect(() => {
     if (enabled) pumpQueue();
-  }, [enabled, sessions, pumpQueue]);
+  }, [enabled, ready, sessions, pumpQueue]);
 
   // ── N22: the agents' load, polled while a cap is set (every second
   // while tasks wait, every few seconds otherwise) ─────────────────────
@@ -293,7 +317,7 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
     let polling = false;
     let stopped = false;
     const schedule = () => {
-      const delay = loadPollDelay(listQueuedTasks().length);
+      const delay = loadPollDelay(waitingTasks().length);
       timerDue = Date.now() + delay;
       timer = setTimeout(tick, delay);
     };
@@ -313,7 +337,7 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
     };
     // A task that starts waiting brings the next read forward.
     const offQueue = subscribeTaskQueue(() => {
-      if (stopped || polling || !timer || timerDue - Date.now() <= loadPollDelay(listQueuedTasks().length)) return;
+      if (stopped || polling || !timer || timerDue - Date.now() <= loadPollDelay(waitingTasks().length)) return;
       clearTimeout(timer);
       schedule();
     });
@@ -325,5 +349,9 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
     };
   }, [enabled]);
 
-  return useMemo(() => ({ queueIfFull }), [queueIfFull]);
+  const noteStarted = useCallback((sessionId: string) => {
+    pendingIdsRef.current.add(sessionId);
+  }, []);
+
+  return useMemo(() => ({ queueIfFull, noteStarted }), [queueIfFull, noteStarted]);
 }

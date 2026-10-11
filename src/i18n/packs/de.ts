@@ -1098,6 +1098,7 @@ export const dePack: LanguagePack = {
     "fleet.queueRunning": "{running} von {cap} laufen",
     "fleet.queueMemory": "{used} von {cap} MB",
     "fleet.queueWaiting": "Startet, sobald ein Platz frei wird",
+    "fleet.queueFailed": "Nicht gestartet – „Jetzt starten“ versucht es erneut",
     "fleet.queueStartNow": "Jetzt starten",
     "fleet.queueRemove": "Entfernen",
     "fleet.capOff": "Aus",

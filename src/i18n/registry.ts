@@ -1128,6 +1128,7 @@ const ENGLISH_PACK: LanguagePack = {
     "fleet.queueRunning": "{running} of {cap} running",
     "fleet.queueMemory": "{used} of {cap} MB",
     "fleet.queueWaiting": "Starts when a slot frees",
+    "fleet.queueFailed": "Did not start — Start now to try again",
     "fleet.queueStartNow": "Start now",
     "fleet.queueRemove": "Remove",
     "fleet.capOff": "Off",

@@ -83,6 +83,8 @@ export interface QueuedTask {
    * record, pairing), run when it starts. Absent for the New Session wizard.
    */
   readonly launch?: QueuedLaunch;
+  /** Its start failed: it stays in the queue, at the top, until "Start now" or "Remove". */
+  readonly failed?: boolean;
 }
 
 type Listener = () => void;
@@ -154,6 +156,41 @@ export function restoreTaskQueue(raw: string | null | undefined): number {
   );
   publish([...queue, ...restored]);
   return restored.length;
+}
+
+/**
+ * A task whose start failed goes back to the top of the queue, marked, and
+ * never starts again on its own (it would only fail again): "Start now"
+ * tries it again, "Remove" drops it.
+ */
+export function requeueFailedTask(task: QueuedTask): void {
+  publish([Object.freeze({ ...task, failed: true }), ...queue.filter((t) => t.id !== task.id)]);
+}
+
+/** The tasks that start on their own when a slot frees, oldest first. */
+export function waitingTasks(): readonly QueuedTask[] {
+  return queue.filter((t) => !t.failed);
+}
+
+/**
+ * The new branches queued tasks in `folder` will make when they start. They
+ * are taken already: a later task must not pick one of them.
+ */
+export function queuedNewBranches(list: readonly QueuedTask[], folder: string, windows = false): string[] {
+  const norm = (p: string) => {
+    const t = p.trim().replace(/[\\/]+$/, "");
+    return windows ? t.replace(/\//g, "\\").toLowerCase() : t;
+  };
+  const want = norm(folder);
+  if (!want) return [];
+  const out: string[] = [];
+  for (const t of list) {
+    if (norm(t.opts.workingDirectory ?? "") !== want) continue;
+    for (const sel of Object.values(t.opts.branchSelections ?? {})) {
+      if (sel.createNew && sel.branch) out.push(sel.branch);
+    }
+  }
+  return out;
 }
 
 /** Take a task out of the queue (to start it, or because it was removed). */

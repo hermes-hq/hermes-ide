@@ -137,7 +137,7 @@ const LibraryView = lazyView("LibraryView", () => import("./components/library/L
 
 function AppContent() {
   const { t } = useI18n();
-  const { state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace } = useSession();
+  const { state, dispatch, createSession, closeSession, requestCloseSession, setActive, saveWorkspace, workspaceReady } = useSession();
   const activeSession = useActiveSession();
   const sessions = useSessionList();
   // Feature Tracks (F28): every local session is attached to the watcher of
@@ -1028,7 +1028,7 @@ function AppContent() {
     }
     return session;
   }, [createSession, dispatch]);
-  const fleet = useFleetControls({ enabled: fleetOn, sessions, startTask: startQueuedTask, t });
+  const fleet = useFleetControls({ enabled: fleetOn, ready: workspaceReady, sessions, startTask: startQueuedTask, t });
   // ── Task launcher (F15) ──
   const launcherOn = isFeatureFlagEnabled("taskLauncher");
   const activeSessionRef = useRef(activeSession);
@@ -1224,6 +1224,7 @@ function AppContent() {
     // With a running-agents or memory cap and no free slot, the task
     // waits in the queue instead of starting (N22).
     queue: (opts, label, launch) => fleet.queueIfFull(opts, label, launch),
+    started: (sessionId) => fleet.noteStarted(sessionId),
     place: (sessionId, index, firstSessionId) => {
       const paneId = layoutRef.current.focusedPaneId;
       if (index === 0 || !firstSessionId || !paneId) {

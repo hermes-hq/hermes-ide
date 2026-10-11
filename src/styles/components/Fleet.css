@@ -86,7 +86,8 @@
 }
 
 .task-queue-label,
-.task-queue-where {
+.task-queue-where,
+.task-queue-failed {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -94,6 +95,7 @@
 
 .task-queue-label { color: var(--text-1); }
 .task-queue-where { color: var(--text-3); font-size: var(--text-2xs); }
+.task-queue-failed { color: var(--red); font-size: var(--text-2xs); }
 
 /* Settings > Limits */
 

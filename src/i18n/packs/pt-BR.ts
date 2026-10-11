@@ -1098,6 +1098,7 @@ export const ptBRPack: LanguagePack = {
     "fleet.queueRunning": "{running} de {cap} em execução",
     "fleet.queueMemory": "{used} de {cap} MB",
     "fleet.queueWaiting": "Começa quando uma vaga liberar",
+    "fleet.queueFailed": "Não iniciou — “Iniciar agora” tenta de novo",
     "fleet.queueStartNow": "Iniciar agora",
     "fleet.queueRemove": "Remover",
     "fleet.capOff": "Desligado",
