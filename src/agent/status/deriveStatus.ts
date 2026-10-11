@@ -131,7 +131,10 @@ export function statusOfEvent(event: SessionEvent): DerivedStatus | null {
     case "turn_interrupted":
       return make("idle");
     case "attention":
-      return make("needs_answer", event.detail);
+      // An agent that reports its own statuses reports its asks as statuses:
+      // its bare notifications (Claude's idle reminder, an auth notice) ask
+      // nothing. Only a signal (an OSC notification) is an ask on its own.
+      return isAgentReported(source) ? null : make("needs_answer", event.detail);
     case "exit":
       // The detail stays empty: the renderer words the exit from the
       // snapshot's { code, signal } in the person's language.
@@ -316,6 +319,17 @@ export function lastReportedStatus(snap: SessionEventSnapshot): AgentStatus | nu
     const e = snap.events[i];
     if (e.type === "exit") return EXITED_STATUS;
     if (e.type === "status" && !isHeuristicSource(e.source)) return e.status;
+    const interrupted = interruptedStatus(e);
+    if (interrupted) return interrupted;
   }
   return null;
+}
+
+/**
+ * A turn the person interrupted ends the turn as the agent recorded it (its
+ * transcript; no hook says so): idle, as sure as its source. Null for any
+ * other event, or for one Hermes only observed.
+ */
+export function interruptedStatus(e: SessionEvent): AgentStatus | null {
+  return e.type === "turn_interrupted" && !isHeuristicSource(e.source) ? { kind: "idle", confidence: confidenceOfSource(e.source), detail: "" } : null;
 }

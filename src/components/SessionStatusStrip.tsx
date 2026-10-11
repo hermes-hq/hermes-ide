@@ -22,11 +22,19 @@ import "../styles/components/SessionStatusStrip.css";
 import { useSessionEvents, type SessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import type { AgentStatus, AgentStatusKind, Confidence } from "../agent/contract/status";
 import { useI18n } from "../i18n/I18nProvider";
-import { fmt } from "../utils/platform";
+import { formatChord, PLATFORM, type Platform } from "../utils/platform";
 import { Button } from "./ui/Button";
 
-/** The attention inbox shortcut as this platform writes it (⌘I / Ctrl+I). */
-export const INBOX_SHORTCUT = fmt("{mod}I");
+/**
+ * The attention shortcut (next waiting agent) as a platform writes it: ⌘I,
+ * or Ctrl+Shift+I on Windows and Linux, where bare Ctrl+I is the terminal's Tab.
+ */
+export function inboxShortcut(platform: Platform): string {
+  return formatChord(platform === "mac" ? "{mod}I" : "{ctrl}{shift}I", platform);
+}
+
+/** The attention shortcut on this platform. */
+export const INBOX_SHORTCUT = inboxShortcut(PLATFORM);
 
 /** One glyph per status kind; the word next to it carries the meaning. */
 export const STATUS_GLYPHS: Readonly<Record<AgentStatusKind, string>> = {

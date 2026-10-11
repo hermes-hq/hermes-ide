@@ -7,7 +7,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { evaluateSpendCaps, formatUsd, spendOf, spendText, spendTotalParts, spendTotalText, sumReported, totalSpend, tripKeyFor, type SpendSession } from "../fleet/spend";
 import { createSpendCapWatcher, getCapTrip, _resetCapTripsForTest } from "../fleet/spendCapWatcher";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent } from "../agent/contract/sessionEventStore";
-import { _resetInboxForTest, listInboxItems, raiseInboxItem } from "../agent/contract/inbox";
+import { _resetInboxForTest, listInboxItems, raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import { NO_CAPS, type FleetCaps } from "../fleet/fleetSettings";
 
 const s = (id: string, costUsd: number | null, feature: string | null = null): SpendSession => ({
@@ -159,6 +159,7 @@ describe("the spend cap watcher", () => {
         caps: () => caps,
         interrupt,
         raise: raiseInboxItem,
+        resolve: resolveInboxItem,
         describe: (t) => `cap ${t.capUsd} reached by ${t.label}`,
       }),
     };
@@ -200,6 +201,22 @@ describe("the spend cap watcher", () => {
     usage("s1", 2.5, 2);
     expect(w.check()).toHaveLength(1);
     expect(interrupt).toHaveBeenCalledTimes(2);
+  });
+
+  it("a raised or turned-off cap closes the inbox item it raised", () => {
+    const { w } = watcher();
+    usage("s1", 1.5);
+    w.check();
+    expect(listInboxItems()).toHaveLength(1);
+    caps = { ...NO_CAPS, sessionUsd: 10 };
+    w.check();
+    expect(listInboxItems()).toEqual([]);
+    usage("s1", 11, 2);
+    w.check();
+    expect(listInboxItems()).toHaveLength(1);
+    caps = { ...NO_CAPS };
+    w.check();
+    expect(listInboxItems()).toEqual([]);
   });
 
   it("a cap set again after another value is a new cap: it trips again", () => {

@@ -23,6 +23,7 @@ export interface SpendWatcherDeps {
   readonly caps: () => FleetCaps;
   readonly interrupt: (sessionId: string) => Promise<boolean>;
   readonly raise: (input: InboxRaise) => InboxItem;
+  readonly resolve: (itemId: string) => boolean;
   /** The inbox line for a trip, in the user's language. */
   readonly describe: (trip: CapTrip) => string;
 }
@@ -75,8 +76,9 @@ export interface SpendCapWatcher {
 export function createSpendCapWatcher(deps: SpendWatcherDeps): SpendCapWatcher {
   // Crossings acted on, with the cap they crossed. Only remembered while
   // that cap keeps its value: a cap the user changes (or turns off and on
-  // again) is a new cap, so setting $1 again after $2 trips again.
-  const tripped = new Map<string, { kind: CapTrip["kind"]; capUsd: number }>();
+  // again) is a new cap, so setting $1 again after $2 trips again. Its
+  // inbox item goes with it: the cap it reported no longer stands.
+  const tripped = new Map<string, { kind: CapTrip["kind"]; capUsd: number; itemId: string }>();
   const trippedKeys = new Set<string>();
   return {
     check() {
@@ -92,6 +94,7 @@ export function createSpendCapWatcher(deps: SpendWatcherDeps): SpendCapWatcher {
         if ((crossed.kind === "session" ? caps.sessionUsd : caps.featureUsd) !== crossed.capUsd) {
           tripped.delete(key);
           trippedKeys.delete(key);
+          deps.resolve(crossed.itemId);
         }
       }
       const trips = evaluateSpendCaps(sessions, caps, trippedKeys);
@@ -105,13 +108,13 @@ export function createSpendCapWatcher(deps: SpendWatcherDeps): SpendCapWatcher {
         return trips;
       }
       for (const trip of trips) {
-        tripped.set(trip.tripKey, { kind: trip.kind, capUsd: trip.capUsd });
         trippedKeys.add(trip.tripKey);
         for (const id of trip.sessionIds) {
           next.set(id, trip);
           deps.interrupt(id).catch((err) => console.warn("[fleet] could not interrupt", id, err));
         }
-        deps.raise({ kind: "limit", sessionId: trip.leadSessionId, detail: deps.describe(trip), source: "cap" });
+        const item = deps.raise({ kind: "limit", sessionId: trip.leadSessionId, detail: deps.describe(trip), source: "cap" });
+        tripped.set(trip.tripKey, { kind: trip.kind, capUsd: trip.capUsd, itemId: item.id });
       }
       setCapped(next);
       return trips;

@@ -168,6 +168,13 @@ describe("deriveStatus: precedence", () => {
     expect(derive([...exited, { type: "attention", at: 2, source: "osc", detail: "?" }]).kind).toBe("exited");
   });
 
+  it("an agent's own bare notification (Claude's idle reminder) asks nothing; an OSC one still does", () => {
+    const done = status(1, "done_unread", "exact", "hook:claude");
+    const reminder: SessionEvent = { type: "attention", at: 60, source: "hook:claude", detail: "Claude is waiting for your input" };
+    expect(derive([done, reminder], 10)).toMatchObject({ kind: "idle", source: "hook:claude" });
+    expect(derive([{ ...reminder, source: "osc" }]).kind).toBe("needs_answer");
+  });
+
   it("an exact working holds against later pty guesses (documented limit, F11 reconciles)", () => {
     expect(derive([status(1, "working", "exact", "hook:x"), status(2, "idle", "guessed", "pty")]).kind).toBe("working");
   });
@@ -378,5 +385,10 @@ describe("lastReportedStatus: what an agent said, never the terminal's guess", (
     expect(lastReportedStatus(snapshotOf([status(1, "working", "guessed", "pty")]))).toBeNull();
     expect(lastReportedStatus(snapshotOf([status(1, "needs_approval", "signal", "osc"), status(2, "working", "guessed", "pty")]))?.kind).toBe("needs_approval");
     expect(lastReportedStatus(snapshotOf([status(1, "working", "exact", "hook:x"), { type: "exit", at: 2, source: "pty", code: 0, signal: null }]))?.kind).toBe("exited");
+  });
+
+  it("an interrupted turn the agent recorded ends the work (the task queue frees the slot)", () => {
+    const interrupted: SessionEvent = { type: "turn_interrupted", at: 2, source: "transcript:claude", n: 1 };
+    expect(lastReportedStatus(snapshotOf([status(1, "working", "exact", "hook:claude"), interrupted]))).toMatchObject({ kind: "idle", confidence: "exact" });
   });
 });

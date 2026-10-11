@@ -29,7 +29,7 @@ import {
 import { listInboxItems, raiseInboxItem, resolveInboxItem, type InboxKind } from "../agent/contract/inbox";
 import type { AgentStatus } from "../agent/contract/status";
 import { inboxKindForStatus } from "./model";
-import { isHeuristicSource, resumedIndex } from "../agent/status/deriveStatus";
+import { interruptedStatus, isHeuristicSource, resumedIndex } from "../agent/status/deriveStatus";
 import { userInputTimes } from "../agent/status/userInput";
 
 const EXITED: AgentStatus = Object.freeze({ kind: "exited", confidence: "exact", detail: "" });
@@ -48,7 +48,8 @@ const QUIET: AgentStatus = Object.freeze({ kind: "idle", confidence: "guessed", 
  * after it reads as quiet (a guess never raises an item).
  *
  * A guessed "blocked" report (see isGuessedBlock) is skipped like the
- * terminal's guesses: what was reported before it stands.
+ * terminal's guesses: what was reported before it stands. A turn the person
+ * interrupted reads as idle (interruptedStatus), as in the status strip.
  */
 export function trustedStatus(snap: SessionEventSnapshot, inputTimes: readonly number[] = userInputTimes(snap.sessionId)): AgentStatus | null {
   let latestGuess: AgentStatus | null = null;
@@ -64,6 +65,8 @@ export function trustedStatus(snap: SessionEventSnapshot, inputTimes: readonly n
       if (latestGuess && resumedIndex(snap.events, i, inputTimes) >= 0) return latestGuess.kind === "working" ? latestGuess : QUIET;
       return e.status;
     }
+    const interrupted = interruptedStatus(e);
+    if (interrupted) return interrupted;
   }
   return null;
 }

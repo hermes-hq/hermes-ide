@@ -52,6 +52,7 @@ import { claimPcAppChords } from "../utils/keymap";
 import { notifyAttention } from "../utils/notifications";
 import { fmt, PLATFORM } from "../utils/platform";
 import { matchAppShortcut } from "../utils/shortcuts";
+import { INBOX_SHORTCUT } from "./SessionStatusStrip";
 import { Badge, Counter } from "./ui/Badge";
 import { Button } from "./ui/Button";
 import { ListRow } from "./ui/ListRow";
@@ -466,6 +467,16 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
     };
   }, [jumpNext, open, openInbox, closeInbox]);
 
+  // The status strip's inbox button: open on that session's first item.
+  useEffect(() => {
+    const onOpen = (e: Event) => {
+      const sessionId = (e as CustomEvent<{ sessionId?: string } | null>).detail?.sessionId;
+      openInbox(false, inboxRows(items).find((i) => i.sessionId === sessionId)?.id);
+    };
+    window.addEventListener("hermes:open-inbox", onOpen);
+    return () => window.removeEventListener("hermes:open-inbox", onOpen);
+  }, [items, openInbox]);
+
   // Focus the listbox when the inbox opens.
   useEffect(() => {
     if (open) listRef.current?.focus({ preventScroll: true });
@@ -824,7 +835,7 @@ export function AttentionCenter({ sessions, activeSessionId, onJump, onOpenChang
             </div>
           )}
           <div className="attention-inbox-footer" aria-hidden="true">
-            {morning ? t("attention.morningHint", { shortcut: fmt("{mod}I") }) : t("attention.hint")}
+            {morning ? t("attention.morningHint", { shortcut: INBOX_SHORTCUT }) : t("attention.hint")}
           </div>
         </div>
       )}

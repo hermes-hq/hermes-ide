@@ -17,7 +17,7 @@ vi.mock("../api/settings", () => ({
 import { I18nProvider } from "../i18n/I18nProvider";
 import { _resetSessionEventStoreForTest, dispatchSessionEvent, getSessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import type { SessionEvent } from "../agent/contract/events";
-import { INBOX_SHORTCUT, SessionStatusStrip, guessedStatus, stripSourceText, stripStatus, STATUS_GLYPHS } from "../components/SessionStatusStrip";
+import { INBOX_SHORTCUT, SessionStatusStrip, guessedStatus, inboxShortcut, stripSourceText, stripStatus, STATUS_GLYPHS } from "../components/SessionStatusStrip";
 import { PLATFORM } from "../utils/platform";
 import { AGENT_STATUS_KINDS } from "../agent/contract/status";
 import { foldStatus } from "../agent/status/deriveStatus";
@@ -320,7 +320,9 @@ describe("<SessionStatusStrip>", () => {
   it("asks for the attention inbox on the platform's inbox shortcut", () => {
     renderStrip();
     const button = strip().querySelector(".session-status-strip-inbox") as HTMLButtonElement;
-    expect(INBOX_SHORTCUT).toBe(PLATFORM === "mac" ? "⌘I" : "Ctrl+I");
+    expect(INBOX_SHORTCUT).toBe(PLATFORM === "mac" ? "⌘I" : "Ctrl+Shift+I");
+    // Bare Ctrl+I is the terminal's Tab on Windows and Linux.
+    expect([inboxShortcut("mac"), inboxShortcut("win"), inboxShortcut("linux")]).toEqual(["⌘I", "Ctrl+Shift+I", "Ctrl+Shift+I"]);
     expect(button.textContent).toBe(INBOX_SHORTCUT);
     expect(button.title).toBe(`Attention inbox (${INBOX_SHORTCUT})`);
     const heard: unknown[] = [];

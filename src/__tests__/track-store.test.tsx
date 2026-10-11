@@ -189,6 +189,19 @@ describe("the gate guard (an agent approving its own gate)", () => {
     expect(listInboxItems().filter((i) => i.kind === "gate")).toHaveLength(1);
   });
 
+  it("closes the error item once the person approves the gate", () => {
+    waiting();
+    dispatchSessionEvent("writer", { type: "turn_start", at: 60_000, n: 1 });
+    approved(61_000);
+    applyTrackSnapshot(snap({ text: featureMd("questions", "waiting"), modifiedAt: 62_000 }));
+    expect(listInboxItems().filter((i) => i.kind === "error")).toHaveLength(1);
+    dispatchSessionEvent("writer", { type: "turn_end", at: 70_000, n: 1 });
+    noteOwnApproval(WT, "demo");
+    approved(90_000);
+    expect(revertGate).toHaveBeenCalledTimes(1);
+    expect(listInboxItems().filter((i) => i.kind === "error")).toHaveLength(0);
+  });
+
   it("uses the turn history when the turn already ended", () => {
     waiting();
     dispatchSessionEvent("reader", { type: "turn_start", at: 60_000, n: 1 });
