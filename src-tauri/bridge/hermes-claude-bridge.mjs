@@ -69,7 +69,6 @@ import {
   buildPermissionOptions,
 } from "./canUseToolHelpers.mjs";
 import {
-  createIdempotentLatch,
   createControlOpBuffer,
   toSdkUserMessage,
   buildSdkEnv,
@@ -226,19 +225,11 @@ function pushInput(msg) {
 }
 
 async function* userInputIterator() {
-  let yieldedFirst = false;
   while (true) {
     if (aborted) return;
     if (inputBuffer.length > 0) {
-      // Hold back the first yield until init has been processed by our
-      // for-await loop so liveRuntime.reportedModel is populated before
-      // the SDK invokes UserPromptSubmit.  Capped at 2s so a slow init
-      // doesn't deadlock the user.
-      if (!yieldedFirst) {
-        const sleep = new Promise((r) => setTimeout(r, 2000));
-        await Promise.race([initSeen.promise, sleep]);
-        yieldedFirst = true;
-      }
+      // No waiting for init here: the CLI reports init only after it has
+      // the first message, so a hold could only time out.
       const next = inputBuffer.shift();
       // Resume the stdin reader once the queue has drained below the
       // low watermark.  Hysteresis avoids paddling pause/resume around
@@ -365,14 +356,6 @@ const liveRuntime = {
   reportedPermissionMode: null,
 };
 
-// Resolves the first time the for-await loop sees an init event.  Hooks
-// await it so they don't race ahead of the SDK's internal init: by the
-// time UserPromptSubmit returns its `additionalContext`, the runtime
-// line carries the actually-loaded model, not "(account default)".
-// Idempotent so the for-await loop can call `.resolve()` on every init
-// event without worrying about double-resolution.
-const initSeen = createIdempotentLatch();
-
 function buildRuntimeLine(hookInput) {
   const m = liveRuntime.reportedModel ?? liveRuntime.model ?? "(account default)";
   // Prefer the hook input's permission_mode — it's always available and
@@ -450,14 +433,10 @@ function sessionStartHook() {
  *  cwd) so Claude is grounded in the current session state every turn.
  *  Invisible to the transcript.
  *
- *  Awaits the first init event with a short timeout so the FIRST user
- *  message also gets the actually-loaded model, not "(account default)". */
+ *  The CLI reports init only after this hook has run, so the first turn's
+ *  runtime line carries the spawn flags; later turns carry the init model. */
 function userPromptSubmitHook() {
   return async (input) => {
-    if (liveRuntime.reportedModel === null) {
-      const sleep = new Promise((r) => setTimeout(r, 1500));
-      await Promise.race([initSeen.promise, sleep]);
-    }
     return {
       hookSpecificOutput: {
         hookEventName: "UserPromptSubmit",
@@ -633,9 +612,6 @@ async function main() {
             uuid: globalThis.crypto?.randomUUID?.() ?? `evt-${Date.now()}`,
           }) + "\n");
         }
-        // Unblock any UserPromptSubmit hook waiting for the first init.
-        initSeen.resolve();
-
         // Fire-and-forget — fetch the SDK's accountInfo and emit it to
         // stdout as a hermes-side event the Usage panel can consume.
         // We only ask once per session; if it fails, the panel just
