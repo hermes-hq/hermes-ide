@@ -97,9 +97,13 @@ export function readFileContent(sessionId: string, projectId: string, filePath: 
   return invoke<FileContent>("read_file_content", { sessionId, projectId, filePath });
 }
 
-export function writeFileContent(sessionId: string, projectId: string, filePath: string, content: string): Promise<number> {
-  return invoke<number>("write_file_content", { sessionId, projectId, filePath, content });
+/** Rejects with FILE_CHANGED_ON_DISK when `expectedContent` is given and the file no longer holds it. */
+export function writeFileContent(sessionId: string, projectId: string, filePath: string, content: string, expectedContent: string | null = null): Promise<number> {
+  return invoke<number>("write_file_content", { sessionId, projectId, filePath, content, expectedContent });
 }
+
+/** The error a save gets when the file changed on disk since it was loaded. */
+export const FILE_CHANGED_ON_DISK = "FILE_CHANGED_ON_DISK";
 
 export function openFileInEditor(sessionId: string, projectId: string, filePath: string, editor: string | null): Promise<void> {
   return invoke("open_file_in_editor", { sessionId, projectId, filePath, editor });

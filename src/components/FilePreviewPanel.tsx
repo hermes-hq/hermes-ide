@@ -4,6 +4,7 @@ import "../styles/components/FilePreview.css";
 import { readFileContent, openFileInEditor, sshReadFile } from "../api/git";
 import { writeToSession } from "../api/sessions";
 import { getSetting } from "../api/settings";
+import { translate } from "../i18n/registry";
 import { useSession } from "../state/SessionContext";
 import { useFileEditor } from "../hooks/useFileEditor";
 import type { CursorInfo, IndentConfig } from "../editor/EditorPane";
@@ -286,9 +287,14 @@ export function FilePreviewPanel({ sessionId, projectId, filePath, onBack, fileH
     }
   }, [sessionId, projectId, filePath, isSSH, sshInfo, onBack]);
 
-  // Auto-enter edit mode for non-binary, non-large text files
+  // Discard the edits a refused save kept, and load the file as it is on disk
+  const handleReload = useCallback(() => {
+    readFileContent(sessionId, projectId, filePath).then(setFile).catch((e) => setError(String(e)));
+  }, [sessionId, projectId, filePath]);
+
+  // Auto-enter edit mode for non-binary, non-large, UTF-8 text files
   useEffect(() => {
-    if (file && !file.is_binary && file.content && file.size <= MAX_DISPLAY_SIZE) {
+    if (file && !file.is_binary && !file.read_only && file.content && file.size <= MAX_DISPLAY_SIZE) {
       setEditMode(true);
     } else {
       setEditMode(false);
@@ -376,6 +382,7 @@ export function FilePreviewPanel({ sessionId, projectId, filePath, onBack, fileH
         {editMode && editor.isDirty && <span className="file-editor-dirty-dot" title="Unsaved changes" />}
         {editMode && editor.isSaving && <span className="file-editor-saving">Saving...</span>}
         {editMode && editor.saveError && <span className="file-editor-error" title={editor.saveError}>Save failed</span>}
+        {file.read_only && <span className="file-preview-readonly" title={translate("filePreview.notUtf8")}>{translate("filePreview.readOnly")}</span>}
         <span className="file-preview-lang">{file.language}</span>
         {editMode && (
           <Button size="sm" className="file-preview-open-btn" onClick={() => editor.save()} disabled={!editor.isDirty} title="Save (Cmd+S)">
@@ -386,6 +393,18 @@ export function FilePreviewPanel({ sessionId, projectId, filePath, onBack, fileH
           {editorLabel}
         </Button>
       </div>
+
+      {editMode && editor.changedOnDisk && (
+        <div className="file-editor-conflict" role="alert">
+          <span className="file-editor-conflict-text">{translate("filePreview.changedOnDisk")}</span>
+          <Button size="sm" onClick={handleReload} title={translate("filePreview.reloadTitle")}>
+            {translate("filePreview.reload")}
+          </Button>
+          <Button size="sm" variant="danger" onClick={() => editor.overwrite()} title={translate("filePreview.overwriteTitle")}>
+            {translate("filePreview.overwrite")}
+          </Button>
+        </div>
+      )}
 
       {file.is_binary ? (
         <div className="file-preview-placeholder">

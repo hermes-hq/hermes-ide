@@ -743,6 +743,9 @@ function AppContent() {
 
       // Cmd+Alt+Arrow — pane navigation
       if (action === "app.focus-next-pane" || action === "app.focus-previous-pane") {
+        // Already handled where it was typed: on Windows/Linux Alt+Up/Down
+        // moves a line in the file editor, which must not also switch panes.
+        if (e.defaultPrevented) return;
         if (!state.layout.root) return;
         const panes = collectPanes(state.layout.root);
         if (panes.length > 1) {

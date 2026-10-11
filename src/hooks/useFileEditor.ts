@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { writeFileContent, sshWriteFile } from "../api/git";
+import { writeFileContent, sshWriteFile, FILE_CHANGED_ON_DISK } from "../api/git";
 
 interface UseFileEditorOptions {
 	sessionId: string;
@@ -17,7 +17,11 @@ interface UseFileEditorReturn {
 	isDirty: boolean;
 	isSaving: boolean;
 	saveError: string | null;
+	/** A save was refused: the file changed on disk (an agent edited it) since it was loaded. */
+	changedOnDisk: boolean;
 	save: () => Promise<boolean>;
+	/** Save over the changes on disk. */
+	overwrite: () => Promise<boolean>;
 	lastSavedAt: number | null;
 }
 
@@ -29,6 +33,7 @@ export function useFileEditor(opts: UseFileEditorOptions): UseFileEditorReturn {
 	const [, setMtime] = useState(initialMtime);
 	const [isSaving, setIsSaving] = useState(false);
 	const [saveError, setSaveError] = useState<string | null>(null);
+	const [changedOnDisk, setChangedOnDisk] = useState(false);
 	const [lastSavedAt, setLastSavedAt] = useState<number | null>(null);
 	const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const contentRef = useRef(content);
@@ -50,10 +55,11 @@ export function useFileEditor(opts: UseFileEditorOptions): UseFileEditorReturn {
 		setMtime(initialMtime);
 		contentRef.current = initialContent;
 		setSaveError(null);
+		setChangedOnDisk(false);
 		setLastSavedAt(null);
 	}, [filePath, initialContent, initialMtime]);
 
-	const doSave = useCallback(async (): Promise<boolean> => {
+	const doSave = useCallback(async (force = false): Promise<boolean> => {
 		const currentContent = contentRef.current;
 		if (currentContent === originalContent) return true;
 
@@ -63,14 +69,18 @@ export function useFileEditor(opts: UseFileEditorOptions): UseFileEditorReturn {
 			if (isSSH) {
 				await sshWriteFile(sessionId, filePath, currentContent);
 			} else {
-				const newMtime = await writeFileContent(sessionId, projectId, filePath, currentContent);
+				// Only write over the text this editor loaded (or last saved).
+				const newMtime = await writeFileContent(sessionId, projectId, filePath, currentContent, force ? null : originalContent);
 				setMtime(newMtime);
 			}
 			setOriginalContent(currentContent);
+			setChangedOnDisk(false);
 			setLastSavedAt(Date.now());
 			return true;
 		} catch (err) {
-			setSaveError(err instanceof Error ? err.message : String(err));
+			const message = err instanceof Error ? err.message : String(err);
+			if (message === FILE_CHANGED_ON_DISK) setChangedOnDisk(true);
+			else setSaveError(message);
 			return false;
 		} finally {
 			setIsSaving(false);
@@ -85,6 +95,8 @@ export function useFileEditor(opts: UseFileEditorOptions): UseFileEditorReturn {
 		}
 		return doSave();
 	}, [doSave]);
+
+	const overwrite = useCallback(() => doSave(true), [doSave]);
 
 	// Auto-save with debounce
 	useEffect(() => {
@@ -119,7 +131,9 @@ export function useFileEditor(opts: UseFileEditorOptions): UseFileEditorReturn {
 		isDirty,
 		isSaving,
 		saveError,
+		changedOnDisk,
 		save,
+		overwrite,
 		lastSavedAt,
 	};
 }
