@@ -2796,6 +2796,7 @@ pub(crate) fn watch_signals(app: AppHandle, session: Arc<StdMutex<Session>>, wat
         session_dir.join(SIGNALS_FILE),
         nonce.clone(),
         Arc::clone(&turns),
+        replay,
     );
     // The OS layer: process facts about this agent, below its own reports.
     super::os_activity::watch(

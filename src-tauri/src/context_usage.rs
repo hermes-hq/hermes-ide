@@ -884,16 +884,71 @@ fn interrupt_event(
     }
 }
 
+/// The transcript being tailed.
+pub struct TranscriptRead {
+    tail: LineTail,
+    /// The event source, `transcript:<agent>`.
+    source: String,
+    /// The next read is the history already in the file.
+    history: bool,
+    /// The transcript was named before the app came back to a running
+    /// agent (a reattach): its history is this launch's own calls.
+    reattached: bool,
+}
+
+impl TranscriptRead {
+    pub fn new(path: PathBuf, agent: &str, reattached: bool) -> Self {
+        Self {
+            tail: LineTail::near_end(path, TRANSCRIPT_BACKLOG_BYTES),
+            source: format!("transcript:{agent}"),
+            history: true,
+            reattached,
+        }
+    }
+}
+
+/// One read of the transcript's new lines, with its sub-agents' calls:
+/// [`read_lines`]' events and interrupted turns. A reattached agent's
+/// history counts toward its spend (the app was away, the agent was not);
+/// only a resumed conversation's past is not this launch's.
+pub fn poll_transcript(
+    t: &mut TranscriptRead,
+    tracker: &mut UsageTracker,
+    spend: &mut SpendTracker,
+    subagents: &mut SubagentTails,
+    interrupts: &mut InterruptWatch,
+    at: i64,
+) -> (Vec<SessionEvent>, usize) {
+    subagents.feed_spend(t.tail.path(), t.history && !t.reattached, spend);
+    let lines = t.tail.poll();
+    if t.history && t.reattached {
+        for line in &lines {
+            let record = serde_json::from_str::<Value>(line)
+                .ok()
+                .and_then(|v| spend_record(&v));
+            if let Some(record) = record {
+                spend.feed(record);
+            }
+        }
+    }
+    let out = read_lines(tracker, spend, interrupts, &lines, at, &t.source, t.history);
+    t.history = false;
+    out
+}
+
 /// Watch one launch's spool for the transcript it names, and tail that
 /// transcript until the agent is gone or the session is. `turns`: the
 /// launch's turns (the spool watcher's), ended here when the transcript
 /// shows the person interrupted one (an exact `turn_interrupted`).
+/// `reattached`: the agent was already running (its spool is read from
+/// the start).
 pub(crate) fn watch(
     app: AppHandle,
     session: Arc<StdMutex<Session>>,
     spool_file: PathBuf,
     nonce: String,
     turns: Arc<StdMutex<TurnTracker>>,
+    reattached: bool,
 ) {
     let session_id = match session.lock() {
         Ok(s) => s.id.clone(),
@@ -901,9 +956,9 @@ pub(crate) fn watch(
     };
     std::thread::spawn(move || {
         let mut spool = LineTail::new(spool_file);
-        // The transcript's tail, the event source, and whether the next read
-        // is the history already in the file.
-        let mut transcript: Option<(LineTail, String, bool)> = None;
+        let mut transcript: Option<TranscriptRead> = None;
+        // Only the spool's first read is the reattached launch's past.
+        let mut replaying = reattached;
         let mut tracker = UsageTracker::default();
         let mut spend = SpendTracker::default();
         let mut subagents = SubagentTails::default();
@@ -924,18 +979,12 @@ pub(crate) fn watch(
                 }
                 match parse_spool_note(&line, &nonce) {
                     Some(SpoolNote::Transcript { path, agent }) => {
-                        let same = transcript
-                            .as_ref()
-                            .is_some_and(|(t, _, _)| t.path() == path);
+                        let same = transcript.as_ref().is_some_and(|t| t.tail.path() == path);
                         if !same {
                             log::info!(
                                 "[CONTEXT] {session_id}: reading usage from the agent's transcript"
                             );
-                            transcript = Some((
-                                LineTail::near_end(path, TRANSCRIPT_BACKLOG_BYTES),
-                                format!("transcript:{agent}"),
-                                true,
-                            ));
+                            transcript = Some(TranscriptRead::new(path, &agent, replaying));
                             // A new conversation; the window its status
                             // line stated still holds.
                             let stated = tracker.stated.take();
@@ -949,27 +998,24 @@ pub(crate) fn watch(
                     None => {}
                 }
             }
-            if let Some((tail, source, history)) = transcript.as_mut() {
-                subagents.feed_spend(tail.path(), *history, &mut spend);
-                let lines = tail.poll();
+            replaying = false;
+            if let Some(t) = transcript.as_mut() {
                 let at = now_ms();
-                let (events, interrupted) = read_lines(
+                let (events, interrupted) = poll_transcript(
+                    t,
                     &mut tracker,
                     &mut spend,
+                    &mut subagents,
                     &mut interrupts,
-                    &lines,
                     at,
-                    source,
-                    *history,
                 );
                 for event in events {
                     emit_session_event(&app, &session_id, event);
                 }
-                if let Some(event) = interrupt_event(&turns, interrupted, at, source) {
+                if let Some(event) = interrupt_event(&turns, interrupted, at, &t.source) {
                     log::info!("[CONTEXT] {session_id}: the person interrupted the turn");
                     emit_session_event(&app, &session_id, event);
                 }
-                *history = false;
             }
             if gone || exited {
                 break;
@@ -1705,6 +1751,40 @@ mod tests {
         let got = near.poll();
         assert_eq!(got, vec!["line-0998".to_string(), "line-0999".to_string()]);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_reattached_agents_history_is_its_own_spend_a_resumed_ones_is_not() {
+        let dir = tempfile::tempdir().unwrap();
+        let subs = dir.path().join("s-1").join("subagents");
+        std::fs::create_dir_all(&subs).unwrap();
+        let transcript = dir.path().join("s-1.jsonl");
+        let lines = [
+            call("msg_1", "claude-sonnet-4-6", 100, 0, 0, 1),
+            call("msg_2", "claude-sonnet-4-6", 100, 0, 0, 2),
+        ];
+        std::fs::write(&transcript, format!("{}\n", lines.join("\n"))).unwrap();
+        let mut sub: Value =
+            serde_json::from_str(&call("msg_sub", "claude-sonnet-4-6", 100, 0, 0, 4)).unwrap();
+        sub["isSidechain"] = json!(true);
+        std::fs::write(subs.join("agent-1.jsonl"), format!("{sub}\n")).unwrap();
+        let read = |reattached: bool| {
+            let mut t = TranscriptRead::new(transcript.clone(), "claude", reattached);
+            poll_transcript(
+                &mut t,
+                &mut UsageTracker::default(),
+                &mut SpendTracker::default(),
+                &mut SubagentTails::default(),
+                &mut InterruptWatch::default(),
+                1,
+            )
+            .0
+        };
+        // The app came back to the same running agent: what it spent counts.
+        let (input, output, _, _) = usage_of(&read(true)).expect("a totals event");
+        assert_eq!((input, output), (Some(300), Some(7)));
+        // A resumed conversation's past is not this launch's.
+        assert!(usage_of(&read(false)).is_none());
     }
 
     #[test]

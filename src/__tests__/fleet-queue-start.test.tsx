@@ -200,6 +200,28 @@ describe("the launcher's \"Also on\" second agent", () => {
   });
 });
 
+describe("a launcher agent closed before the next queue check", () => {
+  it("frees its slot: the next task starts instead of waiting", async () => {
+    const hook = mount(async () => null, { sessions: [], ready: true });
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(10); // the caps load: cap 1
+    });
+    // The launcher's agent holds the slot until the list shows it...
+    act(() => hook.result.current.noteStarted("s1"));
+    await act(async () => {
+      hook.rerender({ sessions: [session("s1")], ready: true });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    // ...then it finishes and is closed, with nothing waiting in between.
+    await act(async () => {
+      hook.rerender({ sessions: [], ready: true });
+      await vi.advanceTimersByTimeAsync(10);
+    });
+    expect(hook.result.current.queueIfFull(opts("two"), "two")).toBe(false);
+    expect(listQueuedTasks()).toEqual([]);
+  });
+});
+
 describe("a queued task whose start fails", () => {
   it("stays in the queue, marked, never retried on its own; the next one still starts; Start now tries it again", async () => {
     let fail = true;

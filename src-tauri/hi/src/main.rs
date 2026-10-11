@@ -1487,9 +1487,10 @@ fn cmd_check(args: &[String]) -> i32 {
     check_exit_code(report.state)
 }
 
-/// Run the checks of the checkout at `cwd`. At a turn end the Stop hook's
-/// rule applies too (track_holds_checks): nothing is checked, so an agent
-/// without the hook is not failed for a plan that has no code yet.
+/// Run the checks of the checkout at `cwd`. At a turn end in a planning
+/// phase nothing is checked, so an agent without the Stop hook is not
+/// failed for a plan that has no code yet. An implement phase waiting at
+/// its gate is still checked: its last turn is the one that finished it.
 fn run_checks(
     cwd: &Path,
     feature: Option<&str>,
@@ -1497,7 +1498,7 @@ fn run_checks(
     budget: Duration,
     own_group: bool,
 ) -> done_when::Report {
-    if trigger == "turn_end" && track_holds_checks(cwd, feature).is_some() {
+    if trigger == "turn_end" && track_hold(cwd, feature, false).is_some() {
         return done_when::Report {
             state: done_when::State::None,
             trigger: trigger.to_string(),
@@ -1515,6 +1516,11 @@ fn run_checks(
 /// checkout's feature (named, else its `hermes/<slug>` branch or only
 /// folder) is in a planning phase, or its gate waits for a person.
 pub fn track_holds_checks(cwd: &Path, feature: Option<&str>) -> Option<String> {
+    track_hold(cwd, feature, true)
+}
+
+/// track_holds_checks, with the waiting gate counted only when `gate`.
+fn track_hold(cwd: &Path, feature: Option<&str>, gate: bool) -> Option<String> {
     use hermes_track::{phases::Gate, phases::Phase, phases::Track};
     let root = done_when::find_root(cwd);
     let slug = match feature {
@@ -1528,7 +1534,7 @@ pub fn track_holds_checks(cwd: &Path, feature: Option<&str>) -> Option<String> {
     if meta.track == Track::Quick {
         return None;
     }
-    if meta.gate == Gate::Waiting {
+    if gate && meta.gate == Gate::Waiting {
         return Some(format!(
             "{slug}: {} waits for the person's review",
             meta.phase.as_str()
@@ -1729,6 +1735,38 @@ mod tests {
         assert!(held.commands.is_empty());
         let manual = run_checks(root, None, "manual", budget, true);
         assert_eq!(manual.state, done_when::State::Failed);
+    }
+
+    #[test]
+    fn a_turn_end_with_the_implement_gate_waiting_is_checked() {
+        use hermes_track::{feature, Track};
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join(".git")).unwrap();
+        std::fs::write(root.join(".git/HEAD"), "ref: refs/heads/hermes/demo\n").unwrap();
+        std::fs::create_dir_all(root.join(".hermes")).unwrap();
+        std::fs::write(
+            root.join(".hermes/worktree.toml"),
+            "done_when = [\"exit 1\"]\n",
+        )
+        .unwrap();
+        feature::create(root, "demo", Track::Full, "", "").unwrap();
+        let budget = Duration::from_secs(30);
+        // A planning phase waiting at its gate: still not checked.
+        std::fs::write(root.join(".hermes/features/demo/questions.md"), "# Q\n").unwrap();
+        feature::finish_phase(root, "demo").unwrap();
+        let held = run_checks(root, None, "turn_end", budget, true);
+        assert_eq!(held.state, done_when::State::None);
+        // `hi phase done` at the end of the implement phase: the gate waits,
+        // and the turn that finished the work is checked.
+        let file = root.join(".hermes/features/demo/feature.md");
+        let text = std::fs::read_to_string(&file).unwrap();
+        let text =
+            hermes_track::set_keys(&text, &[("phase", "implement"), ("gate", "waiting")]).unwrap();
+        std::fs::write(&file, text).unwrap();
+        assert!(track_holds_checks(root, None).is_some());
+        let checked = run_checks(root, None, "turn_end", budget, true);
+        assert_eq!(checked.state, done_when::State::Failed);
     }
 
     fn write_exe(dir: &Path, name: &str) -> PathBuf {
