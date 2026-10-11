@@ -1160,6 +1160,7 @@ mod tests {
                 writer: std::sync::Arc::new(Mutex::new(
                     Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>
                 )),
+                input: None,
                 session: std::sync::Arc::new(Mutex::new(s)),
                 analyzer: std::sync::Arc::new(Mutex::new(
                     crate::pty::analyzer::OutputAnalyzer::new(),

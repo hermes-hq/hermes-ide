@@ -131,11 +131,16 @@ pub fn spawn_inline_pty(
         std::thread::spawn(move || {
             let mut reader = reader;
             let mut buf = [0u8; 4096];
+            let mut pending = Vec::new();
             loop {
                 match std::io::Read::read(&mut reader, &mut buf) {
                     Ok(0) => break,
                     Ok(n) => {
-                        let chunk = String::from_utf8_lossy(&buf[..n]).into_owned();
+                        pending.extend_from_slice(&buf[..n]);
+                        let chunk = take_utf8(&mut pending);
+                        if chunk.is_empty() {
+                            continue;
+                        }
                         let event = format!("inline-pty-output-{pty_id}");
                         let _ = app.emit(&event, chunk);
                     }
@@ -177,6 +182,24 @@ pub fn spawn_inline_pty(
     );
 
     Ok(pty_id)
+}
+
+/// Decodes the text in `pending` and leaves there a character the read
+/// ended inside of, for the next read to finish: decoded alone, each half
+/// became U+FFFD (box drawing in the CLI's screens is 3 bytes a character).
+fn take_utf8(pending: &mut Vec<u8>) -> String {
+    let len = pending.len();
+    // Where the last character starts, if within its longest length (4).
+    let last = (len.saturating_sub(3)..len)
+        .rev()
+        .find(|&i| pending[i] & 0xC0 != 0x80);
+    let cut = match last {
+        Some(i) if std::str::from_utf8(&pending[i..]).is_err_and(|e| e.error_len().is_none()) => i,
+        _ => len,
+    };
+    let text = String::from_utf8_lossy(&pending[..cut]).into_owned();
+    pending.drain(..cut);
+    text
 }
 
 #[tauri::command]
@@ -237,6 +260,34 @@ pub fn kill_inline_pty(state: State<'_, InlinePtyManager>, pty_id: String) -> Re
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_character_split_across_reads_arrives_whole() {
+        let screen = "╭──────╮ ❯ héllo 🙂\n╰──────╯".repeat(40);
+        let bytes = screen.as_bytes();
+        // Every way of cutting the output in two reads, then reads of 7.
+        for at in 0..bytes.len().min(64) {
+            let mut pending = Vec::new();
+            let mut text = String::new();
+            for read in [&bytes[..at], &bytes[at..]] {
+                pending.extend_from_slice(read);
+                text.push_str(&super::take_utf8(&mut pending));
+            }
+            assert_eq!(text, screen, "cut at {at}");
+        }
+        let mut pending = Vec::new();
+        let mut text = String::new();
+        for read in bytes.chunks(7) {
+            pending.extend_from_slice(read);
+            text.push_str(&super::take_utf8(&mut pending));
+        }
+        assert_eq!(text, screen);
+        assert!(pending.is_empty());
+        // Bytes that are not text still show as U+FFFD, and are not held.
+        let mut pending = b"a\xffb\x80".to_vec();
+        assert_eq!(super::take_utf8(&mut pending), "a\u{fffd}b\u{fffd}");
+        assert!(pending.is_empty());
+    }
+
     /// `enriched_path_var()` must be reachable from this module — the fix
     /// for the "spawn: Unable to spawn claude" bug depends on
     /// `inline_pty::spawn_inline_pty` calling

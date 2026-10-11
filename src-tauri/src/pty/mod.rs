@@ -35,6 +35,9 @@ pub(crate) struct PtySession {
     /// Where the terminal lives: this process, or the session host (N20).
     pub(crate) transport: Box<dyn transport::PtyTransport>,
     pub(crate) writer: Arc<StdMutex<Box<dyn Write + Send>>>,
+    /// What the person types and pastes, on its way to `writer` through a
+    /// thread of its own (started on first use; see `write_to_session`).
+    pub(crate) input: Option<std::sync::mpsc::Sender<Vec<u8>>>,
     pub(crate) session: Arc<StdMutex<Session>>,
     pub(crate) analyzer: Arc<StdMutex<OutputAnalyzer>>,
     /// Shell integration state — tracks temp files for cleanup on session close.
@@ -686,6 +689,7 @@ mod tests {
                 writer: Arc::new(Mutex::new(
                     Box::new(typed.clone()) as Box<dyn std::io::Write + Send>
                 )),
+                input: None,
                 session: Arc::clone(&session),
                 analyzer: Arc::clone(&analyzer),
                 shell_integration: super::shell_integration::ShellIntegration::None,
@@ -740,6 +744,7 @@ mod tests {
                 writer: Arc::new(Mutex::new(
                     Box::new(typed.clone()) as Box<dyn std::io::Write + Send>
                 )),
+                input: None,
                 session: Arc::new(Mutex::new(waiting_claude())),
                 analyzer: Arc::new(Mutex::new(OutputAnalyzer::new())),
                 shell_integration: super::shell_integration::ShellIntegration::None,
@@ -770,6 +775,7 @@ mod tests {
             super::PtySession {
                 transport: Box::new(CountingPty(Arc::default())),
                 writer: Arc::clone(&writer),
+                input: None,
                 session: Arc::clone(&session),
                 analyzer: Arc::clone(&analyzer),
                 shell_integration: super::shell_integration::ShellIntegration::None,
@@ -811,6 +817,7 @@ mod tests {
                 writer: Arc::new(Mutex::new(
                     Box::new(typed.clone()) as Box<dyn std::io::Write + Send>
                 )),
+                input: None,
                 session: Arc::clone(&session),
                 analyzer: Arc::new(Mutex::new(OutputAnalyzer::new())),
                 shell_integration: super::shell_integration::ShellIntegration::None,
@@ -867,6 +874,7 @@ mod tests {
                 writer: Arc::new(Mutex::new(
                     Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>
                 )),
+                input: None,
                 session: Arc::new(Mutex::new(crate::pty::launch::tests::test_session())),
                 analyzer: Arc::new(Mutex::new(OutputAnalyzer::new())),
                 shell_integration: super::shell_integration::ShellIntegration::None,
@@ -904,6 +912,7 @@ mod tests {
                 writer: Arc::new(Mutex::new(
                     Box::new(std::io::sink()) as Box<dyn std::io::Write + Send>
                 )),
+                input: None,
                 session: Arc::new(Mutex::new(crate::pty::launch::tests::test_session())),
                 analyzer: Arc::new(Mutex::new(OutputAnalyzer::new())),
                 shell_integration: super::shell_integration::ShellIntegration::None,
