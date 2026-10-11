@@ -18,6 +18,7 @@ import { TURN_LEDGER_EVENT, type TurnLedgerEvent } from "../agent/turns/turnLedg
 import { lastReportedStatus } from "../agent/status/deriveStatus";
 import { raiseInboxItem, resolveInboxItem } from "../agent/contract/inbox";
 import { listAllWorktrees } from "../api/git";
+import { softInterruptAgent } from "../api/agent";
 import type { CreateSessionOpts, SessionData } from "../types/session";
 import type { QueuedLaunch } from "../launcher/launchTask";
 import { getFleetCaps, loadFleetCaps, subscribeFleetCaps, type FleetCaps } from "./fleetSettings";
@@ -79,6 +80,16 @@ export function computeOccupancy(sessions: readonly SessionData[], now: number):
   return { sessionIds: ids, memoryBytes };
 }
 
+/**
+ * Stop the agent in a session because a cap was reached. An Agent view
+ * session has no terminal to signal: its turn is stopped the way its Stop
+ * button does it.
+ */
+export function interruptForCap(session: Pick<SessionData, "mode"> | undefined, sessionId: string): Promise<boolean> {
+  if (session?.mode === "agent") return softInterruptAgent(sessionId).then(() => true);
+  return invoke<boolean>("interrupt_session_agent", { sessionId });
+}
+
 export function describeTrip(trip: CapTrip, t: Translate): string {
   const vars = { spent: formatUsd(trip.spentUsd), cap: formatUsd(trip.capUsd), name: trip.label };
   return trip.kind === "session" ? t("fleet.capInboxSession", vars) : t("fleet.capInboxFeature", vars);
@@ -125,7 +136,7 @@ export function useFleetControls({ enabled, sessions, startTask, t }: FleetContr
         sessions: () => sessionsRef.current.filter((s) => !CLOSED_PHASES.has(s.phase)).map((s) => ({ id: s.id, label: s.label })),
         featureOf: (id) => indexRef.current.features.get(id) ?? null,
         caps: getFleetCaps,
-        interrupt: (sessionId) => invoke<boolean>("interrupt_session_agent", { sessionId }),
+        interrupt: (sessionId) => interruptForCap(sessionsRef.current.find((s) => s.id === sessionId), sessionId),
         raise: raiseInboxItem,
         resolve: resolveInboxItem,
         describe: (trip) => describeTrip(trip, tRef.current),
