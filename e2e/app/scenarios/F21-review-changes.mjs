@@ -235,11 +235,16 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   // ── 5. Push, then Pull against the bare remote ─────────────────────
   log("step 5: push to the bare remote, then pull a commit made elsewhere");
   await bridge.click(`${SECTION} .git-btn-push`);
-  await bridge.waitFor("the push to finish", `
-    const t = e2e.first(".review-changes-toast");
-    return t ? e2e.norm(t.innerText) : null;
-  `, { timeoutMs: 20_000 });
-  const pushed = gitIn(remote, "rev-parse", `refs/heads/${branch}`);
+  // The push runs in the background; the discard's toast can still be up,
+  // so wait for the branch on the remote itself.
+  let pushed = "";
+  for (const until = Date.now() + 20_000; !pushed && Date.now() < until; ) {
+    try {
+      pushed = gitIn(remote, "rev-parse", "--verify", "--quiet", `refs/heads/${branch}`);
+    } catch {
+      await sleep(250);
+    }
+  }
   assert(pushed === gitIn(wt, "rev-parse", "HEAD"), `git: the bare remote has ${branch} at the commit`);
   execFileSync("git", ["clone", "-q", "-b", branch, remote, other], { env: gitEnv });
   gitIn(other, "config", "commit.gpgsign", "false");
