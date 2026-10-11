@@ -8,7 +8,7 @@
 // changed) and ship the whole text to the window (7 s for track_watch).
 //
 //   - idle CPU with the 20 MB file stays within 5 % of a core of the idle
-//     CPU with a small one (macOS and Linux, where `ps` reports it);
+//     CPU with a small one (macOS and Linux, see cpu-time.mjs);
 //   - track_watch answers fast, with at most 256 KB of text and the flag
 //     that it was cut;
 //   - the Track panel says "feature.md is too large (…); open it in your
@@ -16,19 +16,12 @@
 //
 // Negative control: a build of main before the fix ends in RESULT: FAIL.
 
-import { execFileSync } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { cpuSeconds } from "../cpu-time.mjs";
 import { launchApp } from "../harness.mjs";
 import { L, invoke, mkRepo, mkWork, onWindows, runScenario, sleep } from "../review-steps.mjs";
 
-const cpuSeconds = (pid) => {
-  const t = execFileSync("ps", ["-o", "time=", "-p", String(pid)], { encoding: "utf8" }).trim();
-  return t
-    .split(":")
-    .map(Number)
-    .reduce((acc, part) => acc * 60 + part, 0);
-};
 async function cpuShare(pid, ms) {
   const a = cpuSeconds(pid);
   await sleep(ms);
