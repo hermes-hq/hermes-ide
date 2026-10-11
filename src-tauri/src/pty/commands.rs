@@ -3097,6 +3097,32 @@ pub fn close_session(
     Ok(())
 }
 
+/// Stop a session's terminal and keep the session: its row, its worktrees
+/// (with their uncommitted files) and its place in the saved workspace.
+/// For Convert to agent, which starts the same session again in Agent
+/// view; `close_session` would remove the session and delete its worktree.
+#[tauri::command]
+pub fn stop_session_terminal(state: State<'_, AppState>, session_id: String) -> Result<(), String> {
+    let mut mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
+    let Some(mut pty_session) = mgr.sessions.remove(&session_id) else {
+        return Ok(());
+    };
+    drop(mgr);
+    // Ended first, so the threads watching it stop; the reader still says
+    // so when the terminal closes, and the app ignores that for a session
+    // it is converting.
+    if let Ok(mut s) = pty_session.session.lock() {
+        s.phase = SessionPhase::Destroyed;
+    }
+    pty_session.transport.kill().ok();
+    crate::pty::shell_integration::cleanup(&pty_session.shell_integration);
+    let mut transport = pty_session.transport;
+    thread::spawn(move || {
+        transport.wait();
+    });
+    Ok(())
+}
+
 #[tauri::command]
 pub fn get_sessions(state: State<'_, AppState>) -> Result<Vec<SessionUpdate>, String> {
     let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());

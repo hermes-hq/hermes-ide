@@ -33,6 +33,7 @@ import {
   addWorkspacePath,
   sessionHostStatus,
   isShellForeground,
+  stopSessionTerminal,
 } from "../api/sessions";
 import { closeNeedsConfirm } from "./closeConfirm";
 import { deriveSessionLabelFromMessage, isDefaultSessionLabel } from "../utils/autoSessionLabel";
@@ -1278,6 +1279,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
   const busyTimestamps = useRef<Map<string, number>>(new Map());
   const lastAutoAttachCwd = useRef<Map<string, string>>(new Map());
   const closingSessionIds = useRef<Set<string>>(new Set());
+  // Terminal sessions being converted to Agent view: their stopped
+  // terminal's "destroyed" report is not the session ending.
+  const convertingSessionIds = useRef<Set<string>>(new Set());
   const closeTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
   // Saved sessions that could not be restored this launch. They go back
   // into the saved workspace (tried again next start) unless the user
@@ -1531,6 +1535,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         // Disconnected SSH sessions are kept in the UI for reconnection.
         if (session.phase === "destroyed") {
           if (closingSessionIds.current.has(session.id)) return;
+          // A converted session's old terminal, reporting late: the
+          // session lives on in Agent view.
+          if (convertingSessionIds.current.has(session.id)
+            || stateRef.current.sessions[session.id]?.mode === "agent") return;
           if (!stateRef.current.sessions[session.id]) {
             // Never shown: nothing to keep.
             closingSessionIds.current.add(session.id);
@@ -2641,26 +2649,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
       return false;
     }
 
-    // Bug 4 (1.2.x): when the close half of the conversion is
-    // `apiCloseSession` (terminal mode), Bug 1's unconditional cleanup
-    // strips the session's worktree from disk AND from the
-    // `session_worktrees` table.  The follow-up `spawnAgentSession`
-    // would then boot in a deleted directory.  Snapshot the worktree
-    // info BEFORE close so we can restore it after.
-    //
-    // The two helpers `snapshotPreservableWorktrees` and
-    // `restorePreservedWorktrees` are exported from this file and unit-
-    // tested in `convert-mode-worktree-preservation.test.ts` — keep them
-    // and this call site in lock-step.
-    const plan = planConversionWorktreeRestore({
-      currentMode: session.mode,
-      newMode,
-    });
-    const worktreeRestores: PreservedWorktreeEntry[] =
-      plan === "restore-before-spawn"
-        ? await snapshotPreservableWorktrees(sessionId)
-        : [];
-
+    convertingSessionIds.current.add(sessionId);
     try {
       // 1. Close whatever process is currently running for this session.
       if (session.mode === "agent") {
@@ -2668,25 +2657,14 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           console.warn("[SessionContext] Failed to close agent during conversion:", err);
         });
       } else {
-        // Terminal/PTY: ask the backend to tear down the PTY but keep the
-        // session row (so we can re-spawn into it).  The dedicated
-        // `close_session` command also fires `session-removed`, which would
-        // wipe the session from state — that's the wrong behaviour here.
-        // For 1.0.0 we accept the simplification of losing scrollback and
-        // re-issue close_session; the SET_SESSION_MODE dispatch below
-        // immediately re-establishes state for the new mode.
-        await apiCloseSession(sessionId).catch((err) => {
-          console.warn("[SessionContext] Failed to close terminal during conversion:", err);
+        // Terminal/PTY: stop the terminal only.  `close_session` would
+        // remove the session from the app (session-removed) and delete its
+        // worktree with every uncommitted file in it; the session, its
+        // worktree and its saved place all stay.  Scrollback is dropped.
+        await stopSessionTerminal(sessionId).catch((err) => {
+          console.warn("[SessionContext] Failed to stop terminal during conversion:", err);
         });
-      }
-
-      // 1b. Restore worktrees the close just nuked (terminal → agent only).
-      // Errors are non-fatal: we log and let the spawn proceed; the
-      // backend will fall back to the project root and the user will see
-      // a missing-isolation warning if Bug 3's defence-in-depth is
-      // active.  Better than failing the conversion entirely.
-      if (worktreeRestores.length > 0) {
-        await restorePreservedWorktrees(sessionId, worktreeRestores);
+        destroyTerminal(sessionId);
       }
 
       // 2. Flip the mode in state so SplitPane re-renders the right view.
@@ -2737,6 +2715,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     } catch (err) {
       console.error("[SessionContext] convertSessionMode failed:", err);
       return false;
+    } finally {
+      convertingSessionIds.current.delete(sessionId);
     }
   }, [dispatch]);
 
