@@ -110,6 +110,14 @@ impl LineTail {
         tail
     }
 
+    /// Start at the current end: only what is appended from now on.
+    pub fn at_end(path: PathBuf) -> Self {
+        let len = std::fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
+        let mut tail = Self::new(path);
+        tail.offset = len;
+        tail
+    }
+
     pub fn path(&self) -> &Path {
         &self.path
     }
@@ -690,6 +698,50 @@ pub fn read_lines(
     (events, interrupted)
 }
 
+/// Claude Code (2.1.283 and later) writes each sub-agent's calls to a file
+/// of its own beside the transcript, `<session>/subagents/agent-*.jsonl`.
+/// They are paid for too, so their calls count toward the session's spend
+/// (never the gauge). Files already there when the transcript is first
+/// read are history, like the transcript's own lines.
+#[derive(Default)]
+pub struct SubagentTails {
+    tails: std::collections::HashMap<PathBuf, LineTail>,
+}
+
+impl SubagentTails {
+    /// Feed the sub-agent calls written since the last call into `spend`.
+    pub fn feed_spend(&mut self, transcript: &Path, history: bool, spend: &mut SpendTracker) {
+        let Ok(entries) = std::fs::read_dir(transcript.with_extension("").join("subagents")) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+                continue;
+            }
+            let len = entry.metadata().map(|m| m.len()).unwrap_or(0);
+            let tail = self
+                .tails
+                .entry(path.clone())
+                .or_insert_with(|| match history {
+                    true => LineTail::at_end(path),
+                    false => LineTail::new(path),
+                });
+            if len == tail.offset {
+                continue;
+            }
+            for line in tail.poll() {
+                let record = serde_json::from_str::<Value>(&line)
+                    .ok()
+                    .and_then(|v| spend_record(&v));
+                if let Some(record) = record {
+                    spend.feed(record);
+                }
+            }
+        }
+    }
+}
+
 // ─── A turn the person interrupted ───────────────────────────────────
 
 /// Claude Code fires no hook when the person rejects a tool call with Esc
@@ -854,6 +906,7 @@ pub(crate) fn watch(
         let mut transcript: Option<(LineTail, String, bool)> = None;
         let mut tracker = UsageTracker::default();
         let mut spend = SpendTracker::default();
+        let mut subagents = SubagentTails::default();
         let mut interrupts = InterruptWatch::default();
         loop {
             std::thread::sleep(POLL);
@@ -889,6 +942,7 @@ pub(crate) fn watch(
                             tracker = UsageTracker::default();
                             tracker.stated = stated;
                             interrupts = InterruptWatch::default();
+                            subagents = SubagentTails::default();
                         }
                     }
                     Some(SpoolNote::Exited) => exited = true,
@@ -896,6 +950,7 @@ pub(crate) fn watch(
                 }
             }
             if let Some((tail, source, history)) = transcript.as_mut() {
+                subagents.feed_spend(tail.path(), *history, &mut spend);
                 let lines = tail.poll();
                 let at = now_ms();
                 let (events, interrupted) = read_lines(
@@ -1649,6 +1704,44 @@ mod tests {
         let mut near = LineTail::near_end(big, 25);
         let got = near.poll();
         assert_eq!(got, vec!["line-0998".to_string(), "line-0999".to_string()]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sub_agent_calls_in_their_own_files_count_toward_spend() {
+        let dir = std::env::temp_dir().join(format!("hermes-ctx-sub-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let subs = dir.join("s-1").join("subagents");
+        std::fs::create_dir_all(&subs).unwrap();
+        let transcript = dir.join("s-1.jsonl");
+        std::fs::write(&transcript, "").unwrap();
+        let line = |id: &str, out: u64| {
+            let mut v: Value =
+                serde_json::from_str(&call(id, "claude-sonnet-4-6", 100, 0, 0, out)).unwrap();
+            v["isSidechain"] = json!(true);
+            format!("{v}\n")
+        };
+        // A sub-agent of the resumed conversation, from before: history.
+        std::fs::write(subs.join("agent-old.jsonl"), line("msg_old", 1)).unwrap();
+        std::fs::write(subs.join("agent-old.meta.json"), "{}").unwrap();
+        let mut tails = SubagentTails::default();
+        let mut spend = SpendTracker::default();
+        tails.feed_spend(&transcript, true, &mut spend);
+        assert_eq!(spend.totals(), None);
+        // A new sub-agent, and more from the old one.
+        std::fs::write(subs.join("agent-new.jsonl"), line("msg_new", 10)).unwrap();
+        let mut old = std::fs::OpenOptions::new()
+            .append(true)
+            .open(subs.join("agent-old.jsonl"))
+            .unwrap();
+        std::io::Write::write_all(&mut old, line("msg_old2", 20).as_bytes()).unwrap();
+        drop(old);
+        tails.feed_spend(&transcript, false, &mut spend);
+        let (input, output, _) = spend.totals().expect("sub-agent calls are spend");
+        assert_eq!((input, output), (200, 30));
+        // Read once: polling again adds nothing.
+        tails.feed_spend(&transcript, false, &mut spend);
+        assert_eq!(spend.totals().map(|t| (t.0, t.1)), Some((200, 30)));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
