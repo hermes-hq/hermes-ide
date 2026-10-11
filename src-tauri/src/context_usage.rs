@@ -638,9 +638,9 @@ impl UsageTracker {
 /// The events for a batch of transcript lines. Lines that were already in
 /// the file when Hermes started reading it (`history`, e.g. a resumed
 /// conversation) only set where the gauge stands: of those, just the latest
-/// usage goes out, not a replay of every past call and compaction. The
-/// session's totals (F31) go out once per batch, after its other events,
-/// when they changed.
+/// usage goes out, not a replay of every past call and compaction, and none
+/// of their calls is added to this launch's spend. The session's totals
+/// (F31) go out once per batch, after its other events, when they changed.
 #[cfg(test)]
 pub fn events_for_lines(
     tracker: &mut UsageTracker,
@@ -674,7 +674,7 @@ pub fn read_lines(
         if interrupts.feed(&v) && !history {
             interrupted += 1;
         }
-        if let Some(record) = spend_record(&v) {
+        if let Some(record) = spend_record(&v).filter(|_| !history) {
             spend.feed(record);
         }
         if let Some(event) = transcript_record(&v).and_then(|r| tracker.feed(r, at, source)) {
@@ -1404,6 +1404,25 @@ mod tests {
     }
 
     #[test]
+    fn calls_already_in_the_transcript_are_not_this_launchs_spend() {
+        let mut t = UsageTracker::default();
+        let mut spend = SpendTracker::default();
+        let history = vec![
+            call("msg_old1", "claude-sonnet-4-6", 1_000, 0, 0, 1_000),
+            call("msg_old2", "claude-sonnet-4-6", 1_000, 0, 0, 1_000),
+        ];
+        let events = events_for_lines(&mut t, &mut spend, &history, 1, "transcript:claude", true);
+        assert!(
+            usage_of(&events).is_none(),
+            "a resumed conversation's past calls are not priced: {events:?}"
+        );
+        let live = vec![call("msg_new", "claude-sonnet-4-6", 100, 0, 0, 10)];
+        let events = events_for_lines(&mut t, &mut spend, &live, 2, "transcript:claude", false);
+        let (input, output, _, _) = usage_of(&events).expect("a totals event");
+        assert_eq!((input, output), (Some(100), Some(10)));
+    }
+
+    #[test]
     fn totals_add_every_call_once_and_price_them_as_an_estimate() {
         let mut t = UsageTracker::default();
         let mut spend = SpendTracker::default();
@@ -1510,13 +1529,14 @@ mod tests {
         // /clear: a new transcript; the tracker for the gauge starts over,
         // the totals keep what was spent.
         let mut t2 = UsageTracker::default();
+        events_for_lines(&mut t2, &mut spend, &[], 2, "transcript:claude", true);
         let e = events_for_lines(
             &mut t2,
             &mut spend,
             &[call("m2", "claude-haiku-4-5", 1_000_000, 0, 0, 0)],
             2,
             "transcript:claude",
-            true,
+            false,
         );
         let (input, _, cost, _) = usage_of(&e).unwrap();
         assert_eq!(input, Some(2_000_000));
