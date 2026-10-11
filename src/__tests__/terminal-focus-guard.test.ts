@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it } from "vitest";
-import { dialogHoldsKeyboard } from "../terminal/focusGuard";
+import { readFileSync } from "fs";
+import { resolve } from "path";
+import { dialogHoldsKeyboard, mayRefocusTerminalOnReturn } from "../terminal/focusGuard";
 
 afterEach(() => {
   document.body.innerHTML = "";
@@ -39,5 +41,38 @@ describe("a terminal never takes the keyboard from an open modal dialog", () => 
     expect(dialogHoldsKeyboard(term)).toBe(true);
     document.getElementById("d")?.remove();
     expect(dialogHoldsKeyboard(term)).toBe(false);
+  });
+});
+
+describe("coming back to the window leaves the keyboard in a text field outside the terminal", () => {
+  it("the Library search, a sidebar rename or the commit message keep it", () => {
+    document.body.innerHTML = `<div class="xterm"><textarea class="xterm-helper-textarea"></textarea></div><input id="search" type="text"><textarea id="commit"></textarea><div id="name" contenteditable="true"></div>`;
+    for (const id of ["search", "commit"]) {
+      (document.getElementById(id) as HTMLElement).focus();
+      expect(mayRefocusTerminalOnReturn(false), id).toBe(false);
+    }
+    const name = document.getElementById("name") as HTMLElement;
+    Object.defineProperty(name, "isContentEditable", { value: true });
+    expect(mayRefocusTerminalOnReturn(false, name)).toBe(false);
+  });
+
+  it("the terminal itself, a button or nothing focused: the terminal takes it back", () => {
+    document.body.innerHTML = `<div class="xterm"><textarea class="xterm-helper-textarea"></textarea></div><button id="b">x</button>`;
+    (document.querySelector(".xterm-helper-textarea") as HTMLElement).focus();
+    expect(mayRefocusTerminalOnReturn(false)).toBe(true);
+    (document.getElementById("b") as HTMLElement).focus();
+    expect(mayRefocusTerminalOnReturn(false)).toBe(true);
+    (document.getElementById("b") as HTMLElement).blur();
+    expect(mayRefocusTerminalOnReturn(false)).toBe(true);
+  });
+
+  it("an open overlay keeps it whatever is focused", () => {
+    expect(mayRefocusTerminalOnReturn(true, document.body)).toBe(false);
+  });
+
+  it("the app counts the Library as an overlay and asks before refocusing", () => {
+    const src = readFileSync(resolve(__dirname, "../App.tsx"), "utf-8");
+    expect(src).toMatch(/anyOverlayOpenRef\.current = !!\([^)]*\blibraryOpen\b/);
+    expect(src).toContain("if (!mayRefocusTerminalOnReturn(anyOverlayOpenRef.current)) return;");
   });
 });
