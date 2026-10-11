@@ -1892,9 +1892,11 @@ function AppContent() {
           pluginsWithSettings={pluginsWithSettings}
           onPluginCommand={(commandId) => pluginRuntime.executeCommand(commandId)}
           onCheckPluginUpdates={async () => {
-            await pluginUpdater.checkNow();
-            if (pluginUpdater.updatesAvailable.length === 0) {
-              toastStore.addToast({ message: "All plugins are up to date", type: "info", duration: 3000 });
+            const outcome = await pluginUpdater.checkNow();
+            if (outcome.failed) {
+              toastStore.addToast({ message: t("app.pluginUpdateCheckFailed"), type: "error", duration: 4000 });
+            } else if (outcome.updates === 0) {
+              toastStore.addToast({ message: t("app.pluginsUpToDate"), type: "info", duration: 3000 });
             }
           }}
         />

@@ -6,6 +6,8 @@ export const dePack: LanguagePack = {
   nativeLabel: "Deutsch",
   messages: {
     "app.plugins": "Plugins",
+    "app.pluginsUpToDate": "Alle Plugins sind auf dem neuesten Stand",
+    "app.pluginUpdateCheckFailed": "Plugin-Updates konnten nicht geprüft werden. Prüfe deine Verbindung und versuche es erneut.",
     "app.app": "App",
     "app.settings": "Einstellungen",
     "app.context": "Kontext",

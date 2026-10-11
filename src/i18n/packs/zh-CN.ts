@@ -6,6 +6,8 @@ export const zhCNPack: LanguagePack = {
   nativeLabel: "简体中文",
   messages: {
     "app.plugins": "插件",
+    "app.pluginsUpToDate": "所有插件均为最新版本",
+    "app.pluginUpdateCheckFailed": "无法检查插件更新。请检查网络连接后重试。",
     "app.app": "应用",
     "app.settings": "设置",
     "app.context": "上下文",
