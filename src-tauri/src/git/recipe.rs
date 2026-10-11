@@ -37,7 +37,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, State};
 
 use crate::AppState;
@@ -69,6 +69,8 @@ const NON_SECRET_KEYS: &[&str] = &[
 const MAX_LINE_CHARS: usize = 2000;
 const MAX_WALK_ENTRIES: usize = 50_000;
 const PORT_SEARCH_SPAN: u16 = 100;
+/// How long a setup command's output is still read after it exits.
+const PIPE_GRACE: Duration = Duration::from_secs(2);
 const REDACTED: &str = "••••••";
 
 // ─── The recipe file ─────────────────────────────────────────────────
@@ -746,21 +748,36 @@ pub fn run_setup(
             kill_tree(child.id());
         }
         let (tx, rx) = mpsc::channel();
-        let readers = [
-            child.stdout.take().map(|s| pump(s, "stdout", tx.clone())),
-            child.stderr.take().map(|s| pump(s, "stderr", tx.clone())),
-        ];
+        if let Some(s) = child.stdout.take() {
+            pump(s, "stdout", tx.clone());
+        }
+        if let Some(s) = child.stderr.take() {
+            pump(s, "stderr", tx.clone());
+        }
         drop(tx);
-        for line in rx {
-            emit(LogLine {
-                stream: line.stream,
-                text: redactor.redact(&line.text),
-            });
-        }
-        for r in readers.into_iter().flatten() {
-            let _ = r.join();
-        }
-        let status = child.wait();
+        // Wait for the command, not for its pipes: a server it left running
+        // in the background holds them open. Read what is left for a short
+        // while after it exits, then move on.
+        let mut grace_until: Option<Instant> = None;
+        let status = loop {
+            match rx.recv_timeout(Duration::from_millis(50)) {
+                Ok(line) => emit(LogLine {
+                    stream: line.stream,
+                    text: redactor.redact(&line.text),
+                }),
+                Err(mpsc::RecvTimeoutError::Disconnected) => break child.wait(),
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+            }
+            match grace_until {
+                Some(until) if Instant::now() >= until => break child.wait(),
+                Some(_) => {}
+                None => match child.try_wait() {
+                    Ok(Some(_)) => grace_until = Some(Instant::now() + PIPE_GRACE),
+                    Ok(None) => {}
+                    Err(e) => break Err(e),
+                },
+            }
+        };
         *control.pid.lock().unwrap_or_else(|e| e.into_inner()) = None;
         if control.is_stopped() {
             return SetupEnd::Stopped;
@@ -1536,6 +1553,32 @@ mod tests {
         assert!(
             started.elapsed().as_secs() < 30,
             "the command was killed, not waited for"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_command_that_leaves_a_server_running_does_not_hold_setup_up() {
+        // The background job keeps the command's output pipes open after
+        // the command itself has exited.
+        let tmp = TempDir::new().unwrap();
+        let started = Instant::now();
+        let mut lines = Vec::new();
+        let end = run_setup(
+            &strings(&["sleep 20 & echo started", "echo next"]),
+            tmp.path(),
+            &[],
+            &Redactor::default(),
+            &RunControl::default(),
+            &mut |l| lines.push(l.text),
+        );
+        assert_eq!(end, SetupEnd::Done, "{lines:?}");
+        assert!(lines.contains(&"started".to_string()), "{lines:?}");
+        assert!(lines.contains(&"next".to_string()), "{lines:?}");
+        assert!(
+            started.elapsed().as_secs() < 15,
+            "setup waited for the background job: {:?}",
+            started.elapsed()
         );
     }
 }
