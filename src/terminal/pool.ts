@@ -397,7 +397,12 @@ export async function createTerminal(
     });
 
     unlistenExit = await listen(`pty-exit-${sessionId}`, () => {
-      terminal.write("\r\n\x1b[90m[Session ended]\x1b[0m\r\n");
+      const msg = "\r\n\x1b[90m[Session ended]\x1b[0m\r\n";
+      // While held, the exit queues behind the held output (a restored
+      // session that ended while the app was closed replays, then exits).
+      const held = heldOutput.get(sessionId);
+      if (held) held.push(new TextEncoder().encode(msg));
+      else terminal.write(msg);
     });
   } catch (err) {
     // Clean up partial resources on failure
