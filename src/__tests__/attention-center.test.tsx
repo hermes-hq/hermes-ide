@@ -192,6 +192,19 @@ describe("F12 attention center", () => {
     expect(onJump.mock.calls.map((c) => c[0])).toEqual(["B", "B"]);
   });
 
+  it("the status strip's inbox button opens the inbox on that session's row", () => {
+    setup("D");
+    status("B", "needs_approval", "Bash: rm -rf build");
+    clock += 1_000;
+    status("A", "needs_answer", "Ship it?");
+    act(() => {
+      window.dispatchEvent(new CustomEvent("hermes:open-inbox", { detail: { sessionId: "A" } }));
+    });
+    const list = screen.getByRole("listbox", { name: "Attention inbox" });
+    const selected = within(list).getAllByRole("option").find((o) => o.getAttribute("aria-selected") === "true");
+    expect(selected).toHaveAttribute("data-session-id", "A");
+  });
+
   it("rows are 44 px ListRows: ↓ moves the highlight, the session in view is the current row; the count is brass only while something waits", () => {
     const { badge } = setup("A");
     const counter = () => badge().querySelector(".h-counter");
