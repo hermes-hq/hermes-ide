@@ -959,7 +959,10 @@ mod tests {
         };
         let stdout = String::from_utf8_lossy(&out.stdout);
         for f in ["zprofile", "zshrc", "zlogin"] {
-            assert!(stdout.contains(&format!("user-{f}")), "{f} missing: {stdout}");
+            assert!(
+                stdout.contains(&format!("user-{f}")),
+                "{f} missing: {stdout}"
+            );
         }
         assert!(
             stdout.contains(&format!("ZDOTDIR={}", xdg.display())),
