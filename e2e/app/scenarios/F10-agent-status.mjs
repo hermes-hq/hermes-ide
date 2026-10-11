@@ -136,8 +136,12 @@ async function dismissWhatsNew(bridge) {
 const listedSessionIds = (bridge) => bridge.eval(`return e2e.all(".session-item").map((el) => el.getAttribute("data-session-item-id"));`);
 
 async function openWizard(bridge) {
-  if (await bridge.exists("button.es-tile-primary")) await bridge.click("button.es-tile-primary");
-  else await bridge.clickByName("New session");
+  // Chosen and clicked in one go: in run 2 the empty state gives way to the
+  // restored session's pane a moment after its sidebar row appears.
+  await bridge.clickWhenReady(`
+    const target = e2e.first("button.es-tile-primary") || e2e.byName("New session");
+    return e2e.click(e2e.must(target, "a New Session button"));
+  `);
   await bridge.waitFor("the New Session wizard", `return !!e2e.first(".session-creator");`, { timeoutMs: 20_000 });
   await bridge.waitFor("the agent picker", `return e2e.all(".session-creator-provider-card").length > 0;`);
 }
