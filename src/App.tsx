@@ -21,7 +21,7 @@ import "./styles/topbar.css";
 import "./styles/onDemandViewStyles";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { fmt, isMac, PLATFORM } from "./utils/platform";
-import { matchAppShortcut } from "./utils/shortcuts";
+import { matchAppShortcut, shortcutDigit } from "./utils/shortcuts";
 import { shortcutLabel } from "./utils/keymap";
 import { installAppChordListener } from "./hooks/appChordListener";
 import { isMenuGated, triggerMenuBarActionFromKeyboard } from "./hooks/nativeMenuBridge";
@@ -762,7 +762,7 @@ function AppContent() {
       // Cmd+1-9 — session switch (matches sidebar visual order)
       if (action === "app.switch-session") {
         e.preventDefault();
-        const idx = parseInt(e.key) - 1;
+        const idx = shortcutDigit(e) - 1;
         if (idx < sidebarSessions.length) setActive(sidebarSessions[idx].id);
       }
     };
