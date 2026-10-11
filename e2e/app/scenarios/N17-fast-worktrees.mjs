@@ -52,6 +52,7 @@ import { randomBytes } from "node:crypto";
 import {
   appendFileSync,
   closeSync,
+  copyFileSync,
   cpSync,
   existsSync,
   mkdirSync,
@@ -65,7 +66,7 @@ import {
   writeFileSync,
   writeSync,
 } from "node:fs";
-import { platform, tmpdir } from "node:os";
+import { homedir, platform, tmpdir } from "node:os";
 import { basename, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { ownDiskUsage } from "../cow-usage.mjs";
@@ -721,6 +722,16 @@ try {
         };
       `);
       log(`  what the app showed: ${JSON.stringify(dump)}`);
+    } else if (app) {
+      // The app went away on its own: its exit code, the end of its log and
+      // any panic it wrote (install_crash_handler: <home>/.hermes/crash.log).
+      log(`  the app had already exited: ${JSON.stringify(app.exitInfo())}`);
+      log(`  end of ${app.appLog}:\n${readFileSync(app.appLog, "utf8").split("\n").slice(-40).join("\n")}`);
+      const crashLog = join(homeDir ?? homedir(), ".hermes", "crash.log");
+      if (existsSync(crashLog)) {
+        copyFileSync(crashLog, join(evidenceDir, "crash.log"));
+        log(`  copied ${crashLog} to the evidence`);
+      }
     }
   } catch (inner) {
     log(`  (could not capture failure evidence: ${inner.message})`);

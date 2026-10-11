@@ -28,8 +28,8 @@ await runScenario("QA-status-away-tells-agents-apart", async ({ evidenceDir, log
   const C = await startAgent(bridge, fx, { cwd: fx.otherRepo, label: "web: i18n" }, 3);
   await sleep(2500);
   await bridge.eval(`window.__HERMES_E2E__.setWindowFocused(false); return true;`);
-  await block(bridge, A);
-  await block(bridge, B);
+  await block(bridge, A, fx);
+  await block(bridge, B, fx);
   const deadline = Date.now() + 15_000;
   while (rx.got.length < 2 && Date.now() < deadline) await sleep(250);
   const bodies = rx.got.map((g) => JSON.parse(g.body));
@@ -49,7 +49,7 @@ await runScenario("QA-status-away-tells-agents-apart", async ({ evidenceDir, log
   await bridge.click(".settings-close");
   await bridge.waitFor("Settings closed", `return !e2e.first(".settings-close");`);
   await bridge.eval(`window.__HERMES_E2E__.setWindowFocused(false); return true;`);
-  await block(bridge, C);
+  await block(bridge, C, fx);
   const deadline2 = Date.now() + 15_000;
   while (rx.got.length < 3 && Date.now() < deadline2) await sleep(250);
   const third = rx.got[2] ? JSON.parse(rx.got[2].body) : null;
