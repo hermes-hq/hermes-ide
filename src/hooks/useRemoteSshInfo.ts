@@ -33,8 +33,14 @@ export function useRemoteSshInfo(
     }
 
     let cancelled = false;
+    // One query at a time per session, and none while the window is hidden:
+    // over a slow or dead link the queries would otherwise stack up.
+    let inFlight = false;
 
     const poll = async () => {
+      if (inFlight) return;
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+      inFlight = true;
       try {
         const cwd = await sshGetRemoteCwd(sessionId);
         if (cancelled || !mountedRef.current) return;
@@ -61,6 +67,8 @@ export function useRemoteSshInfo(
         if (!cancelled && mountedRef.current) {
           setInfo((prev) => ({ ...prev, isLoading: false }));
         }
+      } finally {
+        inFlight = false;
       }
     };
 
