@@ -27,6 +27,9 @@ static PASS_LOCK: Mutex<()> = Mutex::new(());
 const NOTICE_MIN_FREED: u64 = 1_000_000_000;
 /// "Old worktrees use X" is worth saying from this much needing the person.
 const NOTICE_MIN_NEEDS: u64 = 20_000_000_000;
+/// Low disk: a pass that freed nothing runs again on the next tick only once
+/// free space has fallen by this much since.
+const LOW_DISK_RESCAN_DROP: u64 = 1_000_000_000;
 
 // ─── Inputs ─────────────────────────────────────────────────────────
 
@@ -231,8 +234,12 @@ fn clean_up(app: &AppHandle) -> Result<CleanupOutcome, String> {
         skipped.len(),
         freed_bytes
     );
-    // The state after, for the view.
-    let after = gather(app).map(|i| build_report(&i)).unwrap_or(report);
+    // The state after, for the view: measured again only when something went.
+    let after = if removed_worktrees.is_empty() && cleared_build_output.is_empty() {
+        report
+    } else {
+        gather(app).map(|i| build_report(&i)).unwrap_or(report)
+    };
     Ok(CleanupOutcome {
         freed_bytes,
         removed_worktrees,
@@ -425,10 +432,32 @@ struct NoticeMemory {
     below_guard_said: bool,
     last_needs: Option<Instant>,
     last_report: Option<(u64, u64, u64)>,
+    /// Free space right after the last pass.
+    last_pass_free: Option<u64>,
+    /// The last pass removed a worktree or build output.
+    last_pass_freed: bool,
 }
 
 fn due(last: Option<Instant>, every: Duration) -> bool {
     last.is_none_or(|t| t.elapsed() >= every)
+}
+
+/// Whether this tick runs a pass: every `pass_every`, and on every tick while
+/// the disk is low as long as that can help. A pass that freed nothing is
+/// not repeated (each one measures every worktree) until free space falls
+/// further or `pass_every` comes round.
+fn pass_due(mem: &NoticeMemory, t: &Timings, free: Option<u64>, low: bool) -> bool {
+    if due(mem.last_pass, t.pass_every) {
+        return true;
+    }
+    if !low || !due(mem.last_pass, t.tick) {
+        return false;
+    }
+    mem.last_pass_freed
+        || match (mem.last_pass_free, free) {
+            (Some(before), Some(now)) => now.saturating_add(LOW_DISK_RESCAN_DROP) <= before,
+            _ => true,
+        }
 }
 
 /// Which notices one tick sends. Pure, so the throttling is tested.
@@ -532,9 +561,8 @@ fn tick(app: &AppHandle, mem: &mut NoticeMemory, t: &Timings) {
     let free = disk_guard::free_space_bytes(&base).ok();
     let low = free.is_some_and(|f| f < settings.low_disk_bytes);
     // Low disk: run the pass now, not in six hours (at most once a tick).
-    let pass_due = due(mem.last_pass, t.pass_every) || (low && due(mem.last_pass, t.tick));
     let mut notices = Vec::new();
-    if pass_due {
+    if pass_due(mem, t, free, low) {
         mem.last_pass = Some(Instant::now());
         expire_kept_records(app, &app_data, &settings);
         let result = if settings.auto_cleanup {
@@ -545,6 +573,10 @@ fn tick(app: &AppHandle, mem: &mut NoticeMemory, t: &Timings) {
         match result {
             Ok((report, cleaned)) => {
                 let free = disk_guard::free_space_bytes(&base).ok();
+                mem.last_pass_free = free;
+                mem.last_pass_freed = cleaned.as_ref().is_some_and(|c| {
+                    !c.removed_worktrees.is_empty() || !c.cleared_build_output.is_empty()
+                });
                 notices =
                     notices_for_tick(mem, t, free, &settings, Some((&report, cleaned.as_ref())));
             }
@@ -666,6 +698,40 @@ mod tests {
             Some((&after, Some(&small))),
         );
         assert!(n.is_empty(), "{n:?}");
+    }
+
+    #[test]
+    fn low_disk_passes_back_off_while_they_free_nothing() {
+        // A tick has passed since the last pass; pass_every has not.
+        let ticked = Timings {
+            tick: Duration::ZERO,
+            ..t()
+        };
+        let mut mem = NoticeMemory::default();
+        // First pass is always due.
+        assert!(pass_due(&mem, &ticked, Some(15 * GB), true));
+        // Still low, the last pass freed nothing and free space has not
+        // moved: no new pass.
+        mem.last_pass = Some(Instant::now());
+        mem.last_pass_free = Some(15 * GB);
+        mem.last_pass_freed = false;
+        assert!(!pass_due(&mem, &ticked, Some(15 * GB), true));
+        assert!(!pass_due(&mem, &ticked, Some(15 * GB - GB / 2), true));
+        // Free space fell by a gigabyte or more: worth another look.
+        assert!(pass_due(&mem, &ticked, Some(14 * GB), true));
+        // The last pass freed something: keep going every tick.
+        mem.last_pass_freed = true;
+        assert!(pass_due(&mem, &ticked, Some(15 * GB), true));
+        // Never more than once a tick; plenty of space waits for pass_every.
+        assert!(!pass_due(&mem, &t(), Some(5 * GB), true));
+        assert!(!pass_due(&mem, &ticked, Some(80 * GB), false));
+        // pass_every comes round whatever happened before.
+        mem.last_pass_freed = false;
+        let every = Timings {
+            pass_every: Duration::ZERO,
+            ..t()
+        };
+        assert!(pass_due(&mem, &every, Some(15 * GB), true));
     }
 
     #[test]
