@@ -494,7 +494,8 @@ fn client() -> Result<reqwest::Client, String> {
     // no query string: nothing that tells one person from another.
     reqwest::Client::builder()
         .timeout(FETCH_TIMEOUT)
-        .redirect(reqwest::redirect::Policy::limited(3))
+        // No redirects: an answer from hermes-ide.com must not send us elsewhere.
+        .redirect(reqwest::redirect::Policy::none())
         .build()
         .map_err(|e| e.to_string())
 }
