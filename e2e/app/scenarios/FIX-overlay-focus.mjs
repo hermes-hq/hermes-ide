@@ -147,6 +147,9 @@ try {
   await bridge.click(".task-launcher-launch");
   const [sessionId] = await newTerminals(bridge, before, 1, "the task's terminal");
   await waitLauncherClosed(bridge);
+  // The agent's own start report (idle, from its hook) comes first: arriving
+  // after the blocked status below, it replaced it and the badge stayed at 0.
+  await bridge.waitFor("the agent to report in", `return window.__HERMES_E2E__.sessionStatus(${JSON.stringify(sessionId)})?.source?.startsWith("hook:") ?? false;`, { timeoutMs: 20_000 });
   await bridge.eval(`
     return window.__HERMES_E2E__.injectSessionEvent(${JSON.stringify(sessionId)}, {
       type: "status", at: Date.now(), source: "e2e",
