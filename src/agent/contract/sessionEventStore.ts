@@ -314,6 +314,9 @@ export function clearSessionEvents(sessionId: string): void {
   const set = listeners.get(sessionId);
   if (set) for (const l of [...set]) l();
   notifyAny(sessionId, null, getSessionEventSnapshot(sessionId), previous);
+  // Reading the snapshot above cached an empty one again; with nobody left
+  // watching it, every closed session would keep that entry forever.
+  if (!listeners.has(sessionId)) emptyCache.delete(sessionId);
 }
 
 /** The snapshot of one session, re-rendering only when that session changes. */
@@ -323,6 +326,11 @@ export function useSessionEvents(sessionId: string): SessionEventSnapshot {
     () => getSessionEventSnapshot(sessionId),
     () => getSessionEventSnapshot(sessionId),
   );
+}
+
+/** How many sessions the store holds anything for (tests). */
+export function _retainedSessionCountForTest(): number {
+  return new Set([...snapshots.keys(), ...emptyCache.keys()]).size;
 }
 
 export function _resetSessionEventStoreForTest(): void {

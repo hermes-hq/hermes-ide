@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { act, renderHook } from "@testing-library/react";
 import {
   _resetSessionEventStoreForTest,
+  _retainedSessionCountForTest,
   clearSessionEvents,
   dispatchSessionEvent,
   getSessionEventSnapshot,
@@ -137,6 +138,16 @@ describe("the store", () => {
     expect(l).toHaveBeenCalledTimes(2);
     expect(getSessionEventSnapshot("s1").version).toBe(0);
     expect(sessionIdsWithEvents()).toEqual([]);
+  });
+
+  it("keeps nothing for a cleared session nobody watches", () => {
+    const off = subscribeAllSessionEvents(() => {});
+    const offOne = subscribeSessionEvents("s1", () => getSessionEventSnapshot("s1"));
+    dispatchSessionEvent("s1", status("working"));
+    offOne();
+    clearSessionEvents("s1");
+    off();
+    expect(_retainedSessionCountForTest()).toBe(0);
   });
 });
 
