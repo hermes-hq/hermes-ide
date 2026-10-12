@@ -11,7 +11,7 @@ This release fixes problems that build up when Hermes stays open for days or wee
 - A worktree you choose to keep when closing a session is no longer deleted automatically later.
 - A worktree that could not be removed when its session closed is now retried at the next launch, and launching is faster when old leftover worktrees are lying around.
 - A dropped or slow SSH connection no longer freezes the window.
-- Hermes uses less CPU and battery in the background with many sessions open: git status, memory and terminal checks pause while the window is hidden, and idle agent sessions no longer cost more over time.
+- Hermes uses less CPU and battery in the background with many sessions open: git status and memory checks pause while the window is hidden, and idle agent sessions no longer cost more over time.
 - On Linux, closing a terminal that left a background job running no longer keeps the background terminal service alive, so it picks up app updates again.
 - Plugins that follow a session's transcript stop when the session closes, and closing many sessions no longer leaves data behind in memory.
 - Prompt library updates resume after the system clock was briefly set ahead, and the library's local database no longer grows with every catalog update.
