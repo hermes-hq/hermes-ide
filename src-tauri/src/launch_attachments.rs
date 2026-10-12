@@ -5,7 +5,7 @@
 //! (a screenshot, an image copied from a browser) has no file behind it, so
 //! it is saved here first: `<app data>/attachments/<unique>/<name>`, one
 //! folder per file so two pastes with the same name never collide. Folders
-//! older than a week are removed at startup.
+//! older than a week are removed at startup and once a day after that.
 
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
@@ -14,6 +14,8 @@ use std::time::{Duration, SystemTime};
 pub const MAX_ATTACHMENT_BYTES: usize = 20 * 1024 * 1024;
 /// How long a saved paste is kept.
 const KEEP_FOR: Duration = Duration::from_secs(7 * 24 * 60 * 60);
+/// How often the prune runs again: the app can stay open for weeks.
+const PRUNE_EVERY: Duration = Duration::from_secs(24 * 60 * 60);
 const NAME_CAP: usize = 120;
 
 fn attachments_dir(app_dir: &Path) -> PathBuf {
@@ -108,12 +110,13 @@ pub fn prune_attachments(app_dir: &Path, keep_for: Duration, now: SystemTime) ->
     removed
 }
 
-/// Startup: drop pastes older than a week, off the main thread.
+/// Drop pastes older than a week at startup and every day after, off the
+/// main thread.
 pub fn start_pruning<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
     let Ok(dir) = crate::instance::app_data_dir(app) else {
         return;
     };
-    std::thread::spawn(move || {
+    std::thread::spawn(move || loop {
         let n = prune_attachments(&dir, KEEP_FOR, SystemTime::now());
         if n > 0 {
             log::info!(
@@ -121,6 +124,7 @@ pub fn start_pruning<R: tauri::Runtime>(app: &tauri::AppHandle<R>) {
                 n
             );
         }
+        std::thread::sleep(PRUNE_EVERY);
     });
 }
 
