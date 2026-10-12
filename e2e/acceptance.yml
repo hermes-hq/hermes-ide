@@ -1973,3 +1973,18 @@ features:
         # cannot be given its own git credential helper.
         text: "A push to a remote that needs a password fails with how to sign in when there are no credentials, and succeeds with a git credential helper or with GITHUB_TOKEN"
         scenarios: ["git-auth.mjs@darwin,linux"]
+  NOTICES:
+    name: "Notices from the Hermes team: one quiet card in the sessions sidebar"
+    # The notices file comes from a local server (HERMES_E2E_NOTICES_URL,
+    # test builds only); the scenario never reaches hermes-ide.com.
+    status: shipped
+    criteria:
+      NOTICES-1:
+        text: "A notice from the Hermes site shows as one card above New group and × closes it for good; a notice that links anywhere but the Hermes site or the hermes-hq GitHub organisation is dropped; the file is fetched once a day with no query string or cookie"
+        scenarios: [QA-notices-card.mjs]
+      NOTICES-2:
+        text: "The star ask shows only after 5 landed tasks on 3 different days and never in the first 7 days; Later snoozes it once and its second showing offers only Star and ×; × and Star on GitHub end it for good; it hides while an agent waits or a dialog is open"
+        scenarios: [QA-notices-card.mjs]
+      NOTICES-3:
+        text: "Turning off Show notices from the Hermes team in Settings hides every card and stops the fetch"
+        scenarios: [QA-notices-card.mjs]

@@ -1,5 +1,5 @@
 import "../styles/components/SessionList.css";
-import { useState, useMemo, useCallback, useRef, useEffect } from "react";
+import { useState, useMemo, useCallback, useRef, useEffect, Suspense } from "react";
 import { SessionData } from "../state/SessionContext";
 import { rememberUserLabel } from "../attention/userLabels";
 import { updateSessionGroup, updateSessionLabel, updateSessionDescription, updateSessionColor, sshListTmuxWindows, sshTmuxSelectWindow, sshTmuxNewWindow, sshTmuxRenameWindow } from "../api/sessions";
@@ -34,6 +34,11 @@ import { Badge, Counter } from "./ui/Badge";
 import { Button, CloseButton, IconButton } from "./ui/Button";
 import { Chip } from "./ui/Chip";
 import { ListRow } from "./ui/ListRow";
+import { lazyView } from "../utils/lazyView";
+import { useNoticesEnabled } from "../notices/store";
+
+// Notices from the Hermes team: the card loads on demand, only while they are on.
+const NoticeCard = lazyView("NoticeCard", () => import("./NoticeCard").then((m) => m.NoticeCard));
 
 export const SESSION_COLORS = [
   "#58a6ff", "#3fb950", "#bc8cff", "#f78166",
@@ -689,6 +694,7 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
   const { t } = useI18n();
   // Flags are read once at startup, so this never changes while mounted.
   const agentStatus = isAgentStatusEnabled();
+  const noticesOn = useNoticesEnabled();
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
   const [renameSessionId, setRenameSessionId] = useState<string | null>(null);
   const [newGroupSessionId, setNewGroupSessionId] = useState<string | null>(null);
@@ -1372,6 +1378,12 @@ export function SessionList({ sessions, activeSessionId, onSelect, onClose, onNe
           })}
         </div>
       </div>
+
+      {noticesOn && (
+        <Suspense fallback={null}>
+          <NoticeCard />
+        </Suspense>
+      )}
 
       {/* Sidebar footer: New Project button + inline input */}
       <div className="session-list-footer">

@@ -80,6 +80,10 @@ try {
   check(fx.git("rev-parse", "main") === mainBefore, "main did not move");
   check(!fx.git("ls-tree", "--name-only", "main").includes("DEVELOP.md"), "main never receives develop's DEVELOP.md");
   check(fx.git("ls-tree", "--name-only", "develop").includes("TASK.md"), "develop has the task's work");
+  // The landed-task count the notices' star ask reads (kept after the landing records are forgotten).
+  const counted = await bridge.eval(`const s = await window.__TAURI_INTERNALS__.invoke("get_settings"); return s.notices_landed ? JSON.parse(s.notices_landed) : null;`);
+  log(`  landed count: ${JSON.stringify(counted)}`);
+  check(counted?.count === 1 && counted.days.length === 1, "the landing is counted once, on one day");
 } catch (e) {
   error = e;
 }

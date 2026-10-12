@@ -2244,6 +2244,12 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "library_onboarded",
     // Which 2.0 template pins the Library already carried over
     "pinned_templates_library",
+    // Notices from the Hermes team (src-tauri/src/notices.rs, src/notices/):
+    // the Settings switch ("on" | "off"), which cards were shown, snoozed or
+    // closed (JSON), and the tasks landed (JSON, counted by the backend).
+    "notices_enabled",
+    "notices_state",
+    "notices_landed",
 ];
 
 #[tauri::command]
@@ -3531,6 +3537,12 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "library_last_error",
     // Which 2.0 template pins were carried into the Library — per install
     "pinned_templates_library",
+    // Notices from the Hermes team — which cards were shown or closed, the
+    // tasks landed, the last fetch and the fetched file: per install
+    "notices_state",
+    "notices_landed",
+    "notices_last_fetch",
+    "notices_cache",
 ];
 
 /// Validate a settings file path for export or import.

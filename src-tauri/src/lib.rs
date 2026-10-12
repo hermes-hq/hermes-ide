@@ -29,6 +29,7 @@ mod launch_attachments;
 mod library;
 mod limits;
 mod menu;
+mod notices;
 mod platform;
 mod plugin_features;
 mod plugin_identity;
@@ -1239,6 +1240,7 @@ pub fn run() {
             land::land_preview,
             land::land_gh_status,
             land::land_execute,
+            notices::notices_list,
             land::land_archive,
             land::land_undo,
             land::land_pr_checks,

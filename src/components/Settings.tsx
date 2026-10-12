@@ -41,6 +41,7 @@ import { AgentDoctor } from "./AgentDoctor";
 import { ensureDoctor, useAgentDoctor } from "../launcher/doctorStore";
 import { useI18n } from "../i18n/I18nProvider";
 import { setStatusStripEnabled } from "../statusStrip/preference";
+import { setNoticesEnabled } from "../notices/store";
 import {
   FEATURE_FLAGS,
   FEATURE_FLAG_OVERRIDES_KEY,
@@ -358,6 +359,18 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                     }}
                     label={t("settings.statusStrip")}
                     description={t("settings.statusStripHint")}
+                  />
+                </div>
+
+                <div className="settings-group" data-setting="notices_enabled">
+                  <Toggle
+                    checked={settings.notices_enabled !== "off"}
+                    onChange={(on) => {
+                      updateSetting("notices_enabled", on ? "on" : "off");
+                      void setNoticesEnabled(on);
+                    }}
+                    label={t("settings.notices")}
+                    description={t("settings.noticesHint")}
                   />
                 </div>
 

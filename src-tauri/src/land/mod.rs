@@ -559,6 +559,11 @@ pub async fn land_execute(
                 o.status,
                 session_id
             );
+            // The landing records are forgotten with their session; this
+            // count is kept (the star ask in the sessions sidebar reads it).
+            if o.status == LandStatus::Landed {
+                crate::notices::record_landing(&app);
+            }
         }
         out
     })

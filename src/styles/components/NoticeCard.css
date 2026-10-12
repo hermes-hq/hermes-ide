@@ -1,0 +1,88 @@
+/* ─── Notices from the Hermes team ─────────────────────────────────────
+ * One quiet card at the bottom of the sessions sidebar, above "New group"
+ * (src/components/NoticeCard.tsx). Layout only: the buttons are controls
+ * from src/components/ui; the class names on them are hooks for tests.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.notice-card {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin: 0 var(--space-2) var(--space-2);
+  padding: var(--space-3);
+  background: var(--bg-2);
+  border: var(--control-border-width) solid var(--border-light);
+  border-radius: var(--radius-lg);
+  font-size: var(--text-sm);
+  line-height: var(--leading-normal);
+  color: var(--text-2);
+  user-select: text;
+  animation: notice-card-in var(--dur-base) var(--ease-out-soft);
+}
+
+@keyframes notice-card-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .notice-card { animation: none; }
+}
+
+/* The image slot: full card width at the top, 2:1, the card's own corners.
+ * Only still images reach it (the backend refuses animated ones). */
+.notice-card-image {
+  display: block;
+  width: calc(100% + 2 * var(--space-3));
+  max-width: none;
+  aspect-ratio: 2 / 1;
+  margin: calc(-1 * var(--space-3)) calc(-1 * var(--space-3)) 0;
+  object-fit: cover;
+  border-radius: calc(var(--radius-lg) - var(--control-border-width)) calc(var(--radius-lg) - var(--control-border-width)) 0 0;
+  background: var(--bg-1);
+}
+
+.notice-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin: calc(-1 * var(--space-1)) calc(-1 * var(--space-1)) calc(-1 * var(--space-1)) 0;
+}
+
+.notice-card-label {
+  font-size: var(--text-xs);
+  color: var(--text-3);
+}
+
+.notice-card-title {
+  margin: 0;
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  line-height: var(--leading-snug);
+  color: var(--text-0);
+  overflow-wrap: anywhere;
+}
+
+.notice-card-body {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.notice-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-top: var(--space-0-5);
+}
+
+.notice-card-star-glyph {
+  color: var(--brass);
+}
+
+.notice-card-thanks {
+  color: var(--text-1);
+}

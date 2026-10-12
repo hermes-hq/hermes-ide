@@ -1,6 +1,6 @@
 [package]
 name = "hermes-ide"
-version = "2.2.9"
+version = "2.2.10"
 description = "AI-native terminal"
 authors = ["Gabriel Anhaia"]
 edition = "2021"

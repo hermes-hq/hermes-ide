@@ -8,6 +8,7 @@ import { initFeatureFlags, isFeatureFlagEnabled } from "./featureFlags";
 import { startSessionEventChannel } from "./agent/contract/channel";
 import { getSettings } from "./api/settings";
 import { initStatusStripPreference } from "./statusStrip/preference";
+import { initNoticesPreference } from "./notices/store";
 import { startTurnLedgerBridge } from "./agent/turns/turnLedgerBridge";
 import { startDoneWhen } from "./doneWhen/controller";
 import { startLimitInbox } from "./limits/limitStatus";
@@ -63,7 +64,10 @@ void getStartupProblem().then((problem) => {
     .catch((e) => console.warn("[session-event] channel not attached:", e));
   // The status-strip preference (F11) rides on the same settings read.
   void getSettings()
-    .then((settings) => initStatusStripPreference(settings))
+    .then((settings) => {
+      initStatusStripPreference(settings);
+      initNoticesPreference(settings);
+    })
     .catch(() => {});
   // N19: a session that hits its usage limit waits in the attention inbox.
   startLimitInbox();

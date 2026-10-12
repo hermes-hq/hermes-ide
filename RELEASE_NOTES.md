@@ -1,27 +1,11 @@
-# Hermes IDE 2.2.9
+# Hermes IDE 2.2.10
 
-This release adds New folder… for starting a project from scratch, and fixes problems that build up when Hermes stays open for days or weeks (2.2.8 was never published; its fixes are here).
+This release adds an occasional, quiet note from the Hermes team at the bottom of the sessions list.
 
 ## New
 
-- Start a project from scratch: New folder… in ⌘N and in the New Session wizard creates a new project folder, like an IDE's New Project. Give it a name and a location, and choose whether it starts with a git repository, a .gitignore, an AGENTS.md for agent instructions (which Claude Code also reads) and a README. The folder is added to the session at once, and the agent starts in it.
-
-## Improved
-
-- The sidebar button that groups sessions is now called "New group", so it is no longer confused with creating a project.
-
-## Fixes
-
-- Pasting a lot of text into a terminal whose program isn't reading it no longer freezes the whole window when you resize, split or close that terminal.
-- Cost and token totals no longer grow while a session sits open: each session's usage is counted once. Totals inflated by earlier versions are corrected on the first launch.
-- Turn history snapshots from tasks that ran in their own worktree are now removed from the repository 14 days after the session closes, as promised.
-- Hermes no longer slows down or uses up the system's file-watch limit when worktrees contain large dependency or build folders.
-- A worktree you choose to keep when closing a session is no longer deleted automatically later.
-- A worktree that could not be removed when its session closed is now retried at the next launch, and launching is faster when old leftover worktrees are lying around.
-- A dropped or slow SSH connection no longer freezes the window.
-- Hermes uses less CPU and battery in the background with many sessions open: git status and memory checks pause while the window is hidden, and idle agent sessions no longer cost more over time.
-- On Linux, closing a terminal that left a background job running no longer keeps the background terminal service alive, so it picks up app updates again.
-- Plugins that follow a session's transcript stop when the session closes, and closing many sessions no longer leaves data behind in memory.
-- Prompt library updates resume after the system clock was briefly set ahead, and the library's local database no longer grows with every catalog update.
-- Old data is now cleaned up over time: saved output of sessions closed more than a month ago, undo data for landed tasks after 14 days, worktree backups after 90 days (with automatic clean-up on), pasted screenshots older than a week, Agent view leftovers when a session closes, and the background terminal service's log.
-- The review desk no longer fills browser storage over months of use, which could stop review progress and preferences from being saved.
+- Now and then a small card at the bottom of the sessions list shares news from the Hermes team, such as what's new in a release, sometimes with a small picture; close it with × and it never comes back.
+- After you have landed a few tasks with Hermes on different days, a card asks whether you would like to star Hermes on GitHub; choose Later to be asked once more in a month, or × to never see it again.
+- These cards never pop up, never send system notifications, never show while an agent is waiting on you or a dialog is open, and appear at most once a week.
+- Hermes checks hermes-ide.com for news at most once a day, without cookies or anything that identifies you.
+- To turn all of this off, switch off "Show notices from the Hermes team" in Settings; Hermes then also stops checking for news.
