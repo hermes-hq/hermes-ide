@@ -119,7 +119,7 @@ pub fn expired_sessions(db: &Database, cutoff: &str) -> Result<Vec<ExpiredSessio
             .conn
             .prepare(
                 "SELECT w.worktree_path, p.path
-                 FROM session_worktrees w LEFT JOIN projects p ON p.id = w.realm_id
+                 FROM session_worktrees w LEFT JOIN realms p ON p.id = w.realm_id
                  WHERE w.session_id = ?1",
             )
             .map_err(|e| e.to_string())?;
@@ -134,7 +134,22 @@ pub fn expired_sessions(db: &Database, cutoff: &str) -> Result<Vec<ExpiredSessio
                 candidates.push(PathBuf::from(p));
             }
         }
-        candidates.dedup();
+        // Closing a worktree session removes its folder and its worktree
+        // row, but the session stays attached to its projects, and the refs
+        // live in the project's repository.
+        let mut projects = db
+            .conn
+            .prepare(
+                "SELECT p.path FROM session_realms r JOIN realms p ON p.id = r.realm_id
+                 WHERE r.session_id = ?1 ORDER BY r.attached_at, r.rowid",
+            )
+            .map_err(|e| e.to_string())?;
+        let paths = projects
+            .query_map(params![&session_id], |r| r.get::<_, String>(0))
+            .map_err(|e| e.to_string())?;
+        candidates.extend(paths.flatten().map(PathBuf::from));
+        let mut seen = std::collections::HashSet::new();
+        candidates.retain(|p| seen.insert(p.clone()));
         out.push(ExpiredSession {
             session_id,
             candidates,
@@ -227,7 +242,14 @@ mod tests {
         }
         db.conn
             .execute(
-                "INSERT INTO projects (id, path, name) VALUES ('p1', '/srv/project', 'project')",
+                "INSERT INTO realms (id, path, name) VALUES ('p1', '/srv/project', 'project'),
+                                                            ('p2', '/srv/other', 'other')",
+                [],
+            )
+            .unwrap();
+        db.conn
+            .execute(
+                "INSERT INTO session_realms (session_id, realm_id) VALUES ('old', 'p1'), ('old', 'p2')",
                 [],
             )
             .unwrap();
@@ -247,6 +269,7 @@ mod tests {
                     PathBuf::from("/srv/old"),
                     PathBuf::from("/srv/worktrees/old"),
                     PathBuf::from("/srv/project"),
+                    PathBuf::from("/srv/other"),
                 ],
             }]
         );

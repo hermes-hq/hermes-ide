@@ -1084,8 +1084,9 @@ pub fn gc_expired(db: &Mutex<Database>, cutoff: &str) -> Result<GcReport, String
     let mut report = GcReport::default();
     for session in expired {
         let mut seen = HashSet::new();
-        for dir in &session.candidates {
-            let Some(repo) = Repo::discover(dir) else {
+        let mut left = 0;
+        for dir in gc_folders(&session.candidates) {
+            let Some(repo) = Repo::discover(&dir) else {
                 continue;
             };
             if !seen.insert(repo.lane_key()) {
@@ -1094,15 +1095,44 @@ pub fn gc_expired(db: &Mutex<Database>, cutoff: &str) -> Result<GcReport, String
             for r in repo.refs_under(&format!("refs/hermes/{}/", session.session_id)) {
                 match repo.delete_ref(&r) {
                     Ok(()) => report.refs += 1,
-                    Err(e) => log::warn!("[turn-ledger] could not delete {r}: {e}"),
+                    Err(e) => {
+                        left += 1;
+                        log::warn!("[turn-ledger] could not delete {r}: {e}")
+                    }
                 }
             }
+        }
+        // The rows are the only record that the refs exist: keep them until
+        // a repository was reached and emptied, so a later run retries.
+        if seen.is_empty() || left > 0 {
+            continue;
         }
         let d = db.lock().map_err(|_| "database lock poisoned")?;
         store::delete_turns(&d, &session.session_id)?;
         report.sessions += 1;
     }
     Ok(report)
+}
+
+/// The folders to look for a session's refs in: its candidates, plus the
+/// repository a removed Hermes worktree was made from (named by the
+/// `repo_path.txt` its parent folder keeps), since the refs live in the
+/// shared `.git` of that repository.
+fn gc_folders(candidates: &[PathBuf]) -> Vec<PathBuf> {
+    let mut out = candidates.to_vec();
+    for dir in candidates {
+        if dir.is_dir() {
+            continue;
+        }
+        let repo = dir
+            .parent()
+            .and_then(crate::git::worktree::read_repo_path)
+            .map(|p| PathBuf::from(p.trim()));
+        if let Some(repo) = repo.filter(|r| !out.contains(r)) {
+            out.push(repo);
+        }
+    }
+    out
 }
 
 /// The SQLite datetime text `GC_AFTER_DAYS` before now (UTC).
@@ -2522,6 +2552,68 @@ mod tests {
             GcReport::default()
         );
         assert!(gc_cutoff_now().len() == 19);
+    }
+
+    #[test]
+    fn gc_reaches_the_repo_of_a_removed_worktree_and_keeps_rows_it_cannot_reach() {
+        let t = TestRepo::new();
+        let data = tempfile::tempdir().unwrap();
+        let hash_dir = dunce::canonicalize(data.path())
+            .unwrap()
+            .join("hermes-worktrees")
+            .join("abc");
+        std::fs::create_dir_all(&hash_dir).unwrap();
+        std::fs::write(
+            hash_dir.join("repo_path.txt"),
+            t.root().to_string_lossy().as_bytes(),
+        )
+        .unwrap();
+        let wt = hash_dir.join("wt_hermes-task");
+        let wt_s = wt.to_string_lossy().to_string();
+        t.git(&["worktree", "add", "-q", "-b", "hermes-task", &wt_s]);
+        let (_d, db) = open_db();
+        insert_session(&db, "task", &wt_s, Some("2026-01-01 00:00:00"));
+        insert_session(&db, "lost", "/nowhere/gone", Some("2026-01-01 00:00:00"));
+        let db = Mutex::new(db);
+        let l = ledger();
+        l.ensure_baseline(&db, "task", &wt).unwrap();
+        write(&wt, "src/app.txt", "by the task\n");
+        recorded(l.record_turn(&db, "task", &wt, None, 1).unwrap());
+        store::insert_turn(
+            &db.lock().unwrap(),
+            &Turn {
+                session_id: "lost".into(),
+                n: 1,
+                git_ref: "refs/hermes/lost/turn/1".into(),
+                started_at: 1,
+                ended_at: Some(2),
+                diffstat: Diffstat::default(),
+                degraded: false,
+                checks: None,
+            },
+        )
+        .unwrap();
+        // Closing the session removes its folder; the refs stay in the
+        // project's shared .git.
+        t.git(&["worktree", "remove", "--force", &wt_s]);
+        assert_eq!(t.repo.refs_under("refs/hermes/task/").len(), 2);
+
+        let report = gc_expired(&db, "2026-09-14 00:00:00").unwrap();
+        assert_eq!(
+            report,
+            GcReport {
+                sessions: 1,
+                refs: 2
+            }
+        );
+        assert!(t.repo.refs_under("refs/hermes/task/").is_empty());
+        let d = db.lock().unwrap();
+        assert!(store::list_turns(&d, "task").unwrap().is_empty());
+        assert_eq!(
+            store::list_turns(&d, "lost").unwrap().len(),
+            1,
+            "no repository reached: the row stays so a later run retries"
+        );
     }
 
     #[test]
