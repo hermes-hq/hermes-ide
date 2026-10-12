@@ -46,7 +46,7 @@ import { REPO_ROOT, createLogger, finishScenario, launchApp, outDir, sleep } fro
 const SCENARIO = "F03-retire-autopilot";
 const startedAt = Date.now();
 const DB_FILE = "hermes_idea_v3.db";
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 /** Tables created by schema steps after F03's step 2 (3: turn ledger; 5: launch choices, CAP; 6 adds a column only; 7: prompt library). */
 const ADDED_BY_LATER_STEPS = [
   "agent_turns",

@@ -44,7 +44,7 @@ const CAPTURED_RELEASES = ["0.6.16", "1.1.3", "1.2.5", "1.3.2", "1.4.0"];
 const PREVIOUS_RELEASE = "1.4.0";
 const NEWER_VERSION = 99;
 /** The schema version this build writes. */
-const SCHEMA_VERSION = 7;
+const SCHEMA_VERSION = 8;
 /** Dropped on purpose by schema step 2 (F03); kept in the backup. */
 const DROPPED = new Set(["execution_nodes"]);
 
@@ -87,7 +87,13 @@ function rowCounts(path) {
       .prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name")
       .all()
       .map((r) => r.name);
-    return Object.fromEntries(tables.map((t) => [t, db.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n]));
+    // Schema step 8 merges token_usage's repeated saves into one row per
+    // session and provider: those are the rows that must survive.
+    const count = (t) =>
+      t === "token_usage"
+        ? `SELECT COUNT(*) AS n FROM (SELECT DISTINCT session_id, provider FROM token_usage)`
+        : `SELECT COUNT(*) AS n FROM "${t}"`;
+    return Object.fromEntries(tables.map((t) => [t, db.prepare(count(t)).get().n]));
   });
 }
 
@@ -141,7 +147,7 @@ async function part0() {
     assert(userVersion(dbPath) === SCHEMA_VERSION, `${release}: database now at schema version ${SCHEMA_VERSION}`);
     const after = rowCounts(dbPath);
     const lost = Object.entries(before).filter(([table, n]) => !DROPPED.has(table) && !(after[table] >= n));
-    assert(lost.length === 0, `${release}: all ${Object.keys(before).length} tables kept their rows (${JSON.stringify(before)})`);
+    assert(lost.length === 0, `${release}: all ${Object.keys(before).length} tables kept their rows (${JSON.stringify(before)}; lost: ${JSON.stringify(lost.map(([t, n]) => `${t} ${n} -> ${after[t]}`))})`);
     assert(filesIn(join(app.dataDir, "backups")).length === 1, `${release}: one backup saved before the update`);
   }
 }

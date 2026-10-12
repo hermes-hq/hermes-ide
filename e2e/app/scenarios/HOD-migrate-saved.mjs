@@ -11,7 +11,7 @@
 //          the 2.0.0 shape (schema 6, no library tables), as a 2.0.0 install
 //          leaves it.
 //   run 2  the 2.1 build opens that database: it takes a backup, adds the
-//          library tables (schema 7), and
+//          library tables (schema 7, then any later steps), and
 //          - every saved prompt setting is byte-identical;
 //          - the Library lists the custom prompt under Mine, and its
 //            text has the task, the custom role's instruction and the
@@ -184,7 +184,8 @@ await runLauncherQa(
     after.close();
     const backupsAfter = existsSync(join(dataDir, "backups")) ? readdirSync(join(dataDir, "backups")).length : 0;
     log(`  after quitting: schema ${version}, library tables ${tables.join(", ")}, backups ${backupsBefore} -> ${backupsAfter}`);
-    check(version === 7 && tables.length === 3, "the database is at schema 7 with the three library tables");
+    // 7 added the library tables; later steps (8: token usage) apply on top.
+    check(version >= 7 && tables.length === 3, "the database is at schema 7 or later with the three library tables");
     check(backupsAfter === backupsBefore + 1, "one backup was taken before the update");
     check(Object.entries(SAVED).every(([k, v]) => kept[k] === v), "and every saved prompt setting is still byte-identical on disk");
   },
