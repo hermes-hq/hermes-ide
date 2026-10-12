@@ -8,6 +8,10 @@
 // are known) and one left "waiting" can still be sent. A send that was in
 // flight when Hermes closed comes back as "not delivered" — whether the
 // line reached the agent is not known.
+//
+// The history is bounded: only the last KEEP_REVIEWS reviews' sent comments
+// and deliveries are kept, and a repository untouched for STALE_AFTER_MS is
+// forgotten (most are task worktrees that no longer exist).
 
 import { useSyncExternalStore } from "react";
 import type { ReviewComment } from "./reviewModel";
@@ -34,7 +38,63 @@ const EMPTY: ReviewState = Object.freeze({ viewed: [], comments: [], lastN: 0, s
 const states = new Map<string, ReviewState>();
 const listeners = new Map<string, Set<() => void>>();
 
-const storageKey = (repoPath: string) => `hermes.review.${repoPath}`;
+const STORAGE_PREFIX = "hermes.review.";
+const storageKey = (repoPath: string) => `${STORAGE_PREFIX}${repoPath}`;
+
+/** Reviews whose sent comments and deliveries are kept. */
+const KEEP_REVIEWS = 50;
+/** Reverted-turn marks kept, newest first. */
+const KEEP_REVERTED = 200;
+/** A repository's saved state is dropped after this long without a change. */
+const STALE_AFTER_MS = 30 * 24 * 60 * 60 * 1000;
+
+let swept = false;
+
+/**
+ * Once per run: forget repositories untouched for STALE_AFTER_MS. State saved
+ * before the time stamp existed is stamped now, so it expires in turn.
+ */
+function sweepStale(now: number): void {
+  swept = true;
+  try {
+    const storage = globalThis.localStorage;
+    if (!storage) return;
+    const keys: string[] = [];
+    for (let i = 0; i < storage.length; i++) {
+      const key = storage.key(i);
+      if (key?.startsWith(STORAGE_PREFIX)) keys.push(key);
+    }
+    for (const key of keys) {
+      let parsed: { savedAt?: unknown } | null = null;
+      try {
+        parsed = JSON.parse(storage.getItem(key) ?? "null") as { savedAt?: unknown } | null;
+      } catch {
+        // Unreadable: load() ignores it and the next change overwrites it.
+      }
+      if (!parsed || typeof parsed !== "object") continue;
+      if (typeof parsed.savedAt !== "number") {
+        storage.setItem(key, JSON.stringify({ ...parsed, savedAt: now }));
+      } else if (now - parsed.savedAt > STALE_AFTER_MS) {
+        storage.removeItem(key);
+      }
+    }
+  } catch {
+    // Storage may be unavailable.
+  }
+}
+
+/** Drops sent comments, sent marks and deliveries older than the last KEEP_REVIEWS reviews. */
+function trimHistory(state: Omit<ReviewState, "version">): Omit<ReviewState, "version"> {
+  const cutoff = state.lastN - KEEP_REVIEWS;
+  const reverted = state.reverted.length > KEEP_REVERTED ? state.reverted.slice(-KEEP_REVERTED) : state.reverted;
+  if (cutoff <= 0) return reverted === state.reverted ? state : { ...state, reverted };
+  const sent: Record<string, number> = {};
+  for (const [id, n] of Object.entries(state.sent)) if (n > cutoff) sent[id] = n;
+  const deliveries: Record<number, Delivery> = {};
+  for (const [key, d] of Object.entries(state.deliveries)) if (Number(key) > cutoff) deliveries[Number(key)] = d;
+  const comments = state.comments.filter((c) => !(c.id in state.sent) || c.id in sent);
+  return { ...state, comments, sent, deliveries, reverted };
+}
 
 function load(repoPath: string): ReviewState {
   try {
@@ -90,7 +150,15 @@ function persist(repoPath: string, state: ReviewState): void {
   try {
     globalThis.localStorage?.setItem(
       storageKey(repoPath),
-      JSON.stringify({ viewed: state.viewed, comments: state.comments, lastN: state.lastN, sent: state.sent, deliveries: state.deliveries, reverted: state.reverted }),
+      JSON.stringify({
+        viewed: state.viewed,
+        comments: state.comments,
+        lastN: state.lastN,
+        sent: state.sent,
+        deliveries: state.deliveries,
+        reverted: state.reverted,
+        savedAt: Date.now(),
+      }),
     );
   } catch {
     // Storage may be unavailable; the desk still works for this run.
@@ -100,6 +168,7 @@ function persist(repoPath: string, state: ReviewState): void {
 export function getReviewState(repoPath: string): ReviewState {
   let s = states.get(repoPath);
   if (!s) {
+    if (!swept) sweepStale(Date.now());
     s = load(repoPath);
     states.set(repoPath, s);
   }
@@ -108,7 +177,7 @@ export function getReviewState(repoPath: string): ReviewState {
 
 function update(repoPath: string, next: Omit<ReviewState, "version">): ReviewState {
   const prev = getReviewState(repoPath);
-  const frozen = Object.freeze({ ...next, version: prev.version + 1 });
+  const frozen = Object.freeze({ ...trimHistory(next), version: prev.version + 1 });
   states.set(repoPath, frozen);
   persist(repoPath, frozen);
   const set = listeners.get(repoPath);
@@ -193,4 +262,5 @@ export function sentReviewOf(repoPath: string, commentId: string): number | null
 export function _resetReviewStoreForTest(): void {
   states.clear();
   listeners.clear();
+  swept = false;
 }

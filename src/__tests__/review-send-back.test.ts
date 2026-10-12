@@ -300,6 +300,40 @@ describe("the review store", () => {
     expect(s.deliveries[3].kind).toBe("not_delivered");
   });
 
+  it("keeps only the last 50 reviews' sent comments and deliveries; unsent comments stay", () => {
+    const repo = "/repo/long";
+    const first = addComment(repo, { sessionId: "s", turnN: 1, path: "a.js", side: "new", line: 1, excerpt: "x", text: "old" });
+    const pending = addComment(repo, { sessionId: "s", turnN: 1, path: "a.js", side: "new", line: 2, excerpt: "x", text: "unsent" });
+    for (let i = 0; i < 60; i++) {
+      const n = nextReviewNumber(repo);
+      setDelivery(repo, n, "s", { kind: "delivered", at: n }, null);
+      if (n === 1) markSent(repo, [first.id], n);
+    }
+    const late = addComment(repo, { sessionId: "s", turnN: 2, path: "a.js", side: "new", line: 3, excerpt: "x", text: "recent" });
+    markSent(repo, [late.id], 60);
+    const s = getReviewState(repo);
+    expect(Object.keys(s.deliveries).map(Number).sort((a, b) => a - b)).toEqual(Array.from({ length: 50 }, (_, i) => i + 11));
+    expect(s.comments.map((c) => c.text)).toEqual(["unsent", "recent"]);
+    expect(sentReviewOf(repo, first.id)).toBeNull();
+    expect(sentReviewOf(repo, pending.id)).toBeNull();
+    _resetReviewStoreForTest();
+    expect(getReviewState(repo).comments.map((c) => c.text)).toEqual(["unsent", "recent"]);
+  });
+
+  it("forgets repositories untouched for 30 days and stamps state saved before the stamp existed", () => {
+    const day = 24 * 60 * 60 * 1000;
+    localStorage.setItem("hermes.review./gone", JSON.stringify({ viewed: ["a"], savedAt: Date.now() - 31 * day }));
+    localStorage.setItem("hermes.review./recent", JSON.stringify({ viewed: ["b"], savedAt: Date.now() - 2 * day }));
+    localStorage.setItem("hermes.review./legacy", JSON.stringify({ viewed: ["c"] }));
+    localStorage.setItem("unrelated", "keep");
+    expect(getReviewState("/recent").viewed).toEqual(["b"]);
+    expect(localStorage.getItem("hermes.review./gone")).toBeNull();
+    expect(getReviewState("/gone").viewed).toEqual([]);
+    expect(getReviewState("/legacy").viewed).toEqual(["c"]);
+    expect(typeof JSON.parse(localStorage.getItem("hermes.review./legacy")!).savedAt).toBe("number");
+    expect(localStorage.getItem("unrelated")).toBe("keep");
+  });
+
   it("ignores broken persisted data", () => {
     localStorage.setItem("hermes.review./repo/c", "{not json");
     expect(getReviewState("/repo/c").viewed).toEqual([]);
