@@ -43,6 +43,33 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// Forget the landings of sessions closed at or before `cutoff` (SQLite
+/// datetime text, as `sessions.closed_at`): undo is only offered while the
+/// session is open, and the pre-land refs keep old commits alive in the
+/// repository. A landing without a session row goes by its own age.
+pub fn gc_expired(
+    app_data: &Path,
+    db: &std::sync::Mutex<crate::db::Database>,
+    cutoff: &str,
+    cutoff_ms: i64,
+) -> usize {
+    record::gc(app_data, &|rec| {
+        let Ok(d) = db.lock() else {
+            return false;
+        };
+        let closed = d.conn.query_row(
+            "SELECT closed_at FROM sessions WHERE id = ?1",
+            rusqlite::params![rec.session_id],
+            |r| r.get::<_, Option<String>>(0),
+        );
+        match closed {
+            Ok(closed) => closed.is_some_and(|c| c.as_str() <= cutoff),
+            Err(rusqlite::Error::QueryReturnedNoRows) => rec.created_at <= cutoff_ms,
+            Err(_) => false,
+        }
+    })
+}
+
 /// The session's own worktree, checked: a Hermes worktree folder, not the
 /// project folder, and whether another session shares it.
 #[derive(Debug, Clone)]
@@ -1520,5 +1547,86 @@ mod tests {
             logged.contains("body"),
             "the rest of the message is the body"
         );
+    }
+
+    #[test]
+    fn landings_of_sessions_closed_long_ago_are_forgotten_with_their_refs() {
+        use crate::turn_ledger::store::testing::{insert_session, open_db};
+        let (_t, repo, _wt) = repo_with_task();
+        let data = TempDir::new().unwrap();
+        let head = sh(&repo, &["rev-parse", "main"]);
+        let (_d, db) = open_db();
+        insert_session(&db, "old", "/w", Some("2026-01-01 00:00:00"));
+        insert_session(&db, "fresh", "/w", Some("2026-10-01 00:00:00"));
+        insert_session(&db, "open", "/w", None);
+        let db = std::sync::Mutex::new(db);
+        let cutoff_ms = 1_000_000;
+        // "unknown" has no session row and is old; "gone" lost its repo.
+        for (sid, created_at, repo_path) in [
+            ("old", 1, repo.clone()),
+            ("fresh", 1, repo.clone()),
+            ("open", 1, repo.clone()),
+            ("unknown", 1, repo.clone()),
+            ("unknown2", cutoff_ms + 1, repo.clone()),
+            ("gone", 1, PathBuf::from("/nowhere/repo")),
+        ] {
+            for which in ["branch", "base"] {
+                if repo_path.is_dir() {
+                    let name = ops::land_ref(sid, 1, which).unwrap();
+                    ops::write_ref(&repo_path, &name, &head).unwrap();
+                }
+            }
+            record::save(
+                data.path(),
+                &LandRecord {
+                    id: format!("{sid}-1"),
+                    n: 1,
+                    session_id: sid.into(),
+                    project_id: "p".into(),
+                    repo_path: repo_path.to_string_lossy().into(),
+                    worktree_path: "/w".into(),
+                    branch: "task".into(),
+                    label: String::new(),
+                    mode: LandMode::Commit,
+                    created_at,
+                    branch_before: head.clone(),
+                    branch_after: None,
+                    base: None,
+                    base_before: None,
+                    merged_commit: None,
+                    remote: None,
+                    remote_before: None,
+                    pushed: None,
+                    pr_url: None,
+                    archived: false,
+                    undone_steps: vec![],
+                    undone: false,
+                },
+            )
+            .unwrap();
+        }
+        insert_session(
+            &db.lock().unwrap(),
+            "gone",
+            "/w",
+            Some("2026-01-01 00:00:00"),
+        );
+
+        assert_eq!(
+            gc_expired(data.path(), &db, "2026-09-14 00:00:00", cutoff_ms),
+            3
+        );
+        let refs = |sid: &str| sh(&repo, &["for-each-ref", &format!("refs/hermes/{sid}/")]);
+        for sid in ["old", "unknown", "gone"] {
+            assert!(
+                record::list_for_session(data.path(), sid).is_empty(),
+                "{sid}"
+            );
+            assert_eq!(refs(sid), "", "{sid}");
+        }
+        for sid in ["fresh", "open", "unknown2"] {
+            assert_eq!(record::list_for_session(data.path(), sid).len(), 1, "{sid}");
+            assert_eq!(refs(sid).lines().count(), 2, "{sid}");
+        }
     }
 }

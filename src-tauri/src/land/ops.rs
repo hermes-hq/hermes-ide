@@ -54,6 +54,25 @@ pub fn write_ref(repo_path: &Path, name: &str, target: &str) -> Result<(), Strin
         .map_err(|e| format!("Could not write {name}: {e}"))
 }
 
+/// Delete the pre-land refs of landing `n`. A repository that is gone has
+/// none left.
+pub fn delete_land_refs(repo_path: &Path, session_id: &str, n: u32) -> Result<(), String> {
+    if !repo_path.is_dir() {
+        return Ok(());
+    }
+    let repo = open(repo_path)?;
+    for which in ["branch", "base"] {
+        let Some(name) = land_ref(session_id, n, which) else {
+            continue;
+        };
+        if let Ok(mut r) = repo.find_reference(&name) {
+            r.delete()
+                .map_err(|e| format!("Could not delete {name}: {e}"))?;
+        }
+    }
+    Ok(())
+}
+
 pub fn ref_target(repo_path: &Path, name: &str) -> Option<String> {
     let repo = Repository::open(repo_path).ok()?;
     let r = repo.find_reference(name).ok()?;

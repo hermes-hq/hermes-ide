@@ -122,6 +122,37 @@ pub fn list_for_session(app_data: &Path, session_id: &str) -> Vec<LandRecord> {
     out
 }
 
+/// Forget the landings `expired` picks: their pre-land refs first, then the
+/// record. A record whose refs could not be deleted stays for a later pass.
+pub fn gc(app_data: &Path, expired: &dyn Fn(&LandRecord) -> bool) -> usize {
+    let Ok(entries) = fs::read_dir(dir(app_data)) else {
+        return 0;
+    };
+    let mut removed = 0;
+    for e in entries.flatten() {
+        let name = e.file_name().to_string_lossy().to_string();
+        let Some(rec) = name
+            .strip_suffix(".json")
+            .and_then(|id| load(app_data, id).ok())
+        else {
+            continue;
+        };
+        if !expired(&rec) {
+            continue;
+        }
+        if let Err(err) =
+            super::ops::delete_land_refs(Path::new(&rec.repo_path), &rec.session_id, rec.n)
+        {
+            log::warn!("[land] keeping landing {}: {err}", rec.id);
+            continue;
+        }
+        if fs::remove_file(e.path()).is_ok() {
+            removed += 1;
+        }
+    }
+    removed
+}
+
 pub fn next_n(app_data: &Path, session_id: &str) -> u32 {
     list_for_session(app_data, session_id)
         .last()

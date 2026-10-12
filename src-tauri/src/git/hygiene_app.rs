@@ -491,6 +491,25 @@ fn notices_for_tick(
     out
 }
 
+/// Drop what Hermes keeps for undo once nothing can use it any more: the
+/// landings of sessions closed long ago, with their refs.
+fn expire_kept_records(app: &AppHandle, app_data: &Path) {
+    let Some(state) = app.try_state::<AppState>() else {
+        return;
+    };
+    let days = crate::turn_ledger::GC_AFTER_DAYS;
+    let cutoff_ms = chrono::Utc::now().timestamp_millis() - days * 24 * 3600 * 1000;
+    let landings = crate::land::gc_expired(
+        app_data,
+        &state.db,
+        &crate::turn_ledger::gc_cutoff_now(),
+        cutoff_ms,
+    );
+    if landings > 0 {
+        log::info!("[hygiene] forgot {landings} landings of long-closed sessions");
+    }
+}
+
 fn tick(app: &AppHandle, mem: &mut NoticeMemory, t: &Timings) {
     let settings = read_settings(app);
     let Ok(app_data) = crate::instance::app_data_dir(app) else {
@@ -504,6 +523,7 @@ fn tick(app: &AppHandle, mem: &mut NoticeMemory, t: &Timings) {
     let mut notices = Vec::new();
     if pass_due {
         mem.last_pass = Some(Instant::now());
+        expire_kept_records(app, &app_data);
         let result = if settings.auto_cleanup {
             clean_up(app).map(|c| (c.report.clone(), Some(c)))
         } else {
