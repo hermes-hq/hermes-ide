@@ -492,8 +492,21 @@ fn notices_for_tick(
 }
 
 /// Drop what Hermes keeps for undo once nothing can use it any more: the
-/// landings of sessions closed long ago, with their refs.
-fn expire_kept_records(app: &AppHandle, app_data: &Path) {
+/// landings of sessions closed long ago, with their refs, and (when the
+/// person lets Hermes clean up on its own) removal backups past their age.
+fn expire_kept_records(app: &AppHandle, app_data: &Path, settings: &HygieneSettings) {
+    if settings.auto_cleanup {
+        // Under the pass lock: a removal appends to the same backup log.
+        let _guard = PASS_LOCK.lock().unwrap_or_else(|e| e.into_inner());
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(hygiene::BACKUP_KEEP_DAYS);
+        let backups = hygiene::expire_backups(app_data, cutoff);
+        if backups > 0 {
+            log::info!(
+                "[hygiene] deleted {backups} backups older than {} days",
+                hygiene::BACKUP_KEEP_DAYS
+            );
+        }
+    }
     let Some(state) = app.try_state::<AppState>() else {
         return;
     };
@@ -523,7 +536,7 @@ fn tick(app: &AppHandle, mem: &mut NoticeMemory, t: &Timings) {
     let mut notices = Vec::new();
     if pass_due {
         mem.last_pass = Some(Instant::now());
-        expire_kept_records(app, &app_data);
+        expire_kept_records(app, &app_data, &settings);
         let result = if settings.auto_cleanup {
             clean_up(app).map(|c| (c.report.clone(), Some(c)))
         } else {

@@ -48,6 +48,8 @@ pub const SETTING_LOW_DISK_GB: &str = "worktree_low_disk_gb";
 pub const BACKUP_LOG: &str = "worktree-backups.jsonl";
 /// Namespace of backup refs in the repo itself.
 pub const BACKUP_REF_PREFIX: &str = "refs/hermes/backups/";
+/// How long a backup is kept before the automatic pass deletes it.
+pub const BACKUP_KEEP_DAYS: i64 = 90;
 
 /// How many worktrees are measured at once.
 const SCAN_WORKERS: usize = 4;
@@ -885,6 +887,54 @@ pub fn list_backups(app_data: &Path, limit: usize) -> Vec<BackupRecord> {
     out
 }
 
+/// Delete the backups made before `cutoff`: the ref in its repo, then the
+/// line in the backup log. One whose ref could not be deleted stays listed
+/// for a later pass; one whose repo is gone only leaves the log.
+pub fn expire_backups(app_data: &Path, cutoff: chrono::DateTime<chrono::Utc>) -> usize {
+    let log = app_data.join(BACKUP_LOG);
+    let Ok(text) = fs::read_to_string(&log) else {
+        return 0;
+    };
+    let mut kept = String::new();
+    let mut expired = 0;
+    for line in text.lines() {
+        let old = serde_json::from_str::<BackupRecord>(line).ok().filter(|r| {
+            chrono::DateTime::parse_from_rfc3339(&r.created_at).is_ok_and(|t| t < cutoff)
+        });
+        if old.is_some_and(|r| delete_backup_ref(&r)) {
+            expired += 1;
+            continue;
+        }
+        kept.push_str(line);
+        kept.push('\n');
+    }
+    if expired > 0 {
+        let tmp = log.with_extension("jsonl.tmp");
+        if fs::write(&tmp, kept)
+            .and_then(|_| fs::rename(&tmp, &log))
+            .is_err()
+        {
+            let _ = fs::remove_file(&tmp);
+            return 0;
+        }
+    }
+    expired
+}
+
+/// True when the backup's ref is gone from its repo (deleted now, or
+/// already). Only the commit the backup recorded is deleted.
+fn delete_backup_ref(r: &BackupRecord) -> bool {
+    let repo = Path::new(&r.repo_path);
+    if !repo.is_dir() {
+        return true;
+    }
+    let deleted = git_at(repo)
+        .args(["update-ref", "-d", &r.ref_name, &r.commit])
+        .output()
+        .is_ok_and(|o| o.status.success());
+    deleted || run(git_at(repo).args(["rev-parse", "--verify", "-q", &r.ref_name])).is_none()
+}
+
 // ─── Removal ────────────────────────────────────────────────────────
 
 /// Who asked for a removal.
@@ -1442,6 +1492,37 @@ mod tests {
         // The branch and its commit stay.
         git(&l.repo, &["rev-parse", "--verify", "refs/heads/work"]);
         assert_eq!(list_backups(&l.app_data, 10), vec![b]);
+    }
+
+    #[test]
+    fn backups_older_than_the_cutoff_are_deleted_with_their_refs() {
+        let l = layout();
+        let mut made = Vec::new();
+        for name in ["a_old", "a_new"] {
+            let wt = add_worktree(&l, name, &name[2..]);
+            fs::write(wt.join("untracked.txt"), "new").unwrap();
+            made.push(snapshot_backup(&l.app_data, &l.repo, &wt, true, Some(&name[2..])).unwrap());
+        }
+        // The first backup is a year old; a line that does not parse stays.
+        let log = l.app_data.join(BACKUP_LOG);
+        let text = fs::read_to_string(&log).unwrap();
+        let aged = text.replacen(&made[0].created_at, "2025-01-01T00:00:00+00:00", 1);
+        fs::write(&log, format!("{aged}not json\n")).unwrap();
+        let cutoff = chrono::Utc::now() - chrono::Duration::days(BACKUP_KEEP_DAYS);
+
+        assert_eq!(expire_backups(&l.app_data, cutoff), 1);
+        let refs = git(
+            &l.repo,
+            &["for-each-ref", "--format=%(refname)", BACKUP_REF_PREFIX],
+        );
+        assert_eq!(refs, made[1].ref_name);
+        assert_eq!(list_backups(&l.app_data, 10), vec![made[1].clone()]);
+        assert!(fs::read_to_string(&log).unwrap().contains("not json"));
+        assert_eq!(
+            expire_backups(&l.app_data, cutoff),
+            0,
+            "nothing left to expire"
+        );
     }
 
     #[test]
