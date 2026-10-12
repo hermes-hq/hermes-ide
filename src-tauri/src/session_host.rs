@@ -283,6 +283,21 @@ fn prune_copies(bin_dir: &Path, keep_key: &str, keep_newest: usize) {
     }
 }
 
+#[cfg(unix)]
+/// Past this size the host log is moved aside before a host starts.
+const HOST_LOG_ROTATE_BYTES: u64 = 1024 * 1024;
+
+#[cfg(unix)]
+/// Moves `log` to `<log>.1` (replacing the one before) once it has grown
+/// past `max_bytes`; every host start appends to it.
+fn rotate_log(log: &Path, max_bytes: u64) {
+    if std::fs::metadata(log).is_ok_and(|m| m.len() > max_bytes) {
+        let mut old = log.as_os_str().to_owned();
+        old.push(".1");
+        let _ = std::fs::rename(log, old);
+    }
+}
+
 #[derive(Debug, Clone, Serialize)]
 pub struct HostSessionStatus {
     pub id: String,
@@ -947,6 +962,7 @@ mod unix {
         let shipped = shipped_host_binary(app)
             .ok_or_else(|| "the session host binary is missing from this install".to_string())?;
         let copy = install_copy(&shipped, &paths.bin_dir, &app_version(app))?;
+        rotate_log(&paths.log_file, HOST_LOG_ROTATE_BYTES);
         let log_file = std::fs::OpenOptions::new()
             .create(true)
             .append(true)
@@ -1394,6 +1410,27 @@ mod tests {
         let dirs = std::fs::read_dir(&bin).unwrap().count();
         assert!(dirs <= 3, "kept {dirs} copies");
         assert!(!first.is_file(), "the oldest copy was pruned");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn the_host_log_is_moved_aside_once_it_outgrows_the_cap() {
+        let tmp = tempfile::tempdir().unwrap();
+        let log = tmp.path().join("host.log");
+        let old = tmp.path().join("host.log.1");
+
+        std::fs::write(&log, vec![b'a'; 100]).unwrap();
+        rotate_log(&log, 100);
+        assert!(log.is_file() && !old.exists(), "a log at the cap stays");
+
+        std::fs::write(&old, b"older").unwrap();
+        std::fs::write(&log, vec![b'b'; 101]).unwrap();
+        rotate_log(&log, 100);
+        assert!(!log.exists(), "the next host starts a fresh log");
+        assert_eq!(std::fs::read(&old).unwrap(), vec![b'b'; 101]);
+
+        rotate_log(&log, 100);
+        assert!(!log.exists(), "no log yet is fine");
     }
 }
 
