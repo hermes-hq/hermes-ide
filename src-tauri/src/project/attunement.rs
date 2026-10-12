@@ -797,6 +797,21 @@ fn remove_session_cache_files(
     Ok(())
 }
 
+/// Removes a closed session's agent-mode state folder
+/// (`<agent_state_root>/<id>/`); it lives in the home folder, so nothing
+/// else ever cleans it up. Returns whether a folder was removed.
+fn remove_agent_state_dir(agent_state_root: &Path, session_id: &str) -> bool {
+    is_safe_session_id(session_id)
+        && std::fs::remove_dir_all(agent_state_root.join(session_id)).is_ok()
+}
+
+/// Session close: drop its agent-mode state folder.
+pub fn delete_agent_state_folder(session_id: &str) {
+    if let Ok(root) = crate::agent::hermes_state_root() {
+        remove_agent_state_dir(&root, session_id);
+    }
+}
+
 /// Deletes Hermes-side cached data for one session: execution history,
 /// token usage, context pins/snapshots, session-scoped memory, realm
 /// attachments, recorded error occurrences, the on-disk context file
@@ -1034,6 +1049,22 @@ mod tests {
         let state_root = root.path().join("sessions");
         assert!(remove_session_cache_files(&context_dir, Some(&state_root), SID).is_ok());
         assert!(remove_session_cache_files(&context_dir, None, SID).is_ok());
+    }
+
+    #[test]
+    fn closing_removes_only_that_sessions_agent_state() {
+        let root = tempfile::tempdir().unwrap();
+        let (_, state_root) = seed(root.path(), SID);
+        seed(root.path(), OTHER);
+
+        assert!(remove_agent_state_dir(&state_root, SID));
+
+        assert!(!state_root.join(SID).exists());
+        assert!(state_root.join(OTHER).join("state.json").exists());
+        assert!(!remove_agent_state_dir(&state_root, SID), "already gone");
+        // An id that is not a plain name never reaches the filesystem.
+        assert!(!remove_agent_state_dir(&state_root.join(OTHER), ".."));
+        assert!(state_root.join(OTHER).exists());
     }
 
     #[test]
