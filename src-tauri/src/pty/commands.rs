@@ -3100,6 +3100,7 @@ pub fn close_session(
     let _ = app.emit("session-removed", &session_id);
     crate::project::attunement::delete_session_context_file(&app, &session_id);
     crate::pty::launch::remove_session_files(&app, &session_id);
+    crate::transcript::cleanup_session_watchers(&app, &session_id);
     if let Some(checks) = tauri::Manager::try_state::<crate::done_when::DoneWhenState>(&app) {
         checks.forget(&session_id);
     }

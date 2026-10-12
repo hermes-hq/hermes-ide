@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, Emitter, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 use uuid::Uuid;
 
 use crate::AppState;
@@ -48,7 +48,23 @@ struct JsonlContent {
 /// State for active transcript watchers.
 #[derive(Default)]
 pub struct TranscriptWatcherState {
-    pub watchers: HashMap<String, Arc<AtomicBool>>,
+    /// watcher id -> (session id, stop flag). The session id lets a session
+    /// close stop the watchers a plugin never disposed.
+    pub watchers: HashMap<String, (String, Arc<AtomicBool>)>,
+}
+
+impl TranscriptWatcherState {
+    /// Stop and forget every watcher of `session_id`.
+    pub fn stop_session(&mut self, session_id: &str) {
+        self.watchers.retain(|_, (sid, stop)| {
+            if sid == session_id {
+                stop.store(true, Ordering::Relaxed);
+                false
+            } else {
+                true
+            }
+        });
+    }
 }
 
 // ─── Helpers ────────────────────────────────────────────────────────
@@ -301,9 +317,10 @@ pub fn start_transcript_watcher(
         let mut watcher_state = transcript_watchers
             .lock()
             .map_err(|e| format!("Lock error: {}", e))?;
-        watcher_state
-            .watchers
-            .insert(watcher_id.clone(), Arc::clone(&stop_flag));
+        watcher_state.watchers.insert(
+            watcher_id.clone(),
+            (session_id.clone(), Arc::clone(&stop_flag)),
+        );
     }
 
     let watcher_id_clone = watcher_id.clone();
@@ -374,7 +391,7 @@ pub fn stop_transcript_watcher(
         .lock()
         .map_err(|e| format!("Lock error: {}", e))?;
 
-    if let Some(stop_flag) = watcher_state.watchers.remove(&watcher_id) {
+    if let Some((_, stop_flag)) = watcher_state.watchers.remove(&watcher_id) {
         stop_flag.store(true, Ordering::Relaxed);
     }
 
@@ -382,18 +399,15 @@ pub fn stop_transcript_watcher(
 }
 
 /// Stop all transcript watchers for a given session.
-/// Called internally when a session is destroyed.
-#[allow(dead_code)]
-pub fn cleanup_session_watchers(
-    transcript_watchers: &Mutex<TranscriptWatcherState>,
-    _session_id: &str,
-) {
-    // Since we don't track session_id → watcher_id mapping in the watcher state,
-    // and watchers auto-stop when they detect the session is gone,
-    // this is a best-effort cleanup. The polling thread will exit on its own
-    // when the stop flag is set or the file becomes inaccessible.
-    // For a more targeted cleanup, we could add a session_id field to the watcher state.
-    let _ = transcript_watchers; // Currently a no-op; watchers stop on their own
+/// Called when the session closes: otherwise a watcher the plugin never
+/// disposed keeps polling the closed session's transcript forever.
+pub fn cleanup_session_watchers(app: &AppHandle, session_id: &str) {
+    if let Some(watchers) = app.try_state::<Mutex<TranscriptWatcherState>>() {
+        watchers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .stop_session(session_id);
+    }
 }
 
 #[cfg(test)]
@@ -531,5 +545,29 @@ mod tests {
             find_transcript_file_in(&projects, &real.to_string_lossy()),
             Some(t)
         );
+    }
+
+    #[test]
+    fn stop_session_stops_only_that_sessions_watchers() {
+        let mut state = TranscriptWatcherState::default();
+        let a1 = Arc::new(AtomicBool::new(false));
+        let a2 = Arc::new(AtomicBool::new(false));
+        let b = Arc::new(AtomicBool::new(false));
+        state
+            .watchers
+            .insert("w1".into(), ("a".into(), Arc::clone(&a1)));
+        state
+            .watchers
+            .insert("w2".into(), ("a".into(), Arc::clone(&a2)));
+        state
+            .watchers
+            .insert("w3".into(), ("b".into(), Arc::clone(&b)));
+
+        state.stop_session("a");
+
+        assert!(a1.load(Ordering::Relaxed));
+        assert!(a2.load(Ordering::Relaxed));
+        assert!(!b.load(Ordering::Relaxed));
+        assert_eq!(state.watchers.keys().collect::<Vec<_>>(), vec!["w3"]);
     }
 }
