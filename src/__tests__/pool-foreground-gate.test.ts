@@ -4,7 +4,7 @@
  * the shell started, and takes suggestions and ghost text down the moment
  * the OS reports such a program in the foreground.
  */
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 const h = vi.hoisted(() => ({
 	isShellForeground: vi.fn((_id: string) => Promise.resolve(true)),
@@ -43,8 +43,10 @@ import {
 	showGhostText,
 	refreshShellForeground,
 	subscribeSuggestions,
+	focusTerminal,
 	type PoolEntry,
 } from "../terminal/pool";
+import { setWindowFocusOverride } from "../attention/windowFocus";
 
 const S = "s";
 
@@ -184,5 +186,35 @@ describe("asking the OS", () => {
 		h.isShellForeground.mockRejectedValueOnce(new Error("ipc")).mockResolvedValueOnce(true);
 		await expect(refreshShellForeground(S)).rejects.toThrow("ipc");
 		await expect(refreshShellForeground(S)).resolves.toBe(true);
+	});
+});
+
+describe("the focused terminal's foreground poll", () => {
+	afterEach(() => {
+		const entry = pool.get(S);
+		if (entry?.shellFgPollTimer) clearInterval(entry.shellFgPollTimer);
+		setWindowFocusOverride(null);
+		vi.useRealTimers();
+	});
+
+	it("stops asking while the window has no focus, and asks again when it returns", async () => {
+		vi.useFakeTimers();
+		h.isShellForeground.mockResolvedValue(true);
+		setWindowFocusOverride(true);
+		const entry = addEntry();
+		Object.assign(entry, { shellFgPollTimer: null, terminal: { ...entry.terminal, focus() {} } });
+
+		focusTerminal(S);
+		await vi.advanceTimersByTimeAsync(900);
+		const whileFocused = h.isShellForeground.mock.calls.length;
+		expect(whileFocused).toBeGreaterThanOrEqual(3);
+
+		setWindowFocusOverride(false);
+		await vi.advanceTimersByTimeAsync(3000);
+		expect(h.isShellForeground.mock.calls.length).toBe(whileFocused);
+
+		setWindowFocusOverride(true);
+		await vi.advanceTimersByTimeAsync(0);
+		expect(h.isShellForeground.mock.calls.length).toBe(whileFocused + 1);
 	});
 });

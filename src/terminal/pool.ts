@@ -24,6 +24,7 @@ import { THEMES, FONT_FAMILIES } from "./themes";
 import { clearGhostOverlay } from "./ghostText";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { dialogHoldsKeyboard } from "./focusGuard";
+import { isWindowFocused, subscribeWindowFocus } from "../attention/windowFocus";
 
 // ─── Types ───────────────────────────────────────────────────────────
 
@@ -554,9 +555,25 @@ function setFocusedSession(sessionId: string, entry: PoolEntry): void {
     // last time this terminal was focused.
     refreshShellForeground(sessionId).catch(() => { /* keep last known value */ });
     entry.shellFgPollTimer = setInterval(() => {
+      // Nobody types into a window without focus, and on Windows each check
+      // reads the whole process table; check again when focus returns.
+      if (!isWindowFocused()) return;
       refreshShellForeground(sessionId).catch(() => { /* IPC failure — keep last known value */ });
     }, 300);
+    watchWindowFocusForShellFg();
   }
+}
+
+let shellFgFocusWatched = false;
+
+function watchWindowFocusForShellFg(): void {
+  if (shellFgFocusWatched) return;
+  shellFgFocusWatched = true;
+  subscribeWindowFocus(() => {
+    const id = _focusedSessionId;
+    if (!id || !isWindowFocused() || !pool.get(id)?.shellFgPollTimer) return;
+    refreshShellForeground(id).catch(() => { /* keep last known value */ });
+  });
 }
 
 export function attach(sessionId: string, viewport: HTMLDivElement, autoFocus = true): void {
