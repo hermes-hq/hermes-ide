@@ -51,7 +51,7 @@ mod updater;
 mod workspace;
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
 use tauri::{Emitter, Manager};
@@ -127,6 +127,30 @@ fn keep_missing_worktree_link(
     }
 }
 
+/// Why a `session_worktrees` row is stale at startup.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaleLink {
+    /// Its session row is gone: the link goes whatever happens to the folder.
+    SessionGone,
+    /// Its session was closed and is not restored, but removing its worktree
+    /// on close failed: retried now, and the link stays until it succeeds.
+    RemovalFailedOnClose,
+}
+
+fn stale_link(
+    database: &db::Database,
+    session_id: &str,
+    restored: &HashSet<String>,
+) -> Option<StaleLink> {
+    // On a read error the session counts as present and open: keep.
+    if !database.session_exists(session_id).unwrap_or(true) {
+        return Some(StaleLink::SessionGone);
+    }
+    let closed =
+        !restored.contains(session_id) && database.is_session_closed(session_id).unwrap_or(false);
+    closed.then_some(StaleLink::RemovalFailedOnClose)
+}
+
 /// The ids of the sessions the saved workspace (the `saved_workspace`
 /// setting the frontend writes) restores at the next launch. Empty when
 /// there is no saved workspace or it cannot be read: then nothing is
@@ -172,11 +196,14 @@ fn prune_old_session_snapshots(database: &db::Database) {
 /// Called once during app startup. For each `session_worktrees` record whose
 /// session is missing from the `sessions` table, we remove the git worktree
 /// from disk (if it is a linked worktree) and delete the DB record. We also
-/// scan `{app_data_dir}/hermes-worktrees/` directories for orphans that have
-/// no DB record, and replay any incomplete journal operations from prior
-/// crashes. Finally, we run `git worktree prune` on every repo that had
+/// list `{app_data_dir}/hermes-worktrees/` directories that have no DB record
+/// (returned for `remove_orphan_worktrees_in_background`), and replay any
+/// incomplete journal operations from prior crashes. Finally, we run `git worktree prune` on every repo that had
 /// stale entries and emit a cleanup summary event to the frontend.
-fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
+fn cleanup_stale_worktrees(
+    app: &tauri::AppHandle,
+    database: &db::Database,
+) -> Vec<(PathBuf, PathBuf)> {
     let app_data_dir = match instance::app_data_dir(app) {
         Ok(dir) => dir,
         Err(e) => {
@@ -184,7 +211,7 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                 "Startup worktree cleanup: failed to get app data dir: {}",
                 e
             );
-            return;
+            return Vec::new();
         }
     };
 
@@ -192,25 +219,35 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
         Ok(wts) => wts,
         Err(e) => {
             log::warn!("Startup worktree cleanup: failed to list worktrees: {}", e);
-            return;
+            return Vec::new();
         }
     };
 
     let mut repos_to_prune: HashSet<String> = HashSet::new();
     let mut cleanup_count: u32 = 0;
+    let restored_sessions = saved_workspace_session_ids(
+        database
+            .get_setting("saved_workspace")
+            .ok()
+            .flatten()
+            .as_deref(),
+    );
 
     for wt in &all_worktrees {
-        // Check whether the owning session still exists
-        let session_exists = database.session_exists(&wt.session_id).unwrap_or(true); // default to true (keep) on error
-
-        if session_exists {
+        let Some(stale) = stale_link(database, &wt.session_id, &restored_sessions) else {
             continue;
-        }
+        };
 
         log::info!(
-            "Startup worktree cleanup: removing stale worktree '{}' (session '{}' no longer exists)",
-            wt.worktree_path, wt.session_id
+            "Startup worktree cleanup: removing stale worktree '{}' (session '{}' {})",
+            wt.worktree_path,
+            wt.session_id,
+            match stale {
+                StaleLink::SessionGone => "no longer exists",
+                StaleLink::RemovalFailedOnClose => "was closed; retrying its removal",
+            }
         );
+        let mut removal_failed = false;
 
         // Only remove worktrees Hermes made from disk: not the project
         // folder, not a checkout made outside Hermes that the session
@@ -231,9 +268,14 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                         wt.worktree_path,
                         e
                     );
+                    removal_failed = true;
                 }
                 repos_to_prune.insert(project_entry.path.clone());
             }
+        }
+        if removal_failed && stale == StaleLink::RemovalFailedOnClose {
+            // Kept so the next startup tries again.
+            continue;
         }
 
         // Delete the DB record regardless
@@ -252,13 +294,6 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
     // Re-fetch from DB since some records may have been deleted above.
     let remaining_worktrees = database.get_all_session_worktrees().unwrap_or_default();
     let mut missing_paths: Vec<serde_json::Value> = Vec::new();
-    let restored_sessions = saved_workspace_session_ids(
-        database
-            .get_setting("saved_workspace")
-            .ok()
-            .flatten()
-            .as_deref(),
-    );
 
     for wt in &remaining_worktrees {
         if wt.is_main_worktree {
@@ -330,7 +365,10 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
         }
     }
 
-    // Scan all projects for orphaned worktree directories with no DB record
+    // Scan all projects for orphaned worktree directories with no DB record.
+    // Only listed here: inspecting each one runs several git processes, so
+    // that happens off the launch path (remove_orphan_worktrees_in_background).
+    let mut orphans: Vec<(PathBuf, PathBuf)> = Vec::new();
     if let Ok(projects) = database.get_all_projects() {
         // Collect all known worktree paths from DB for efficient lookup
         let known_paths: HashSet<String> = database
@@ -355,19 +393,9 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
                     }
                     let path_str = path.to_string_lossy().to_string();
 
-                    // Check if this directory has a DB record. Only a folder
-                    // git vouches has nothing to lose goes now; anything else
-                    // stays for Settings > Storage (backup first, the
-                    // person decides).
-                    if !known_paths.contains(&path_str)
-                        && git::hygiene::remove_orphan_if_nothing_to_lose(
-                            &app_data_dir,
-                            Path::new(&proj.path),
-                            &path,
-                        )
-                    {
-                        log::info!("Removed orphaned worktree directory: {}", path_str);
-                        cleanup_count += 1;
+                    // No DB record, and not a folder the person kept on close.
+                    if !known_paths.contains(&path_str) && !git::hygiene::is_kept(&path) {
+                        orphans.push((PathBuf::from(&proj.path), path));
                     }
                 }
             }
@@ -495,6 +523,58 @@ fn cleanup_stale_worktrees(app: &tauri::AppHandle, database: &db::Database) {
     // Emit a separate event for missing worktree paths so the UI can warn the user
     if !missing_paths.is_empty() {
         let _ = app.emit("worktree-paths-missing", &missing_paths);
+    }
+    orphans
+}
+
+/// Startup's orphan pass, after launch: `(repo, folder)` pairs found with no
+/// DB record. Only a folder git vouches has nothing to lose goes; anything
+/// else stays for Settings > Storage (backup first, the person decides).
+fn remove_orphan_worktrees_in_background(app: tauri::AppHandle, orphans: Vec<(PathBuf, PathBuf)>) {
+    if orphans.is_empty() {
+        return;
+    }
+    let spawned = std::thread::Builder::new()
+        .name("worktree-orphans".into())
+        .spawn(move || {
+            let Ok(app_data_dir) = instance::app_data_dir(&app) else {
+                return;
+            };
+            let mut removed: u32 = 0;
+            for (repo, path) in orphans {
+                // Most orphans have work in them and stay: tell those apart
+                // without holding the DB.
+                let facts = git::hygiene::work_facts(&repo, &path);
+                if !facts.git_knows || facts.has_work() {
+                    continue;
+                }
+                let Some(state) = app.try_state::<AppState>() else {
+                    return;
+                };
+                // Held through the removal: sessions run by now, and one may
+                // have taken the folder (its branch) since startup listed it.
+                let db = state.db.lock().unwrap_or_else(|e| e.into_inner());
+                let path_str = path.to_string_lossy();
+                let linked = db
+                    .get_all_session_worktrees()
+                    .map(|rows| rows.iter().any(|r| r.worktree_path == path_str))
+                    .unwrap_or(true);
+                if !linked
+                    && git::hygiene::remove_orphan_if_nothing_to_lose(&app_data_dir, &repo, &path)
+                {
+                    log::info!("Removed orphaned worktree directory: {}", path_str);
+                    removed += 1;
+                }
+            }
+            if removed > 0 {
+                let _ = app.emit("worktree-cleanup-summary", removed);
+            }
+        });
+    if let Err(e) = spawned {
+        log::warn!(
+            "Startup worktree cleanup: could not start the orphan pass: {}",
+            e
+        );
     }
 }
 
@@ -720,7 +800,7 @@ pub fn run() {
             app.manage(db::startup::StartupProblemState(None));
 
             // Clean up stale worktrees from previous sessions that no longer exist
-            cleanup_stale_worktrees(app.handle(), &database);
+            let orphan_worktrees = cleanup_stale_worktrees(app.handle(), &database);
 
             prune_old_session_snapshots(&database);
 
@@ -760,6 +840,7 @@ pub fn run() {
             };
 
             app.manage(state);
+            remove_orphan_worktrees_in_background(app.handle().clone(), orphan_worktrees);
             // Feature Tracks (F28): one thread polls the worktrees sessions
             // are attached to and reports changes under .hermes/features.
             let track_state = std::sync::Arc::new(track::TrackWatchState::default());
@@ -1366,6 +1447,42 @@ mod tests {
         assert!(
             !marker.exists(),
             "marker should be gone after clean shutdown"
+        );
+    }
+
+    /// A closed session whose worktree removal failed on close is retried at
+    /// startup; an open or restored one is never touched.
+    #[test]
+    fn startup_retries_worktree_removal_of_closed_sessions_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let database = db::Database::new(&tmp.path().join("test.db")).unwrap();
+        for id in ["open", "closed", "closed-restored"] {
+            database
+                .conn
+                .execute(
+                    "INSERT INTO sessions (id, label, description, color, group_name, phase, working_directory, shell, workspace_paths, created_at, ssh_info)
+                     VALUES (?1, ?1, '', '#000', NULL, 'idle', '/tmp', '/bin/sh', '[]', '2026-05-13', NULL)",
+                    rusqlite::params![id],
+                )
+                .unwrap();
+        }
+        database
+            .update_session_status("closed", "destroyed")
+            .unwrap();
+        database
+            .update_session_status("closed-restored", "destroyed")
+            .unwrap();
+        let restored: HashSet<String> = ["closed-restored".to_string()].into_iter().collect();
+
+        assert_eq!(stale_link(&database, "open", &restored), None);
+        assert_eq!(
+            stale_link(&database, "closed", &restored),
+            Some(StaleLink::RemovalFailedOnClose)
+        );
+        assert_eq!(stale_link(&database, "closed-restored", &restored), None);
+        assert_eq!(
+            stale_link(&database, "gone", &restored),
+            Some(StaleLink::SessionGone)
         );
     }
 

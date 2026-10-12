@@ -1747,6 +1747,19 @@ impl Database {
         Ok(count > 0)
     }
 
+    /// Whether the session was closed (`close_session` marks it destroyed).
+    pub fn is_session_closed(&self, session_id: &str) -> Result<bool, String> {
+        let count: i64 = self
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM sessions WHERE id = ?1 AND phase = 'destroyed'",
+                params![session_id],
+                |row| row.get(0),
+            )
+            .map_err(|e| e.to_string())?;
+        Ok(count > 0)
+    }
+
     /// Deletes Hermes-side cached data for one session: the saved terminal
     /// scrollback, execution history, token usage, context pins/snapshots,
     /// session-scoped memory, realm attachments and recorded error
