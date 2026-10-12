@@ -247,8 +247,6 @@ fn cleanup_stale_worktrees(
                 StaleLink::RemovalFailedOnClose => "was closed; retrying its removal",
             }
         );
-        let mut removal_failed = false;
-
         // Only remove worktrees Hermes made from disk: not the project
         // folder, not a checkout made outside Hermes that the session
         // reused, and never a checkout another session still points at.
@@ -256,6 +254,38 @@ fn cleanup_stale_worktrees(
             .count_sessions_for_worktree_path(&wt.worktree_path)
             .map(|n| n > 1)
             .unwrap_or(true);
+        if stale == StaleLink::RemovalFailedOnClose {
+            // A closed session's worktree goes only when nothing in it would
+            // be lost (earlier versions kept these links, and work may still
+            // be there); otherwise the folder and its link stay as they are.
+            let path = Path::new(&wt.worktree_path);
+            let removed = path.is_dir()
+                && git::worktree::is_owned_checkout(wt.is_main_worktree, &wt.worktree_path)
+                && !shared
+                && database
+                    .get_project(&wt.project_id)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|project| {
+                        repos_to_prune.insert(project.path.clone());
+                        git::hygiene::remove_orphan_if_nothing_to_lose(
+                            &app_data_dir,
+                            Path::new(&project.path),
+                            path,
+                        )
+                    });
+            if removed {
+                if let Err(e) = database.delete_session_worktree(&wt.id) {
+                    log::warn!(
+                        "Startup worktree cleanup: failed to delete DB record '{}': {}",
+                        wt.id,
+                        e
+                    );
+                }
+                cleanup_count += 1;
+            }
+            continue;
+        }
         if git::worktree::is_owned_checkout(wt.is_main_worktree, &wt.worktree_path) && !shared {
             if let Ok(Some(project_entry)) = database.get_project(&wt.project_id) {
                 if let Err(e) = git::worktree::remove_worktree(
@@ -268,14 +298,9 @@ fn cleanup_stale_worktrees(
                         wt.worktree_path,
                         e
                     );
-                    removal_failed = true;
                 }
                 repos_to_prune.insert(project_entry.path.clone());
             }
-        }
-        if removal_failed && stale == StaleLink::RemovalFailedOnClose {
-            // Kept so the next startup tries again.
-            continue;
         }
 
         // Delete the DB record regardless
