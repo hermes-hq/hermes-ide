@@ -3012,23 +3012,13 @@ pub fn close_session(
         // pin cleanup + worktree removal used to live in this block — for
         // Bug 1 (1.2.x) those moved into the mode-agnostic section below
         // so agent sessions get the same treatment.
-        if let Ok(analyzer) = pty_session.analyzer.lock() {
+        if let Ok(mut analyzer) = pty_session.analyzer.lock() {
             let snapshot = analyzer.get_stripped_output();
             let metrics = analyzer.to_metrics();
             if let Ok(db) = state.db.lock() {
                 db.save_session_snapshot(&session_id, &snapshot).ok();
                 // Persist final token state
-                for (provider, tokens) in &metrics.token_usage {
-                    db.record_token_usage(
-                        &session_id,
-                        provider,
-                        &tokens.model,
-                        tokens.input_tokens as i64,
-                        tokens.output_tokens as i64,
-                        tokens.estimated_cost_usd,
-                    )
-                    .ok();
-                }
+                save_token_usage(&db, &session_id, &mut analyzer).ok();
                 // Persist memory facts
                 for fact in &metrics.memory_facts {
                     db.save_memory_entry(
@@ -3138,26 +3128,36 @@ pub fn save_all_snapshots(state: State<'_, AppState>) -> Result<(), String> {
         }
 
         // Save snapshot AFTER metadata to avoid INSERT OR REPLACE wiping it
-        if let Ok(analyzer) = pty_session.analyzer.lock() {
+        if let Ok(mut analyzer) = pty_session.analyzer.lock() {
             let snapshot = analyzer.get_stripped_output();
             db.save_session_snapshot(session_id, &snapshot).ok();
 
             // Persist token usage
-            let metrics = analyzer.to_metrics();
-            for (provider, tokens) in &metrics.token_usage {
-                db.record_token_usage(
-                    session_id,
-                    provider,
-                    &tokens.model,
-                    tokens.input_tokens as i64,
-                    tokens.output_tokens as i64,
-                    tokens.estimated_cost_usd,
-                )
-                .ok();
-            }
+            save_token_usage(&db, session_id, &mut analyzer).ok();
         }
     }
 
+    Ok(())
+}
+
+/// Writes the token usage a session gained since its last save. This runs
+/// on every workspace save, so it must add only the growth.
+pub(crate) fn save_token_usage(
+    db: &Database,
+    session_id: &str,
+    analyzer: &mut OutputAnalyzer,
+) -> Result<(), String> {
+    for unsaved in analyzer.unsaved_token_usage() {
+        db.record_token_usage(
+            session_id,
+            &unsaved.provider,
+            &unsaved.model,
+            unsaved.input_tokens as i64,
+            unsaved.output_tokens as i64,
+            unsaved.cost_usd,
+        )?;
+        analyzer.mark_tokens_saved(&unsaved);
+    }
     Ok(())
 }
 

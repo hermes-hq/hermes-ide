@@ -141,6 +141,31 @@ pub(crate) fn saved_workspace_session_ids(saved_workspace: Option<&str>) -> Hash
         .collect()
 }
 
+/// Closed sessions keep their saved scrollback this long.
+const CLOSED_SNAPSHOT_KEEP_DAYS: i64 = 30;
+/// The newest closed sessions (the reopen list) keep it whatever their age.
+const CLOSED_SNAPSHOT_KEEP_RECENT: i64 = 20;
+
+/// Drops the scrollback saved for sessions closed long ago, so the database
+/// does not keep every closed session's output forever.
+fn prune_old_session_snapshots(database: &db::Database) {
+    // Without a readable saved workspace we cannot tell what it restores.
+    let Ok(saved) = database.get_setting("saved_workspace") else {
+        return;
+    };
+    let keep: Vec<String> = saved_workspace_session_ids(saved.as_deref())
+        .into_iter()
+        .collect();
+    let cutoff = (chrono::Utc::now() - chrono::Duration::days(CLOSED_SNAPSHOT_KEEP_DAYS))
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string();
+    match database.prune_closed_session_snapshots(&cutoff, CLOSED_SNAPSHOT_KEEP_RECENT, &keep) {
+        Ok(0) => {}
+        Ok(n) => log::info!("Dropped the saved scrollback of {n} long-closed sessions"),
+        Err(e) => log::warn!("Pruning old session scrollback failed: {e}"),
+    }
+}
+
 /// Clean up worktrees whose sessions no longer exist, remove orphaned
 /// directories, and replay incomplete journal operations.
 ///
@@ -526,7 +551,7 @@ fn do_save_workspace(app: &tauri::AppHandle) {
         }
 
         // Save scrollback snapshot AFTER metadata (since create_session_v2 replaces the row)
-        if let Ok(analyzer) = pty_session.analyzer.lock() {
+        if let Ok(mut analyzer) = pty_session.analyzer.lock() {
             let snapshot = analyzer.get_stripped_output();
             if let Err(e) = db.save_session_snapshot(session_id, &snapshot) {
                 log::error!(
@@ -536,18 +561,8 @@ fn do_save_workspace(app: &tauri::AppHandle) {
                 );
             }
 
-            let metrics = analyzer.to_metrics();
-            for (provider, tokens) in &metrics.token_usage {
-                if let Err(e) = db.record_token_usage(
-                    session_id,
-                    provider,
-                    &tokens.model,
-                    tokens.input_tokens as i64,
-                    tokens.output_tokens as i64,
-                    tokens.estimated_cost_usd,
-                ) {
-                    log::warn!("Failed to record token usage for '{}': {}", session_id, e);
-                }
+            if let Err(e) = pty::commands::save_token_usage(&db, session_id, &mut analyzer) {
+                log::warn!("Failed to record token usage for '{}': {}", session_id, e);
             }
         }
     }
@@ -706,6 +721,8 @@ pub fn run() {
 
             // Clean up stale worktrees from previous sessions that no longer exist
             cleanup_stale_worktrees(app.handle(), &database);
+
+            prune_old_session_snapshots(&database);
 
             // Sessions the session host kept running (N20): their shells
             // are still configured with the previous run's shell-integration

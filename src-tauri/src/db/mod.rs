@@ -376,8 +376,37 @@ impl Database {
         Ok(result)
     }
 
+    /// Drops the saved scrollback of sessions closed at or before `cutoff`
+    /// (SQLite datetime text, UTC), which nothing else ever removes. Keeps
+    /// it for the newest `keep_recent` closed sessions (the ones offered for
+    /// reopening) and for `keep_ids` (the saved workspace). Rows stay.
+    pub fn prune_closed_session_snapshots(
+        &self,
+        cutoff: &str,
+        keep_recent: i64,
+        keep_ids: &[String],
+    ) -> Result<usize, String> {
+        let keep = serde_json::to_string(keep_ids).map_err(|e| e.to_string())?;
+        self.conn
+            .execute(
+                "UPDATE sessions SET scrollback_snapshot = NULL
+                 WHERE scrollback_snapshot IS NOT NULL
+                   AND phase = 'destroyed' AND closed_at IS NOT NULL AND closed_at <= ?1
+                   AND id NOT IN (SELECT id FROM sessions
+                                  WHERE phase = 'destroyed' AND closed_at IS NOT NULL
+                                  ORDER BY closed_at DESC LIMIT ?2)
+                   AND id NOT IN (SELECT value FROM json_each(?3))",
+                params![cutoff, keep_recent, keep],
+            )
+            .map_err(|e| e.to_string())
+    }
+
     // ─── Token Operations ───────────────────────────────────────
 
+    /// Adds usage to the session's one row for `provider`. Callers pass what
+    /// was used since their last call, not running totals: sessions are
+    /// saved every few seconds, and a restored session's counters restart
+    /// at zero under the same id.
     pub fn record_token_usage(
         &self,
         session_id: &str,
@@ -389,7 +418,13 @@ impl Database {
     ) -> Result<(), String> {
         self.conn.execute(
             "INSERT INTO token_usage (session_id, provider, model, input_tokens, output_tokens, estimated_cost_usd)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(session_id, provider) DO UPDATE SET
+                model = excluded.model,
+                input_tokens = input_tokens + excluded.input_tokens,
+                output_tokens = output_tokens + excluded.output_tokens,
+                estimated_cost_usd = COALESCE(estimated_cost_usd, 0.0) + excluded.estimated_cost_usd,
+                recorded_at = datetime('now')",
             params![session_id, provider, model, input_tokens, output_tokens, cost],
         ).map_err(|e| e.to_string())?;
         Ok(())
@@ -2973,6 +3008,83 @@ mod tests {
         assert_eq!(daily[0].total_output_tokens, 40);
         assert!((daily[0].total_cost_usd - 0.5).abs() < 1e-9);
         assert_eq!(daily[0].session_count, 2);
+    }
+
+    #[test]
+    fn only_long_closed_sessions_lose_their_saved_scrollback() {
+        let db = test_db();
+        let close = |id: &str, at: Option<&str>| {
+            insert_test_session(&db, id);
+            db.save_session_snapshot(id, "$ ls\n").unwrap();
+            if let Some(at) = at {
+                db.conn
+                    .execute(
+                        "UPDATE sessions SET phase = 'destroyed', closed_at = ?2 WHERE id = ?1",
+                        params![id, at],
+                    )
+                    .unwrap();
+            }
+        };
+        close("old", Some("2026-01-01 00:00:00"));
+        close("old-in-workspace", Some("2026-01-02 00:00:00"));
+        close("old-but-recent-list", Some("2026-01-03 00:00:00"));
+        close("new", Some("2026-03-01 00:00:00"));
+        close("live", None);
+
+        let n = db
+            .prune_closed_session_snapshots(
+                "2026-02-01 00:00:00",
+                2,
+                &["old-in-workspace".to_string()],
+            )
+            .unwrap();
+        assert_eq!(n, 1);
+        assert_eq!(db.get_session_snapshot("old").unwrap(), None);
+        for kept in ["old-in-workspace", "old-but-recent-list", "new", "live"] {
+            assert_eq!(
+                db.get_session_snapshot(kept).unwrap(),
+                Some("$ ls\n".to_string()),
+                "{kept}"
+            );
+        }
+        assert!(db.session_exists("old").unwrap(), "the row stays");
+    }
+
+    #[test]
+    fn usage_recorded_many_times_adds_up_in_one_row_per_session() {
+        let db = test_db();
+        insert_test_session(&db, "sess1");
+        // The first save names the model "unknown"; later saves name it.
+        db.record_token_usage("sess1", "anthropic", "unknown", 0, 0, 0.25)
+            .unwrap();
+        for _ in 0..3 {
+            db.record_token_usage("sess1", "anthropic", "claude", 10, 20, 0.25)
+                .unwrap();
+        }
+        let rows: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM token_usage", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(rows, 1);
+
+        let daily = db.get_cost_daily(7).unwrap();
+        assert_eq!(daily.len(), 1, "{daily:?}");
+        assert_eq!(daily[0].model, "claude");
+        assert_eq!(
+            (daily[0].total_input_tokens, daily[0].total_output_tokens),
+            (30, 60)
+        );
+        assert!((daily[0].total_cost_usd - 1.0).abs() < 1e-9);
+        assert_eq!(daily[0].session_count, 1);
+
+        let today = db.get_token_usage_today().unwrap();
+        assert_eq!(today.len(), 1);
+        assert!((today[0].estimated_cost_usd - 1.0).abs() < 1e-9);
+
+        let by_project = db.get_cost_by_project(7).unwrap();
+        assert_eq!(by_project.len(), 1);
+        assert!((by_project[0].total_cost_usd - 1.0).abs() < 1e-9);
+        assert_eq!(by_project[0].session_count, 1);
     }
 
     #[test]

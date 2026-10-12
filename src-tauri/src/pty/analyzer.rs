@@ -274,6 +274,17 @@ pub(crate) fn is_cd_refusal(line: &str) -> bool {
             || lower.contains("is denied"))
 }
 
+/// One provider's usage since the last database save, and the totals to
+/// remember once it is written.
+pub(crate) struct UnsavedTokens {
+    pub provider: String,
+    pub model: String,
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub cost_usd: f64,
+    totals: (u64, u64, f64),
+}
+
 pub struct OutputAnalyzer {
     registry: ProviderRegistry,
     pub active_provider_idx: Option<usize>,
@@ -287,6 +298,8 @@ pub struct OutputAnalyzer {
     // Token ledger
     token_usage: HashMap<String, ProviderTokens>,
     token_history: VecDeque<(u64, u64)>,
+    /// Per provider, the totals already written to the database.
+    tokens_saved: HashMap<String, (u64, u64, f64)>,
     // Tool tracking
     tool_calls: VecDeque<ToolCall>,
     tool_call_summary: HashMap<String, u32>,
@@ -521,6 +534,7 @@ impl OutputAnalyzer {
             pending_phase: None,
             token_usage: HashMap::new(),
             token_history: VecDeque::new(),
+            tokens_saved: HashMap::new(),
             tool_calls: VecDeque::new(),
             tool_call_summary: HashMap::new(),
             files_touched: HashSet::new(),
@@ -1022,6 +1036,39 @@ impl OutputAnalyzer {
         }
     }
 
+    /// Per provider, the usage not yet written to the database: growth since
+    /// the last [`Self::mark_tokens_saved`]. A counter lower than at that save
+    /// (the agent restarted in this terminal) counts again from zero.
+    pub(crate) fn unsaved_token_usage(&self) -> Vec<UnsavedTokens> {
+        let mut out = Vec::new();
+        for (provider, t) in &self.token_usage {
+            let (si, so, sc) = self.tokens_saved.get(provider).copied().unwrap_or_default();
+            let input = t.input_tokens.checked_sub(si).unwrap_or(t.input_tokens);
+            let output = t.output_tokens.checked_sub(so).unwrap_or(t.output_tokens);
+            let cost = if t.estimated_cost_usd >= sc {
+                t.estimated_cost_usd - sc
+            } else {
+                t.estimated_cost_usd
+            };
+            if input > 0 || output > 0 || cost > 0.0 {
+                out.push(UnsavedTokens {
+                    provider: provider.clone(),
+                    model: t.model.clone(),
+                    input_tokens: input,
+                    output_tokens: output,
+                    cost_usd: cost,
+                    totals: (t.input_tokens, t.output_tokens, t.estimated_cost_usd),
+                });
+            }
+        }
+        out
+    }
+
+    pub(crate) fn mark_tokens_saved(&mut self, saved: &UnsavedTokens) {
+        self.tokens_saved
+            .insert(saved.provider.clone(), saved.totals);
+    }
+
     /// The terminal's recent lines, for the scrollback snapshot.
     pub(crate) fn get_stripped_output(&self) -> String {
         self.snapshot.text()
@@ -1113,6 +1160,61 @@ impl OutputAnalyzer {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn cumulative(input: u64, output: u64, cost: f64) -> TokenUpdate {
+        TokenUpdate {
+            provider: "anthropic".into(),
+            model: "test-model".into(),
+            input_tokens: input,
+            output_tokens: output,
+            cost_usd: Some(cost),
+            is_cumulative: true,
+        }
+    }
+
+    fn saved_usage(db: &crate::db::Database) -> (i64, i64, i64, f64) {
+        db.conn
+            .query_row(
+                "SELECT COUNT(*), SUM(input_tokens), SUM(output_tokens), SUM(estimated_cost_usd)
+                 FROM token_usage WHERE session_id = 's1'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn repeated_saves_record_each_token_once() {
+        let tmp = tempfile::NamedTempFile::new().unwrap();
+        let db = crate::db::Database::new(tmp.path()).unwrap();
+        let save = |a: &mut OutputAnalyzer| {
+            crate::pty::commands::save_token_usage(&db, "s1", a).unwrap();
+        };
+
+        let mut a = OutputAnalyzer::new();
+        a.apply_token_update(cumulative(100, 10, 0.5));
+        for _ in 0..5 {
+            save(&mut a);
+        }
+        assert_eq!(saved_usage(&db), (1, 100, 10, 0.5));
+
+        a.apply_token_update(cumulative(150, 20, 0.75));
+        save(&mut a);
+        save(&mut a);
+        assert_eq!(saved_usage(&db), (1, 150, 20, 0.75));
+
+        // The agent restarted in this terminal: its counters start over.
+        a.apply_token_update(cumulative(30, 5, 0.25));
+        save(&mut a);
+        assert_eq!(saved_usage(&db), (1, 180, 25, 1.0));
+
+        // A restored session keeps its id but starts a new analyzer.
+        let mut restored = OutputAnalyzer::new();
+        restored.apply_token_update(cumulative(40, 4, 0.5));
+        save(&mut restored);
+        save(&mut restored);
+        assert_eq!(saved_usage(&db), (1, 220, 29, 1.5));
+    }
 
     #[test]
     fn the_snapshot_keeps_a_typed_command_on_one_line() {

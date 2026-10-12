@@ -63,6 +63,11 @@ pub const MIGRATIONS: &[Migration] = &[
         name: "prompt library: item state, usage, installs",
         apply: create_library_tables,
     },
+    Migration {
+        version: 8,
+        name: "token_usage: one row per session and provider",
+        apply: token_usage_one_row_per_session,
+    },
 ];
 
 /// The schema version this build writes.
@@ -894,6 +899,33 @@ fn create_launch_choice_tables(conn: &Connection) -> rusqlite::Result<()> {
     )
 }
 
+// ─── Step 8: token_usage one row per session and provider ────────────
+
+/// Earlier releases inserted a session's running totals again on every
+/// workspace save, so the cost views summed the same usage many times.
+/// Each (session, provider) keeps one row with the largest totals it
+/// reached; from now on usage is added to that row.
+fn token_usage_one_row_per_session(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(
+        "
+        UPDATE token_usage SET
+            input_tokens = (SELECT MAX(t.input_tokens) FROM token_usage t
+                WHERE t.session_id = token_usage.session_id AND t.provider = token_usage.provider),
+            output_tokens = (SELECT MAX(t.output_tokens) FROM token_usage t
+                WHERE t.session_id = token_usage.session_id AND t.provider = token_usage.provider),
+            estimated_cost_usd = (SELECT MAX(COALESCE(t.estimated_cost_usd, 0.0)) FROM token_usage t
+                WHERE t.session_id = token_usage.session_id AND t.provider = token_usage.provider),
+            recorded_at = (SELECT MAX(t.recorded_at) FROM token_usage t
+                WHERE t.session_id = token_usage.session_id AND t.provider = token_usage.provider)
+        WHERE id IN (SELECT MAX(id) FROM token_usage GROUP BY session_id, provider);
+        DELETE FROM token_usage
+        WHERE id NOT IN (SELECT MAX(id) FROM token_usage GROUP BY session_id, provider);
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_token_usage_session_provider
+            ON token_usage(session_id, provider);
+        ",
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1303,6 +1335,75 @@ mod tests {
             .collect();
         ladder.push(extra);
         ladder
+    }
+
+    #[test]
+    fn step_8_keeps_one_row_per_session_and_provider_with_its_largest_totals() {
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn, None, &MIGRATIONS[..7]).unwrap();
+        // What earlier releases left: the running totals saved again and
+        // again, the model named only once it was known.
+        conn.execute_batch(
+            "INSERT INTO token_usage (session_id, provider, model, input_tokens, output_tokens, estimated_cost_usd, recorded_at) VALUES
+                ('s1', 'anthropic', 'unknown', 0, 0, 0.5, '2026-01-10 10:00:00'),
+                ('s1', 'anthropic', 'm1', 100, 10, 0.5, '2026-01-10 10:00:10'),
+                ('s1', 'anthropic', 'm1', 300, 30, 1.5, '2026-01-10 10:00:20'),
+                ('s1', 'anthropic', 'm1', 300, 30, 1.5, '2026-01-11 09:00:00'),
+                ('s1', 'openai', 'm2', 7, 3, NULL, '2026-01-10 10:00:00'),
+                ('s2', 'anthropic', 'm1', 50, 5, 0.25, '2026-01-10 11:00:00');",
+        )
+        .unwrap();
+
+        migrate(&conn, None, MIGRATIONS).unwrap();
+
+        let mut stmt = conn
+            .prepare(
+                "SELECT session_id, provider, model, input_tokens, output_tokens,
+                        estimated_cost_usd, recorded_at
+                 FROM token_usage ORDER BY session_id, provider",
+            )
+            .unwrap();
+        let rows: Vec<(String, String, String, i64, i64, f64, String)> = stmt
+            .query_map([], |r| {
+                Ok((
+                    r.get(0)?,
+                    r.get(1)?,
+                    r.get(2)?,
+                    r.get(3)?,
+                    r.get(4)?,
+                    r.get(5)?,
+                    r.get(6)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        let row = |s: &str, p: &str, m: &str, i: i64, o: i64, c: f64, at: &str| {
+            (
+                s.to_string(),
+                p.to_string(),
+                m.to_string(),
+                i,
+                o,
+                c,
+                at.to_string(),
+            )
+        };
+        assert_eq!(
+            rows,
+            vec![
+                row("s1", "anthropic", "m1", 300, 30, 1.5, "2026-01-11 09:00:00"),
+                row("s1", "openai", "m2", 7, 3, 0.0, "2026-01-10 10:00:00"),
+                row("s2", "anthropic", "m1", 50, 5, 0.25, "2026-01-10 11:00:00"),
+            ]
+        );
+        // A second row for the same session and provider is refused.
+        assert!(conn
+            .execute(
+                "INSERT INTO token_usage (session_id, provider, model) VALUES ('s1', 'anthropic', 'm1')",
+                [],
+            )
+            .is_err());
     }
 
     #[test]
