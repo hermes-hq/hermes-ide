@@ -65,6 +65,29 @@ describe("createFleetMemoryStore", () => {
     await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
     expect(read).toHaveBeenCalledTimes(2);
   });
+
+  it("does not read the process table while the window is hidden", async () => {
+    let hidden = false;
+    Object.defineProperty(document, "visibilityState", { configurable: true, get: () => (hidden ? "hidden" : "visible") });
+    try {
+      const read = vi.fn<() => Promise<FleetMemory>>(() => Promise.resolve(reading({ a: 120 })));
+      const store = createFleetMemoryStore(read, 1000);
+      const stop = store.subscribe(() => {});
+      await act(async () => {});
+      expect(read).toHaveBeenCalledTimes(1);
+
+      hidden = true;
+      await act(async () => { await vi.advanceTimersByTimeAsync(5000); });
+      expect(read).toHaveBeenCalledTimes(1);
+
+      hidden = false;
+      await act(async () => { await vi.advanceTimersByTimeAsync(1000); });
+      expect(read).toHaveBeenCalledTimes(2);
+      stop();
+    } finally {
+      delete (document as unknown as Record<string, unknown>).visibilityState;
+    }
+  });
 });
 
 describe("SessionMemoryTag", () => {

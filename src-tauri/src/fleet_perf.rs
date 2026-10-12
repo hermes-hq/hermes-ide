@@ -202,9 +202,11 @@ pub fn process_table() -> Vec<Proc> {
         .collect()
 }
 
-/// Memory of every session's process tree and of Hermes itself.
+/// Memory of every session's process tree and of Hermes itself. Async so the
+/// process-table read (tens of ms with many processes) stays off the window's
+/// thread.
 #[tauri::command]
-pub fn fleet_memory(state: State<'_, AppState>) -> Result<FleetMemory, String> {
+pub async fn fleet_memory(state: State<'_, AppState>) -> Result<FleetMemory, String> {
     let roots: Vec<(String, u32)> = {
         let mgr = state.pty_manager.lock().map_err(|e| e.to_string())?;
         mgr.sessions
@@ -212,7 +214,9 @@ pub fn fleet_memory(state: State<'_, AppState>) -> Result<FleetMemory, String> {
             .filter_map(|(id, s)| s.transport.pid().map(|pid| (id.clone(), pid)))
             .collect()
     };
-    Ok(fleet_from(&process_table(), std::process::id(), &roots))
+    tokio::task::spawn_blocking(move || fleet_from(&process_table(), std::process::id(), &roots))
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]

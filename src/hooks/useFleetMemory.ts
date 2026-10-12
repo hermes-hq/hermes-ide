@@ -33,6 +33,8 @@ export function createFleetMemoryStore(
 
   const poll = () => {
     if (inFlight) return;
+    // Nobody sees the numbers while the window is hidden.
+    if (typeof document !== "undefined" && document.visibilityState === "hidden" && latest) return;
     inFlight = true;
     read()
       .then((reading) => {
