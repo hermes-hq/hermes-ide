@@ -3,6 +3,7 @@ import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type React
 import { open } from "@tauri-apps/plugin-dialog";
 import { useI18n } from "../i18n/I18nProvider";
 import { Button, Checkbox, Chip, CloseButton, IconButton, Input, Segmented, Select, Textarea, type SelectOption } from "./ui";
+import { NewFolderForm } from "./NewFolderForm";
 import type { ControlAttrs } from "./ui/attrs";
 import { cx } from "./ui/Button";
 import { CloseGlyph } from "./ui/icons";
@@ -327,6 +328,7 @@ export function TaskLauncher({
   const [suggestName, setSuggestName] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
   const [projects, setProjects] = useState<{ path: string; name: string }[]>([]);
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [recents, setRecents] = useState<string[]>([]);
   const [prefixes, setPrefixes] = useState<Record<string, string>>({});
   const [globalSuffix, setGlobalSuffix] = useState("");
@@ -1153,6 +1155,8 @@ export function TaskLauncher({
   // ── keyboard ────────────────────────────────────────────────────
   const openMenu = (m: Exclude<Menu, null>) => {
     setMenu((cur) => (cur === m ? null : m));
+    // The project menu opens on its list, not on a New folder form left open.
+    setNewFolderOpen(false);
   };
   useEffect(() => {
     if (!menu) return;
@@ -2084,10 +2088,30 @@ export function TaskLauncher({
                     { note: p.path },
                   ),
                 )}
-                <Button size="sm" className="task-launcher-browse" onClick={() => void chooseFolder()}>
-                  {t("launcher.browse")}
-                </Button>
+                <span className="task-launcher-folder-actions">
+                  <Button size="sm" className="task-launcher-browse" onClick={() => void chooseFolder()}>
+                    {t("launcher.browse")}
+                  </Button>
+                  <Button size="sm" className="task-launcher-new-folder" onClick={() => setNewFolderOpen(true)} disabled={newFolderOpen}>
+                    {t("newFolder.open")}
+                  </Button>
+                </span>
               </div>
+              {newFolderOpen && (
+                <NewFolderForm
+                  projects={projects}
+                  onCreated={(project) => {
+                    setProjects((prev) => [{ path: project.path, name: project.name }, ...prev.filter((p) => !samePath(p.path, project.path))]);
+                    setNewFolderOpen(false);
+                    setRepoPath(project.path);
+                    // A new repository has no commit to make a worktree from:
+                    // its first task works in the folder itself.
+                    setWhere("current-checkout");
+                    pickDone();
+                  }}
+                  onCancel={() => setNewFolderOpen(false)}
+                />
+              )}
               <label className="task-launcher-inline-label" htmlFor="task-launcher-repo">{t("launcher.repoTyped")}</label>
               {/* Enter here confirms the folder (it never launches): the menu closes, the task field has the keyboard. */}
               <span className="task-launcher-repo-field" data-own-enter="true">

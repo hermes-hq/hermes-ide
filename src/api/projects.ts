@@ -18,6 +18,19 @@ export function createProject(path: string, name: string | null): Promise<Projec
   return invoke<Project>("create_project", { path, name });
 }
 
+/** What a new project folder starts with (the New folder form's checkboxes). */
+export interface NewFolderOptions {
+  git: boolean;
+  agentsMd: boolean;
+  readme: boolean;
+  gitignore: boolean;
+}
+
+/** Makes the new folder `name` in `parent` and adds it as a project. */
+export function createProjectFolder(parent: string, name: string, options: NewFolderOptions): Promise<Project> {
+  return invoke<Project>("create_project_folder", { parent, name, options });
+}
+
 export function deleteProject(id: string): Promise<void> {
   return invoke("delete_project", { id });
 }

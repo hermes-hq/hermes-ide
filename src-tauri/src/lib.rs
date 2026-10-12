@@ -1070,6 +1070,7 @@ pub fn run() {
             workspace::get_projects,
             // Projects
             project::create_project,
+            project::create_project_folder,
             project::get_registered_projects,
             project::get_projects_ordered,
             project::get_project,

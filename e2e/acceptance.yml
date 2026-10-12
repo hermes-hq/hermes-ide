@@ -1886,6 +1886,9 @@ features:
       QA-launcher-14:
         text: "Files and images attached in the task launcher reach the agent: a pasted screenshot is saved and shown as a chip, a dropped file is named where it is (and no terminal behind the launcher gets its path), and the first prompt lists both paths after the task"
         scenarios: [QA-launcher-attachments.mjs]
+      QA-launcher-15:
+        text: "New folder… in ⌘N and the New Session wizard makes a new project folder, like an IDE's New Project: a name, where it goes, and a git repository, .gitignore, AGENTS.md (with CLAUDE.md importing it) and README as chosen; an existing folder is refused and left untouched; the agent starts in the new folder"
+        scenarios: [QA-launcher-new-project-folder.mjs]
   REAL-HOD:
     name: "The prompt library with the real Claude Code and Codex CLIs"
     # Local only, like REAL above: needs the signed-in CLIs and costs a tiny

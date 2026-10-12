@@ -5,7 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { open as shellOpen } from "@tauri-apps/plugin-shell";
 import { CreateSessionOpts } from "../state/SessionContext";
 import { getProjectsOrdered, createProject, deleteProject } from "../api/projects";
-import type { ProjectOrdered } from "../types/project";
+import type { Project, ProjectOrdered } from "../types/project";
 import { getSessions, sshListTmuxSessions, checkAiProviders } from "../api/sessions";
 import {
   AI_AGENT_PREFIXES_KEY,
@@ -46,6 +46,7 @@ import { isFeatureFlagEnabled } from "../featureFlags";
 import { randomTaskSlug } from "../state/isolation";
 import { SESSION_COLORS } from "./SessionList";
 import { useI18n } from "../i18n/I18nProvider";
+import { NewFolderForm } from "./NewFolderForm";
 import { rememberUserLabel } from "../attention/userLabels";
 import { Badge, Button, Checkbox, Chip, CloseButton, IconButton, Input, Radio } from "./ui";
 import { cx } from "./ui/Button";
@@ -154,6 +155,7 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
   const [allProjects, setAllProjects] = useState<ProjectOrdered[]>([]);
   const [query, setQuery] = useState("");
   const [scanPath, setScanPath] = useState("");
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [scanning, setScanning] = useState(false);
   const [creating, setCreating] = useState(false);
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -639,18 +641,22 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
     if (!path.trim()) return;
     setScanning(true);
     try {
-      const project = await createProject(path.trim(), null);
-      const ordered: ProjectOrdered = { ...project, session_count: 0, last_opened_at: null, path_exists: true };
-      setAllProjects((prev) => [ordered, ...prev.filter((r) => r.id !== project.id)]);
-      setSelectedProjectIds((prev) =>
-        prev.includes(project.id) ? prev : (isShellOnly ? [project.id] : [...prev, project.id])
-      );
+      addChosenProject(await createProject(path.trim(), null));
       setScanPath("");
     } catch (err) {
       console.error("Failed to create project:", err);
     } finally {
       setScanning(false);
     }
+  };
+
+  /** A folder added here (typed, browsed or made new) joins the session's folders. */
+  const addChosenProject = (project: Project) => {
+    const ordered: ProjectOrdered = { ...project, session_count: 0, last_opened_at: null, path_exists: true };
+    setAllProjects((prev) => [ordered, ...prev.filter((r) => r.id !== project.id)]);
+    setSelectedProjectIds((prev) =>
+      prev.includes(project.id) ? prev : (isShellOnly ? [project.id] : [...prev, project.id])
+    );
   };
 
   const handleBrowse = async () => {
@@ -1191,7 +1197,20 @@ export function SessionCreator({ onClose, onCreate, defaultGroup, initialMode, o
               <Button className="session-creator-scan-btn" onClick={() => scanNewPath(scanPath)} disabled={scanning || !scanPath.trim()}>
                 {t("common.scan")}
               </Button>
+              <Button className="session-creator-scan-btn session-creator-new-folder" onClick={() => setNewFolderOpen(true)} disabled={newFolderOpen}>
+                {t("newFolder.open")}
+              </Button>
             </div>
+            {newFolderOpen && (
+              <NewFolderForm
+                projects={allProjects}
+                onCreated={(project) => {
+                  addChosenProject(project);
+                  setNewFolderOpen(false);
+                }}
+                onCancel={() => setNewFolderOpen(false)}
+              />
+            )}
             {nonGitSelected.length > 0 && (
               <div className="session-creator-nongit" role="note">
                 {nonGitSelected.map((hint) => (

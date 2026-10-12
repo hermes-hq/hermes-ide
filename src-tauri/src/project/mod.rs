@@ -58,6 +58,146 @@ pub struct ProjectOrdered {
 
 // ─── IPC Commands ────────────────────────────────────────────────────
 
+/// What a new project folder starts with (the New folder form's checkboxes).
+#[derive(Debug, Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewFolderOptions {
+    /// `git init`.
+    pub git: bool,
+    /// An AGENTS.md to fill in, with CLAUDE.md importing it.
+    pub agents_md: bool,
+    pub readme: bool,
+    /// Only with `git`.
+    pub gitignore: bool,
+}
+
+/// The IDE's "New Project": makes the folder `name` inside `parent` (a
+/// leading `~` is the home folder) with what `options` asks for, and adds it
+/// as a project. An existing folder is never touched.
+#[tauri::command]
+pub fn create_project_folder(
+    state: State<'_, AppState>,
+    app: AppHandle,
+    parent: String,
+    name: String,
+    options: NewFolderOptions,
+) -> Result<Project, String> {
+    let dir = make_project_folder(&parent, &name, options)?;
+    create_project(
+        state,
+        app,
+        dir.to_string_lossy().to_string(),
+        Some(name.trim().to_string()),
+    )
+}
+
+const AGENTS_MD: &str = "# {name}
+
+Instructions for the coding agents working in this project. Claude Code reads
+them through CLAUDE.md; Codex, Cursor, Copilot and most others read this file.
+
+## What this project is
+
+## How to build, run and test
+
+## Conventions
+";
+
+/// Common clutter of most stacks; a project adds its own.
+const GITIGNORE: &str = ".DS_Store
+Thumbs.db
+.env
+.env.*
+!.env.example
+*.log
+node_modules/
+dist/
+build/
+target/
+.venv/
+__pycache__/
+";
+
+fn make_project_folder(
+    parent: &str,
+    name: &str,
+    options: NewFolderOptions,
+) -> Result<std::path::PathBuf, String> {
+    let name = name.trim();
+    if name.is_empty() {
+        return Err("Give the folder a name.".to_string());
+    }
+    const NOT_IN_NAMES: &[char] = &['/', '\\', ':', '*', '?', '"', '<', '>', '|'];
+    if name == "."
+        || name == ".."
+        || name
+            .chars()
+            .any(|c| c.is_control() || NOT_IN_NAMES.contains(&c))
+    {
+        return Err(format!("\"{name}\" cannot be a folder name."));
+    }
+    let parent = parent.trim();
+    let parent = match parent.strip_prefix('~') {
+        Some(rest) if rest.is_empty() || rest.starts_with('/') || rest.starts_with('\\') => {
+            let home = dirs::home_dir().ok_or("Your home folder could not be found.")?;
+            home.join(rest.trim_start_matches(['/', '\\']))
+        }
+        _ => std::path::PathBuf::from(parent),
+    };
+    if !parent.is_dir() {
+        return Err(format!("{} is not a folder.", parent.display()));
+    }
+    let dir = parent.join(name);
+    std::fs::create_dir(&dir).map_err(|e| {
+        if e.kind() == std::io::ErrorKind::AlreadyExists {
+            format!("{} already exists.", dir.display())
+        } else {
+            format!("Could not create {}: {e}", dir.display())
+        }
+    })?;
+    if let Err(e) = fill_project_folder(&dir, name, options) {
+        // The folder is ours and new: take it back rather than leave half a project.
+        let _ = std::fs::remove_dir_all(&dir);
+        return Err(e);
+    }
+    Ok(dir)
+}
+
+fn fill_project_folder(
+    dir: &std::path::Path,
+    name: &str,
+    options: NewFolderOptions,
+) -> Result<(), String> {
+    let write = |file: &str, text: &str| {
+        std::fs::write(dir.join(file), text).map_err(|e| format!("Could not write {file}: {e}"))
+    };
+    if options.git {
+        let out = crate::git::cli::git_command()
+            .arg("init")
+            .arg("--quiet")
+            .current_dir(dir)
+            .output()
+            .map_err(|e| format!("Could not start a git repository: {e}"))?;
+        if !out.status.success() {
+            return Err(format!(
+                "Could not start a git repository: {}",
+                String::from_utf8_lossy(&out.stderr).trim()
+            ));
+        }
+        if options.gitignore {
+            write(".gitignore", GITIGNORE)?;
+        }
+    }
+    if options.readme {
+        write("README.md", &format!("# {name}\n"))?;
+    }
+    if options.agents_md {
+        write("AGENTS.md", &AGENTS_MD.replace("{name}", name))?;
+        crate::agent_setup::link("claude", dir)?;
+    }
+    Ok(())
+}
+
 #[tauri::command]
 pub fn create_project(
     state: State<'_, AppState>,
@@ -355,4 +495,110 @@ pub fn scan_project(
     });
 
     Ok(())
+}
+
+#[cfg(test)]
+mod new_folder_tests {
+    use super::{make_project_folder, NewFolderOptions};
+
+    const PLAIN: NewFolderOptions = NewFolderOptions {
+        git: false,
+        agents_md: false,
+        readme: false,
+        gitignore: false,
+    };
+
+    fn names(dir: &std::path::Path) -> Vec<String> {
+        let mut n: Vec<String> = std::fs::read_dir(dir)
+            .unwrap()
+            .map(|e| e.unwrap().file_name().to_string_lossy().to_string())
+            .collect();
+        n.sort();
+        n
+    }
+
+    #[test]
+    fn makes_the_folder_with_everything_asked_for() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let all = NewFolderOptions {
+            git: true,
+            agents_md: true,
+            readme: true,
+            gitignore: true,
+        };
+        let dir =
+            make_project_folder(tmp.path().to_str().unwrap(), "  habit-tracker ", all).unwrap();
+        assert_eq!(dir, tmp.path().join("habit-tracker"));
+        assert_eq!(
+            names(&dir),
+            [".git", ".gitignore", "AGENTS.md", "CLAUDE.md", "README.md"]
+        );
+        assert!(dir.join(".git").is_dir());
+        let agents = std::fs::read_to_string(dir.join("AGENTS.md")).unwrap();
+        assert!(agents.starts_with("# habit-tracker\n"), "{agents}");
+        assert_eq!(
+            std::fs::read_to_string(dir.join("CLAUDE.md")).unwrap(),
+            "@AGENTS.md\n"
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.join("README.md")).unwrap(),
+            "# habit-tracker\n"
+        );
+        assert!(std::fs::read_to_string(dir.join(".gitignore"))
+            .unwrap()
+            .contains(".env\n"));
+    }
+
+    #[test]
+    fn makes_an_empty_folder_when_nothing_is_asked() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let dir = make_project_folder(tmp.path().to_str().unwrap(), "notes", PLAIN).unwrap();
+        assert!(dir.is_dir());
+        assert!(names(&dir).is_empty());
+    }
+
+    #[test]
+    fn writes_no_gitignore_without_a_repository() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let opts = NewFolderOptions {
+            gitignore: true,
+            ..PLAIN
+        };
+        let dir = make_project_folder(tmp.path().to_str().unwrap(), "plain", opts).unwrap();
+        assert!(names(&dir).is_empty());
+    }
+
+    #[test]
+    fn never_touches_an_existing_folder() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join("taken")).unwrap();
+        std::fs::write(tmp.path().join("taken").join("keep.txt"), "mine").unwrap();
+        let all = NewFolderOptions {
+            git: true,
+            agents_md: true,
+            readme: true,
+            gitignore: true,
+        };
+        let err = make_project_folder(tmp.path().to_str().unwrap(), "taken", all).unwrap_err();
+        assert!(err.contains("already exists"), "{err}");
+        assert_eq!(names(&tmp.path().join("taken")), ["keep.txt"]);
+    }
+
+    #[test]
+    fn refuses_names_that_are_not_one_folder() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let parent = tmp.path().to_str().unwrap();
+        for bad in ["", "   ", ".", "..", "a/b", "a\\b", "x:y"] {
+            assert!(make_project_folder(parent, bad, PLAIN).is_err(), "{bad:?}");
+        }
+        assert!(names(tmp.path()).is_empty());
+    }
+
+    #[test]
+    fn refuses_a_parent_that_is_not_a_folder() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let missing = tmp.path().join("nope");
+        let err = make_project_folder(missing.to_str().unwrap(), "app", PLAIN).unwrap_err();
+        assert!(err.contains("is not a folder"), "{err}");
+    }
 }
