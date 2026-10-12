@@ -22,23 +22,61 @@ interface CacheEntry {
   pollInterval: number;
   /** All requested intervals so we can recompute on unsubscribe */
   requestedIntervals: Map<() => void, number>;
+  /** A status call is pending; ticks skip until it settles */
+  inFlight: boolean;
+  /** A forced refresh arrived while a call was pending; run one more after it */
+  again: boolean;
 }
 
 const cache = new Map<string, CacheEntry>();
 
-function fetchAndNotify(workDir: string) {
+const windowHidden = () => typeof document !== "undefined" && document.visibilityState === "hidden";
+
+/**
+ * One status walk per directory at a time, and no timed walks while the
+ * window is hidden: on a big repo a walk can outlast the interval, and
+ * overlapping walks of the same tree only make each other slower.
+ * `force` (first subscriber, explicit refresh) runs even when hidden, and
+ * queues one follow-up call instead of being dropped while one is pending.
+ */
+function fetchAndNotify(workDir: string, force = false) {
   const entry = cache.get(workDir);
   if (!entry) return;
+  if (!force && windowHidden()) return;
+  if (entry.inFlight) {
+    if (force) entry.again = true;
+    return;
+  }
+  entry.inFlight = true;
   gitStatus(entry.sessionId)
     .then((result) => {
       const current = cache.get(workDir);
-      if (!current) return;
+      if (current !== entry) return;
       current.data = result;
       current.listeners.forEach((cb) => cb());
     })
     .catch(() => {
       // Silently ignore — previous data remains
+    })
+    .finally(() => {
+      entry.inFlight = false;
+      if (entry.again && cache.get(workDir) === entry) {
+        entry.again = false;
+        fetchAndNotify(workDir, true);
+      }
     });
+}
+
+let visibilityAttached = false;
+
+/** Catch up once when the window comes back instead of waiting a full interval. */
+function attachVisibilityRefresh() {
+  if (visibilityAttached || typeof document === "undefined") return;
+  visibilityAttached = true;
+  document.addEventListener("visibilitychange", () => {
+    if (windowHidden()) return;
+    for (const workDir of cache.keys()) fetchAndNotify(workDir);
+  });
 }
 
 function restartPolling(workDir: string, entry: CacheEntry) {
@@ -82,8 +120,11 @@ export function subscribeGitStatus(
       listeners: new Set(),
       pollInterval: DEFAULT_POLL_INTERVAL,
       requestedIntervals: new Map(),
+      inFlight: false,
+      again: false,
     };
     cache.set(workDir, entry);
+    attachVisibilityRefresh();
   }
 
   // Update the sessionId — use the latest subscriber's session
@@ -98,7 +139,7 @@ export function subscribeGitStatus(
   entry.pollInterval = newInterval;
 
   if (entry.refCount === 1) {
-    fetchAndNotify(workDir);
+    fetchAndNotify(workDir, true);
   }
   if (needsRestart) {
     restartPolling(workDir, entry);
@@ -130,5 +171,5 @@ export function getGitStatusSnapshot(workDir: string): GitSessionStatus | null {
 
 /** Force an immediate refresh (e.g. after a git operation). */
 export function refreshGitStatus(workDir: string): void {
-  fetchAndNotify(workDir);
+  fetchAndNotify(workDir, true);
 }

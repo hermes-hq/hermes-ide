@@ -68,7 +68,7 @@ export function useSessionGitSummary(
       behind: p.behind,
       hasConflicts: p.has_conflicts,
     }));
-    setSummary({
+    const next: SessionGitSummary = {
       branch: first.branch,
       changeCount: first.files.length,
       ahead: first.ahead,
@@ -76,7 +76,10 @@ export function useSessionGitSummary(
       hasConflicts: first.has_conflicts,
       isLoading: false,
       allBranches,
-    });
+    };
+    // Every poll delivers a fresh object; keep the old one when nothing
+    // changed so the row does not re-render on each tick.
+    setSummary((prev) => (JSON.stringify(prev) === JSON.stringify(next) ? prev : next));
   }, []);
 
   useEffect(() => {
