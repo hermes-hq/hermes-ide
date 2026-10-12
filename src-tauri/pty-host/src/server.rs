@@ -239,14 +239,19 @@ fn janitor(sessions: Sessions, cfg: Arc<Config>, started: Instant) {
             std::thread::sleep(Duration::from_millis(250));
             let mut map = sessions.lock().unwrap_or_else(|e| e.into_inner());
             map.retain(|id, sess| {
-                let s = sess.lock().unwrap_or_else(|e| e.into_inner());
+                let mut s = sess.lock().unwrap_or_else(|e| e.into_inner());
                 // A session ended on request is forgotten at once: nobody
                 // needs to be told it ended (Hermes stops idle terminals
                 // this way when it quits, then starts new ones on restore).
-                let gone = s.exited
+                // Its program having ended is enough: on Linux a leftover
+                // background job (`cmd & disown`, `ssh -fN`) can keep the
+                // terminal open, so its output never ends, and the host
+                // would never empty out and exit.
+                let gone = (s.exited
                     && (s.exit_delivered
                         || s.kill_requested
-                        || s.exited_at.is_some_and(|t| t.elapsed() >= cfg.exited_keep));
+                        || s.exited_at.is_some_and(|t| t.elapsed() >= cfg.exited_keep)))
+                    || (s.kill_requested && matches!(s.child.try_wait(), Ok(Some(_))));
                 if gone {
                     log(&format!("forgot ended session {id}"));
                 }

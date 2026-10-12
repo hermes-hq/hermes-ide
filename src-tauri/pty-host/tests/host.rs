@@ -754,3 +754,47 @@ fn resize_and_kill_still_reach_a_program_that_leaves_its_input_unread() {
     }
     assert!(!pid_alive(pid), "killed program is gone");
 }
+
+#[test]
+fn a_session_ended_on_request_is_forgotten_while_a_leftover_job_holds_its_terminal() {
+    // On Linux the terminal stays open while any process holds it, so a job
+    // the shell left behind in a session of its own (`ssh -fN`, `cmd &
+    // disown`) kept the session's output from ever ending. A closed session
+    // stayed listed for good, and the host never exited.
+    let mut host = Host::start(300, 200);
+    let mut c = host.connect().unwrap();
+    c.spawn(
+        "leftover",
+        sh("perl -MPOSIX -e 'setsid(); sleep 30' & echo job=$!; while :; do sleep 0.1; done"),
+        env_min(),
+        "/",
+        24,
+        80,
+    )
+    .unwrap();
+    let mut attached = host.connect().unwrap().attach("leftover", 24, 80).unwrap();
+    attached
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .unwrap();
+    let mut reader = attached.take_reader().unwrap();
+    let text = read_until(&mut reader, "\n", Duration::from_secs(10));
+    let job: i32 = text
+        .split("job=")
+        .nth(1)
+        .and_then(|s| s.split_whitespace().next())
+        .and_then(|s| s.parse().ok())
+        .unwrap_or_else(|| panic!("no job pid in {text:?}"));
+    // Give perl a moment to call setsid().
+    std::thread::sleep(Duration::from_millis(300));
+
+    host.connect().unwrap().kill("leftover").unwrap();
+    let exited = host.wait_exit(Duration::from_secs(10));
+    unsafe {
+        libc::kill(job, libc::SIGKILL);
+    }
+    assert!(
+        exited,
+        "the host forgets the session and exits:\n{}",
+        host.log()
+    );
+}
