@@ -10,7 +10,7 @@
 //! order are the N best by static rank: search takes 300 such candidates
 //! and reranks only those, whatever the catalog size (design §12.5).
 
-use super::catalog::{compare_static, parse_ref, Manifest, Row, VerifiedCatalog, Vocab};
+use super::catalog::{compare_static, parse_ref, Manifest, Row, ShardList, VerifiedCatalog, Vocab};
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
@@ -18,6 +18,10 @@ use std::path::Path;
 
 /// Bumped when the schema below changes; an older file is rebuilt.
 pub const STORE_VERSION: i64 = 1;
+
+/// Manifests kept in the history, the current one included: the earlier
+/// ones are what a rollback can go back to.
+const KEEP_MANIFESTS: i64 = 3;
 
 const SCHEMA: &str = "
 CREATE TABLE IF NOT EXISTS entry (
@@ -424,8 +428,105 @@ pub fn apply(
         ],
     )
     .map_err(|e| e.to_string())?;
+    prune_unreferenced(&tx, cat)?;
     tx.commit().map_err(|e| e.to_string())?;
     Ok(summary)
+}
+
+/// Drops the oldest manifests from the history, then every object and body
+/// no kept manifest references. Each update stores the shards and bodies it
+/// changed, so without this the file grows with every catalog release.
+fn prune_unreferenced(conn: &Connection, cat: &VerifiedCatalog) -> Result<(), String> {
+    let err = |e: rusqlite::Error| e.to_string();
+    conn.execute(
+        "DELETE FROM manifest_history WHERE rowid NOT IN
+           (SELECT rowid FROM manifest_history ORDER BY applied_at DESC, seq DESC LIMIT ?1)",
+        [KEEP_MANIFESTS],
+    )
+    .map_err(err)?;
+
+    // The catalog just applied, from memory: it must survive even if a
+    // stored object cannot be read back.
+    let mut objects: HashSet<String> = cat.objects.iter().map(|(h, _)| h.clone()).collect();
+    let mut bodies: HashSet<String> = cat
+        .rows
+        .iter()
+        .filter_map(|(r, _)| parse_ref(&r.body).ok())
+        .collect();
+    let earlier: Vec<Vec<u8>> = {
+        let mut stmt = conn
+            .prepare("SELECT manifest FROM manifest_history WHERE sha256 != ?1")
+            .map_err(err)?;
+        let rows = stmt
+            .query_map([&cat.manifest_sha], |r| r.get(0))
+            .map_err(err)?;
+        rows.filter_map(Result::ok).collect()
+    };
+    for bytes in earlier {
+        let Ok(m) = serde_json::from_slice::<Manifest>(&bytes) else {
+            continue;
+        };
+        let mut refs: Vec<&str> = m.vocab.iter().map(String::as_str).collect();
+        refs.extend(m.packs.values().filter_map(|p| {
+            p.as_str()
+                .or_else(|| p.get("object").and_then(|o| o.as_str()))
+        }));
+        for r in refs {
+            if let Ok(hex) = parse_ref(r) {
+                objects.insert(hex);
+            }
+        }
+        for tier in m.tiers.values() {
+            let Ok(list_hex) = parse_ref(&tier.list) else {
+                continue;
+            };
+            objects.insert(list_hex.clone());
+            let Some(list) = stored_object(conn, &list_hex)
+                .and_then(|b| serde_json::from_slice::<ShardList>(&b).ok())
+            else {
+                continue;
+            };
+            for shard in list.shards.values() {
+                let Ok(hex) = parse_ref(&shard.object) else {
+                    continue;
+                };
+                // A shard already kept had its bodies counted with it.
+                if !objects.insert(hex.clone()) {
+                    continue;
+                }
+                let Some(text) = stored_object(conn, &hex) else {
+                    continue;
+                };
+                for line in String::from_utf8_lossy(&text).lines() {
+                    let body = serde_json::from_str::<serde_json::Value>(line)
+                        .ok()
+                        .and_then(|v| parse_ref(v.get("body")?.as_str()?).ok());
+                    if let Some(h) = body {
+                        bodies.insert(h);
+                    }
+                }
+            }
+        }
+    }
+
+    for (table, keep) in [("object", &objects), ("body_cache", &bodies)] {
+        let stale: Vec<String> = {
+            let mut stmt = conn
+                .prepare(&format!("SELECT hash FROM {table}"))
+                .map_err(err)?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).map_err(err)?;
+            rows.filter_map(Result::ok)
+                .filter(|h| !keep.contains(h))
+                .collect()
+        };
+        let mut del = conn
+            .prepare(&format!("DELETE FROM {table} WHERE hash = ?1"))
+            .map_err(err)?;
+        for h in stale {
+            del.execute([h]).map_err(err)?;
+        }
+    }
+    Ok(())
 }
 
 // ─── Reading ──────────────────────────────────────────────────────────
@@ -675,6 +776,40 @@ mod tests {
         assert_eq!(s.removed, vec!["summarize-notes".to_string()]);
         assert_eq!(new_ids(&conn).len(), 2);
         assert!(previous_manifest(&conn).is_some());
+    }
+
+    #[test]
+    fn an_update_drops_what_only_older_catalogs_used() {
+        let count = |conn: &Connection, table: &str| -> i64 {
+            conn.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r.get(0))
+                .unwrap()
+        };
+        let mut conn = loaded();
+        let first = parse_ref(&row_by_id(&conn, "summarize-notes").unwrap().row.body).unwrap();
+        for seq in 2..=5 {
+            let text = format!("Body number {seq}.");
+            let f = catalog::tests::fixture(
+                &format!("2026.01{seq:02}.0"),
+                seq,
+                &[("find-root-cause", serde_json::json!({}), text.as_str())],
+            );
+            let mut src = f.objects.clone();
+            let cat = catalog::collect(&f.manifest, &mut src, true, &known_bodies(&conn)).unwrap();
+            apply(&mut conn, &cat, "update").unwrap();
+        }
+        assert_eq!(count(&conn, "manifest_history"), KEEP_MANIFESTS);
+        // The shared vocab plus a shard and a shard list per kept catalog.
+        assert_eq!(count(&conn, "object"), 1 + 2 * KEEP_MANIFESTS);
+        assert_eq!(count(&conn, "body_cache"), KEEP_MANIFESTS);
+        assert!(!known_bodies(&conn).contains(&first));
+
+        // Going back one catalog still works offline.
+        let s = super::super::update::rollback(&mut conn).unwrap();
+        assert_eq!(s.seq, 4);
+        let row = row_by_id(&conn, "find-root-cause").unwrap();
+        assert!(body(&conn, &row.row.body)
+            .unwrap()
+            .contains("Body number 4."));
     }
 
     #[test]
