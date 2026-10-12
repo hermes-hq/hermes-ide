@@ -461,10 +461,14 @@ pub struct SpendTracker {
     anonymous: Vec<(CallTokens, Option<String>)>,
     codex: Option<(u64, u64)>,
     last: Option<(u64, u64, Option<u64>)>,
+    /// Something was fed since the last `event`. The totals are re-summed over
+    /// every call of the launch, so an idle poll must not pay for that.
+    dirty: bool,
 }
 
 impl SpendTracker {
     pub fn feed(&mut self, record: SpendRecord) {
+        self.dirty = true;
         match record {
             SpendRecord::Call {
                 id,
@@ -535,6 +539,9 @@ impl SpendTracker {
     /// A `usage` event (confidence `estimated`) when the totals changed
     /// since the last one sent.
     pub fn event(&mut self, at: i64, source: &str) -> Option<SessionEvent> {
+        if !std::mem::take(&mut self.dirty) {
+            return None;
+        }
         let (input, output, cost) = self.totals()?;
         // Compared in micro-dollars: a float that moved by rounding only is no news.
         let now = (
@@ -1521,6 +1528,34 @@ mod tests {
         let events = events_for_lines(&mut t, &mut spend, &live, 2, "transcript:claude", false);
         let (input, output, _, _) = usage_of(&events).expect("a totals event");
         assert_eq!((input, output), (Some(100), Some(10)));
+    }
+
+    #[test]
+    fn an_idle_poll_does_not_re_sum_the_launch() {
+        // Each poll with no new lines used to re-price every call since launch.
+        let mut t = UsageTracker::default();
+        let mut spend = SpendTracker::default();
+        let lines = vec![call("msg_a", "claude-sonnet-4-6", 100, 0, 0, 10)];
+        let events = events_for_lines(&mut t, &mut spend, &lines, 1, "transcript:claude", false);
+        assert!(usage_of(&events).is_some());
+        // A change that did not come through `feed` is invisible to an idle
+        // poll: proof that the totals were not summed again.
+        spend.calls.insert(
+            "msg_hidden".into(),
+            (
+                CallTokens {
+                    input: 5,
+                    ..Default::default()
+                },
+                None,
+            ),
+        );
+        let idle = events_for_lines(&mut t, &mut spend, &[], 2, "transcript:claude", false);
+        assert!(usage_of(&idle).is_none());
+        // New lines still produce totals.
+        let more = vec![call("msg_b", "claude-sonnet-4-6", 1, 0, 0, 1)];
+        let events = events_for_lines(&mut t, &mut spend, &more, 3, "transcript:claude", false);
+        assert!(usage_of(&events).is_some());
     }
 
     #[test]
