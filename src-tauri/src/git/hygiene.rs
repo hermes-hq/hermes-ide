@@ -341,6 +341,35 @@ fn admin_dir(path: &Path) -> Option<PathBuf> {
     run(git_at(path).args(["rev-parse", "--absolute-git-dir"])).map(PathBuf::from)
 }
 
+// ─── Kept by the person ─────────────────────────────────────────────
+
+/// Marks a worktree the person chose to keep on close. It sits in git's
+/// private folder for the worktree, so `git status` never sees it, and it
+/// goes when the worktree does.
+const KEPT_MARKER: &str = "hermes-kept";
+
+/// git's private folder for the worktree at `path`, from its `.git` file
+/// (no git process: this runs for every folder of every scan).
+fn admin_dir_from_git_file(path: &Path) -> Option<PathBuf> {
+    let text = fs::read_to_string(path.join(".git")).ok()?;
+    let dir = text.trim().strip_prefix("gitdir:")?.trim();
+    Some(path.join(dir))
+}
+
+/// Record that the person keeps the worktree at `path`: no automatic
+/// cleanup removes it from now on.
+pub fn mark_kept(path: &Path) -> Result<(), String> {
+    let admin = admin_dir_from_git_file(path)
+        .filter(|d| d.is_dir())
+        .ok_or_else(|| format!("{} is not a git worktree", path.display()))?;
+    fs::write(admin.join(KEPT_MARKER), b"").map_err(|e| e.to_string())
+}
+
+/// The person chose to keep this worktree; only they may remove it.
+pub fn is_kept(path: &Path) -> bool {
+    admin_dir_from_git_file(path).is_some_and(|d| d.join(KEPT_MARKER).is_file())
+}
+
 // ─── Last used ──────────────────────────────────────────────────────
 
 /// A time from the database: SQLite's `YYYY-MM-DD HH:MM:SS` (UTC) or RFC 3339.
@@ -596,7 +625,7 @@ pub fn inspect(
             .sum()
     };
     let total_bytes = allocated_size(path);
-    let decision = decide(PolicyInput {
+    let mut decision = decide(PolicyInput {
         open,
         linked: !links.is_empty(),
         idle: is_idle(used, now, settings.idle_days),
@@ -604,6 +633,9 @@ pub fn inspect(
         facts: &facts,
         build_output_bytes,
     });
+    if is_kept(path) {
+        decision.auto_action = AutoAction::None;
+    }
     let auto_bytes = match decision.auto_action {
         AutoAction::None => 0,
         AutoAction::RemoveBuildOutput => build_output_bytes,
@@ -1000,6 +1032,10 @@ pub fn remove_worktree_safely(
         }
         return outcome;
     };
+    if requester == Requester::Automatic && is_kept(path) {
+        outcome.error = Some("You chose to keep it; left for you to decide".into());
+        return outcome;
+    }
     let facts = work_facts(repo, path);
     if requester == Requester::Automatic {
         let d = decide(PolicyInput {
@@ -1066,6 +1102,13 @@ pub fn remove_worktree_safely(
 /// nothing in it can be lost (clean, no commits that exist only there).
 /// Anything else stays for the Storage view. True when removed.
 pub fn remove_orphan_if_nothing_to_lose(app_data: &Path, repo: &Path, path: &Path) -> bool {
+    if is_kept(path) {
+        log::info!(
+            "[hygiene] keeping worktree '{}': the person chose to keep it",
+            path.display()
+        );
+        return false;
+    }
     let facts = work_facts(repo, path);
     if !facts.git_knows || facts.has_work() {
         log::info!(
@@ -1663,6 +1706,57 @@ mod tests {
             &dirty
         ));
         assert!(dirty.join("x.txt").exists());
+    }
+
+    #[test]
+    fn a_kept_worktree_is_never_removed_automatically_even_when_clean() {
+        let l = layout();
+        let kept = add_worktree(&l, "a_kept", "kept");
+        fs::write(kept.join(".env"), "SECRET=1").unwrap(); // ignored, so "clean"
+        mark_kept(&kept).unwrap();
+        assert!(is_kept(&kept));
+        assert!(git(&kept, &["status", "--porcelain"]).is_empty());
+        assert!(!remove_orphan_if_nothing_to_lose(
+            &l.app_data,
+            &l.repo,
+            &kept
+        ));
+        let out = remove_worktree_safely(
+            &l.app_data,
+            &l.base,
+            Some(&l.repo),
+            &kept,
+            false,
+            Requester::Automatic,
+        );
+        assert!(!out.removed, "{out:?}");
+        let settings = HygieneSettings {
+            idle_days: 0,
+            ..Default::default()
+        };
+        let entries = scan(
+            &l.base,
+            &[],
+            &HashSet::new(),
+            &settings,
+            SystemTime::now() + Duration::from_secs(60),
+        );
+        assert_eq!(entries[0].decision.state, LifeState::Orphaned);
+        assert_eq!(entries[0].decision.auto_action, AutoAction::None);
+        assert_eq!(entries[0].auto_bytes, 0);
+        assert!(kept.join(".env").exists());
+        // The person can still remove it.
+        let out = remove_worktree_safely(
+            &l.app_data,
+            &l.base,
+            Some(&l.repo),
+            &kept,
+            false,
+            Requester::Person {
+                allow_unrecoverable: false,
+            },
+        );
+        assert!(out.removed, "{out:?}");
     }
 
     #[test]

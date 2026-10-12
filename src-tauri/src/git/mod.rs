@@ -3440,6 +3440,15 @@ fn keep_worktree(
         return Err("This session has no worktree of its own".into());
     };
     db.delete_session_worktree(&row.id)?;
+    // Without its link the folder looks like an orphan: the marker keeps
+    // startup and the hygiene pass from removing it once it is clean.
+    if let Err(e) = hygiene::mark_kept(Path::new(&row.worktree_path)) {
+        log::warn!(
+            "[worktree] could not mark {} as kept: {}",
+            row.worktree_path,
+            e
+        );
+    }
     log::info!(
         "[worktree] kept {} on close of session {}",
         row.worktree_path,
@@ -5691,6 +5700,7 @@ mod tests {
             .insert_session_worktree("w1", "s1", "p1", &wt, Some("task"), false)
             .unwrap();
         assert_eq!(keep_worktree(&db, "s1", "p1").unwrap(), wt);
+        assert!(hygiene::is_kept(Path::new(&wt)));
         assert!(db
             .lock()
             .unwrap()
