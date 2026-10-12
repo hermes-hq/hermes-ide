@@ -48,9 +48,12 @@ pub fn mirrors() -> Vec<String> {
 }
 
 /// Whether the background task should check now.
+/// A stamp later than `now` (written while the clock was ahead) counts as no
+/// stamp: otherwise checks would stop until the clock caught up with it.
 pub fn due(now: i64, last_check: Option<i64>, last_success: Option<i64>) -> bool {
-    let since_success = last_success.map(|t| now - t).unwrap_or(i64::MAX);
-    let since_check = last_check.map(|t| now - t).unwrap_or(i64::MAX);
+    let since = |t: Option<i64>| t.filter(|&t| t <= now).map_or(i64::MAX, |t| now - t);
+    let since_success = since(last_success);
+    let since_check = since(last_check);
     since_success >= INTERVAL_SECS && since_check >= RETRY_SECS
 }
 
@@ -462,6 +465,17 @@ mod tests {
         // A failed check an hour ago and no success for days: try again.
         assert!(due(200_000, Some(200_000 - RETRY_SECS), Some(0)));
         assert!(!due(200_000, Some(200_000 - 60), Some(0)));
+    }
+
+    #[test]
+    fn a_check_stamped_while_the_clock_was_ahead_does_not_stop_checks() {
+        let month = 30 * 24 * 3600;
+        assert!(due(100_000, Some(100_000 + month), Some(100_000 + month)));
+        assert!(due(
+            100_000,
+            Some(100_000 - RETRY_SECS),
+            Some(100_000 + month)
+        ));
     }
 
     #[test]
