@@ -6,9 +6,16 @@ use crate::protocol::{
 };
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
-use std::path::Path;
-use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::path::{Path, PathBuf};
+use std::sync::{Arc, Mutex, MutexGuard, TryLockError};
+use std::time::{Duration, Instant};
+
+/// How long resize, kill and detach wait for the live channel while input
+/// is being written to it.
+const CHANNEL_WAIT: Duration = Duration::from_millis(200);
+/// Bounds a request sent beside the live channel, so a host that stopped
+/// reading cannot hold the caller (the app's main thread) for good.
+const SIDE_REQUEST_TIMEOUT: Duration = Duration::from_secs(2);
 
 /// What the host said in its `HelloAck`.
 #[derive(Debug, Clone)]
@@ -22,6 +29,8 @@ pub struct HostInfo {
 pub struct Connection {
     stream: UnixStream,
     info: HostInfo,
+    socket: PathBuf,
+    token: String,
 }
 
 fn other(msg: impl Into<String>) -> io::Error {
@@ -66,7 +75,12 @@ impl Connection {
             }
             _ => return Err(other("host did not answer the hello")),
         };
-        Ok(Self { stream, info })
+        Ok(Self {
+            stream,
+            info,
+            socket: socket.to_path_buf(),
+            token: token.to_string(),
+        })
     }
 
     pub fn info(&self) -> &HostInfo {
@@ -162,6 +176,7 @@ impl Connection {
         self.stream.set_read_timeout(None)?;
         self.stream.set_write_timeout(None)?;
         let reader = self.stream.try_clone()?;
+        let hangup = self.stream.try_clone()?;
         Ok(Attached {
             id: id.to_string(),
             pid,
@@ -170,6 +185,9 @@ impl Connection {
             replay_bytes,
             out: Arc::new(Mutex::new(self.stream)),
             reader: Some(reader),
+            hangup,
+            socket: self.socket,
+            token: self.token,
         })
     }
 }
@@ -186,6 +204,10 @@ pub struct Attached {
     pub replay_bytes: u64,
     out: Arc<Mutex<UnixStream>>,
     reader: Option<UnixStream>,
+    /// Closes the channel without waiting for `out`.
+    hangup: UnixStream,
+    socket: PathBuf,
+    token: String,
 }
 
 impl Attached {
@@ -219,9 +241,25 @@ impl Attached {
         })
     }
 
+    /// Sends a request on the live channel, or, while input is stuck on it
+    /// (the program leaves it unread and an older host waits on that),
+    /// over a connection of its own. Never blocks for long either way.
     fn send(&self, msg: Msg) -> io::Result<()> {
-        let mut stream = self.out.lock().unwrap_or_else(|e| e.into_inner());
-        write_frame(&mut *stream, &Frame::Msg(msg))
+        if let Some(mut stream) = lock_within(&self.out, CHANNEL_WAIT) {
+            stream.set_write_timeout(Some(SIDE_REQUEST_TIMEOUT))?;
+            let sent = write_frame(&mut *stream, &Frame::Msg(msg));
+            let _ = stream.set_write_timeout(None);
+            if sent.is_err() {
+                // A frame cut short leaves the channel unreadable.
+                let _ = stream.shutdown(std::net::Shutdown::Both);
+            }
+            return sent;
+        }
+        let mut conn = Connection::connect(&self.socket, &self.token, SIDE_REQUEST_TIMEOUT)?;
+        match conn.request(msg)? {
+            Msg::Ok => Ok(()),
+            other_msg => Err(other(format!("unexpected reply {other_msg:?}"))),
+        }
     }
 
     pub fn resize(&self, rows: u16, cols: u16) -> io::Result<()> {
@@ -240,9 +278,29 @@ impl Attached {
 
     /// Leaves the program running in the host and closes the channel.
     pub fn detach(&self) {
-        let _ = self.send(Msg::Detach);
-        let stream = self.out.lock().unwrap_or_else(|e| e.into_inner());
-        let _ = stream.shutdown(std::net::Shutdown::Both);
+        // The host takes a closed channel as a detach too, so a stuck one is
+        // just closed.
+        if let Some(mut stream) = lock_within(&self.out, CHANNEL_WAIT) {
+            if stream.set_write_timeout(Some(SIDE_REQUEST_TIMEOUT)).is_ok() {
+                let _ = write_frame(&mut *stream, &Frame::Msg(Msg::Detach));
+            }
+        }
+        let _ = self.hangup.shutdown(std::net::Shutdown::Both);
+    }
+}
+
+/// Locks `m`, giving up after `wait`.
+fn lock_within<T>(m: &Mutex<T>, wait: Duration) -> Option<MutexGuard<'_, T>> {
+    let deadline = Instant::now() + wait;
+    loop {
+        match m.try_lock() {
+            Ok(guard) => return Some(guard),
+            Err(TryLockError::Poisoned(e)) => return Some(e.into_inner()),
+            Err(TryLockError::WouldBlock) if Instant::now() < deadline => {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            Err(TryLockError::WouldBlock) => return None,
+        }
     }
 }
 
@@ -305,5 +363,108 @@ impl Write for FrameWriter {
 
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::unix::net::UnixListener;
+    use std::sync::mpsc;
+
+    fn handshake(stream: &mut UnixStream) {
+        match read_frame(stream).unwrap() {
+            Some(Frame::Msg(Msg::Hello { .. })) => {}
+            other => panic!("expected hello, got {other:?}"),
+        }
+        write_frame(
+            stream,
+            &Frame::Msg(Msg::HelloAck {
+                proto: PROTOCOL_VERSION,
+                version: "test".into(),
+                pid: 1,
+                exe: String::new(),
+                started_at: 0,
+            }),
+        )
+        .unwrap();
+    }
+
+    /// A host that stops reading the live channel after the attach (as an
+    /// older host did while the program left its input unread): input
+    /// written to it blocks, and resize, kill and detach must still return
+    /// promptly instead of waiting behind it.
+    #[test]
+    fn resize_kill_and_detach_return_while_input_is_stuck_on_the_channel() {
+        let tmp = tempfile::Builder::new()
+            .prefix("hpc-")
+            .tempdir_in("/tmp")
+            .unwrap();
+        let socket = tmp.path().join("s.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        let (seen_tx, seen_rx) = mpsc::channel::<Msg>();
+        std::thread::spawn(move || {
+            let (mut live, _) = listener.accept().unwrap();
+            handshake(&mut live);
+            match read_frame(&mut live).unwrap() {
+                Some(Frame::Msg(Msg::Attach { id, .. })) => write_frame(
+                    &mut live,
+                    &Frame::Msg(Msg::Attached {
+                        id,
+                        pid: 1,
+                        alive: true,
+                        exit_code: None,
+                        replay_bytes: 0,
+                    }),
+                )
+                .unwrap(),
+                other => panic!("expected attach, got {other:?}"),
+            }
+            // Never read from `live` again; answer side requests.
+            for conn in listener.incoming() {
+                let mut conn = conn.unwrap();
+                handshake(&mut conn);
+                if let Ok(Some(Frame::Msg(msg))) = read_frame(&mut conn) {
+                    let _ = write_frame(&mut conn, &Frame::Msg(Msg::Ok));
+                    let _ = seen_tx.send(msg);
+                }
+            }
+            drop(live);
+        });
+
+        let attached = Connection::connect(&socket, "token", Duration::from_secs(3))
+            .unwrap()
+            .attach("s1", 24, 80)
+            .unwrap();
+        let mut writer = attached.writer();
+        let feeder = std::thread::spawn(move || writer.write_all(&vec![b'x'; 16 << 20]));
+        // Long enough for the socket buffers to fill and the write to block.
+        std::thread::sleep(Duration::from_millis(500));
+        assert!(!feeder.is_finished(), "the input write should be stuck");
+
+        let started = Instant::now();
+        attached.resize(30, 100).unwrap();
+        attached.kill().unwrap();
+        assert!(
+            started.elapsed() < Duration::from_secs(3),
+            "resize and kill waited {:?}",
+            started.elapsed()
+        );
+        let got = |rx: &mpsc::Receiver<Msg>| rx.recv_timeout(Duration::from_secs(3)).unwrap();
+        assert_eq!(
+            got(&seen_rx),
+            Msg::Resize {
+                id: "s1".into(),
+                rows: 30,
+                cols: 100
+            }
+        );
+        assert_eq!(got(&seen_rx), Msg::Kill { id: "s1".into() });
+
+        let started = Instant::now();
+        attached.detach();
+        assert!(started.elapsed() < Duration::from_secs(3));
+        // Closing the channel also frees the stuck input write.
+        assert!(feeder.join().unwrap().is_err());
     }
 }

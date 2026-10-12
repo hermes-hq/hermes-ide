@@ -656,3 +656,101 @@ fn a_paste_while_a_command_prints_does_not_freeze_the_session_or_the_host() {
     c.list().expect("the host still answers");
     output.join().expect("the command finished");
 }
+
+#[test]
+fn resize_and_kill_still_reach_a_program_that_leaves_its_input_unread() {
+    // A paste into a program that never reads its input fills the terminal's
+    // input queue. The host used to write it on the thread that reads the
+    // client's requests, so it read nothing more: a resize or kill sent after
+    // the paste waited forever, and the app with it.
+    let host = Host::start(60_000, 60_000);
+    let mut c = host.connect().unwrap();
+    let pid = c
+        .spawn(
+            "deaf",
+            sh("stty raw -echo; trap 'stty size' WINCH; echo ready; while :; do sleep 0.1; done"),
+            env_min(),
+            "/",
+            24,
+            80,
+        )
+        .unwrap();
+
+    // Raw frames on one stream, in order: input, then resize, then kill.
+    let mut raw = UnixStream::connect(&host.socket).unwrap();
+    raw.set_read_timeout(Some(Duration::from_secs(3))).unwrap();
+    write_frame(
+        &mut raw,
+        &Frame::Msg(Msg::Hello {
+            token: TOKEN.into(),
+            proto: PROTOCOL_VERSION,
+        }),
+    )
+    .unwrap();
+    assert!(matches!(
+        read_frame(&mut raw).unwrap(),
+        Some(Frame::Msg(Msg::HelloAck { .. }))
+    ));
+    let attach = Msg::Attach {
+        id: "deaf".into(),
+        rows: 24,
+        cols: 80,
+    };
+    write_frame(&mut raw, &Frame::Msg(attach)).unwrap();
+    assert!(matches!(
+        read_frame(&mut raw).unwrap(),
+        Some(Frame::Msg(Msg::Attached { .. }))
+    ));
+    raw.set_read_timeout(None).unwrap();
+
+    let (out_tx, out_rx) = std::sync::mpsc::channel::<String>();
+    let mut rd = raw.try_clone().unwrap();
+    std::thread::spawn(move || {
+        while let Ok(Some(frame)) = read_frame(&mut rd) {
+            let text = match frame {
+                Frame::Data(bytes) => String::from_utf8_lossy(&bytes).to_string(),
+                Frame::Msg(Msg::Exited { .. }) => "<exited>".into(),
+                Frame::Msg(_) => continue,
+            };
+            if out_tx.send(text).is_err() {
+                break;
+            }
+        }
+    });
+    let mut seen = String::new();
+    let mut wait_for = |needle: &str| {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !seen.contains(needle) {
+            let left = deadline.saturating_duration_since(Instant::now());
+            match out_rx.recv_timeout(left) {
+                Ok(text) => seen.push_str(&text),
+                Err(_) => panic!("never saw {needle:?}; got:\n{seen}\n{}", host.log()),
+            }
+        }
+    };
+    wait_for("ready");
+
+    // Far more than the terminal and the socket buffers hold.
+    let mut wr = raw.try_clone().unwrap();
+    let feeder = std::thread::spawn(move || -> std::io::Result<()> {
+        for _ in 0..64 {
+            write_frame(&mut wr, &Frame::Data(vec![b'x'; 64 * 1024]))?;
+        }
+        let resize = Msg::Resize {
+            id: "deaf".into(),
+            rows: 33,
+            cols: 111,
+        };
+        write_frame(&mut wr, &Frame::Msg(resize))
+    });
+    wait_for("33 111");
+    feeder.join().unwrap().unwrap();
+
+    write_frame(&mut raw, &Frame::Msg(Msg::Kill { id: "deaf".into() })).unwrap();
+    wait_for("<exited>");
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while pid_alive(pid) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    assert!(!pid_alive(pid), "killed program is gone");
+}
