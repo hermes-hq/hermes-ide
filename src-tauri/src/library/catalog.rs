@@ -22,7 +22,7 @@ pub const CLIENT_VERSION: &str = "0.1.0";
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
-    format!("{:x}", h.finalize())
+    h.finalize().iter().map(|b| format!("{:02x}", b)).collect()
 }
 
 /// `sha256:<64 hex>` -> `<64 hex>`.
