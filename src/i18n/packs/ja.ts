@@ -1473,7 +1473,7 @@ export const jaPack: LanguagePack = {
     "onboarding.skip": "スキップ",
     "onboarding.finish": "完了",
     "onboarding.openShell": "シェルを開く",
-    "onboarding.usageStats": "利用統計: オフ",
+    "onboarding.usageStats": "匿名の利用統計: オン。設定 > プライバシー でいつでもオフにできます。",
     "onboarding.moreInSettings": "テーマとプライバシーは設定にあります。",
     "onboarding.resume": "セットアップに戻る",
     "onboarding.signInNote": "ターミナルで {agent} にサインインしてから、セットアップに戻ってください。",

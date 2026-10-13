@@ -1,14 +1,14 @@
 #!/usr/bin/env node
-// Scenario: F04 — private by default.
+// Scenario: F04 — analytics on by default, opt-out respected.
 //
 // Proves, against the REAL compiled app, with a local HTTP server standing in
 // for the analytics service (HERMES_E2E_ANALYTICS_HOST, test builds only):
-//   1. A fresh profile that clicks through onboarding without touching the
-//      analytics checkbox (which starts unchecked) ends up with
-//      telemetry_enabled=false.
-//   2. With analytics off, the analytics plugin does not exist in the app and
-//      nothing reaches the analytics server, even while the user creates a
-//      session (an event the app would track).
+//   1. A fresh profile has no stored telemetry_enabled, and analytics is on:
+//      app_started reaches the analytics server before onboarding finishes.
+//   2. The onboarding analytics checkbox starts checked; unticking it and
+//      finishing stores telemetry_enabled=false, and from then on nothing
+//      reaches the analytics server, even while the user creates a session
+//      (an event the app would track).
 //   3. Turning analytics on in Settings > Privacy takes effect right away:
 //      the next session the user creates reaches the analytics server.
 //   4. Turning it off again stops it right away.
@@ -18,14 +18,15 @@
 //      context file, the agent-mode state folder) and leaves the session,
 //      another session's caches and a repository folder alone. A path-like
 //      session id is refused by the backend.
-//   6. A profile that opted in turns analytics on by itself on the next
-//      launch.
+//   6. A profile that turned analytics off stays off after a relaunch: the
+//      analytics plugin is never registered and nothing, not even
+//      app_started, reaches the analytics server.
 //
 //   node e2e/app/build.mjs
-//   node e2e/app/scenarios/F04-private-by-default.mjs
+//   node e2e/app/scenarios/F04-analytics-opt-out.mjs
 //
 // Evidence (log + screenshots) goes to HERMES_E2E_EVIDENCE, or
-// <out dir>/evidence/F04-private-by-default.
+// <out dir>/evidence/F04-analytics-opt-out.
 
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:http";
@@ -33,7 +34,7 @@ import { platform, tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger, finishScenario, launchApp, outDir, sleep } from "../harness.mjs";
 
-const SCENARIO = "F04-private-by-default";
+const SCENARIO = "F04-analytics-opt-out";
 const startedAt = Date.now();
 const evidenceDir = process.env.HERMES_E2E_EVIDENCE || join(outDir(), "evidence", SCENARIO);
 const logFile = join(evidenceDir, "scenario.log");
@@ -221,18 +222,44 @@ try {
   });
   const { bridge } = app;
 
-  // ── 2. Onboarding: leave the analytics checkbox alone ─────────────
-  log("step 2: walk onboarding to the privacy step and finish without touching analytics");
+  // ── 2. No stored choice: analytics is on ──────────────────────────
+  log("step 2: with no stored choice, analytics is on before onboarding finishes");
   await bridge.waitFor("the welcome dialog", `return !!e2e.first(".onboarding-dialog");`);
   await bridge.screenshot(join(evidenceDir, "01-welcome.png"));
+  const fresh = await rawInvoke(bridge, "get_settings");
+  assert(fresh.ok, "get_settings resolved");
+  assert(
+    fresh.value.telemetry_enabled === undefined || fresh.value.telemetry_enabled === null || fresh.value.telemetry_enabled === "",
+    `a fresh profile has no stored telemetry_enabled (got ${JSON.stringify(fresh.value.telemetry_enabled)})`,
+  );
+  const startDeadline = Date.now() + 15_000;
+  while (!eventNames().includes("app_started") && Date.now() < startDeadline) await sleep(200);
+  assert(
+    eventNames().includes("app_started"),
+    `with no stored choice, app_started reached the stand-in (${JSON.stringify(eventNames())})`,
+  );
+  assert(
+    received.every((e) => e.path === "/api/v0/events"),
+    "every request went to the analytics events endpoint of the stand-in",
+  );
+
+  // ── 3. Onboarding: untick analytics, then nothing is sent ─────────
+  log("step 3: walk onboarding to the privacy step, untick analytics, finish, and create a session");
   for (let i = 0; i < 3; i++) {
     await bridge.click(".onboarding-actions .onboarding-btn-primary"); // welcome -> theme -> ai_setup -> privacy
     await sleep(150);
   }
   await bridge.waitFor("the privacy screen", `return e2e.all(".onboarding-privacy-checkbox input").length === 2;`);
   const analyticsChecked = await bridge.eval(`return e2e.all(".onboarding-privacy-checkbox input")[0].checked;`);
-  assert(analyticsChecked === false, "the analytics checkbox starts unchecked on a fresh profile");
+  assert(analyticsChecked === true, "the analytics checkbox starts checked on a fresh profile");
   await bridge.screenshot(join(evidenceDir, "02-privacy-step-default.png"));
+  await bridge.clickWhenReady(`
+    const [analytics] = e2e.all(".onboarding-privacy-checkbox input");
+    return e2e.click(analytics);
+  `);
+  await bridge.waitFor("the analytics checkbox to be unticked", `
+    return e2e.all(".onboarding-privacy-checkbox input")[0].checked === false;
+  `);
   await bridge.clickWhenReady(`
     const [, policy] = e2e.all(".onboarding-privacy-checkbox input");
     return e2e.click(policy);
@@ -255,17 +282,17 @@ try {
     settings.value.telemetry_enabled === "false",
     `telemetry_enabled is stored as "false" (got ${JSON.stringify(settings.value.telemetry_enabled)})`,
   );
-
-  // ── 3. Analytics off: no plugin, nothing sent ─────────────────────
-  log("step 3: with analytics off, create a session and watch the analytics stand-in");
-  const probe = await rawInvoke(bridge, "plugin:aptabase|track_event", { name: "e2e-probe", props: null });
-  assert(probe.ok === false, `the analytics plugin is not registered (${probe.error})`);
+  await sleep(1500); // let anything tracked before the opt-out flush
+  const countAfterOptOut = received.length;
   const sessionA = await createPlainSession(bridge);
   log(`  session A: ${sessionA}`);
   await sleep(2500); // several flush intervals of the analytics client
-  assert(received.length === 0, `nothing reached the analytics stand-in while off (${JSON.stringify(eventNames())})`);
+  assert(
+    received.length === countAfterOptOut,
+    `nothing more reached the stand-in after opting out in onboarding (${JSON.stringify(eventNames().slice(countAfterOptOut))})`,
+  );
 
-  // ── 4. Opt in from Settings > Privacy: takes effect right away ────
+  // ── 4. Turn it back on in Settings > Privacy: takes effect right away
   log("step 4: turn analytics on in Settings > Privacy, then create a session");
   await setAnalyticsInSettings(bridge, true, join(evidenceDir, "03-settings-privacy-on.png"));
   const stored = await rawInvoke(bridge, "get_settings");
@@ -394,9 +421,13 @@ try {
 
   if (stateRoot) rmSync(join(stateRoot, sessionB), { recursive: true, force: true, maxRetries: 10, retryDelay: 200 });
 
-  // ── 7. Relaunch while opted in: analytics starts with the app ─────
-  log("step 7: opt in, quit, and relaunch on the same profile");
-  await setAnalyticsInSettings(bridge, true, null);
+  // ── 7. Relaunch while opted out: analytics stays off ─────────────
+  log("step 7: with analytics off, quit and relaunch on the same profile");
+  const storedOff = await rawInvoke(bridge, "get_settings");
+  assert(
+    storedOff.ok && storedOff.value.telemetry_enabled === "false",
+    `telemetry_enabled is still "false" before the relaunch (got ${JSON.stringify(storedOff.value?.telemetry_enabled)})`,
+  );
   const firstExit = await app.stop();
   assert(!firstExit.forced && firstExit.code === 0, `the app quit cleanly before the relaunch (${JSON.stringify(firstExit)})`);
   app = null;
@@ -409,17 +440,18 @@ try {
   });
   const relaunched = app.bridge;
   const afterRelaunch = () => received.slice(countBeforeRelaunch).map((e) => e.eventName);
-  const relaunchDeadline = Date.now() + 20_000;
-  while (!afterRelaunch().includes("app_started") && Date.now() < relaunchDeadline) await sleep(200);
+  await sleep(4000); // past startup (where app_started is tracked) and several flush intervals
   assert(
-    afterRelaunch().includes("app_started"),
-    `the opted-in profile sent app_started on the next launch (${JSON.stringify(afterRelaunch())})`,
+    afterRelaunch().length === 0,
+    `nothing reached the stand-in after relaunching opted out, not even app_started (${JSON.stringify(afterRelaunch())})`,
   );
+  const probe = await rawInvoke(relaunched, "plugin:aptabase|track_event", { name: "e2e-probe", props: null });
+  assert(probe.ok === false, `the analytics plugin is not registered after the relaunch (${probe.error})`);
   assert(
-    readFileSync(app.appLog, "utf8").includes("[analytics] opted in: analytics turned on"),
-    "the app turned analytics on from the stored opt-in",
+    !readFileSync(app.appLog, "utf8").includes("[analytics] analytics turned on"),
+    "the relaunched app never turned analytics on",
   );
-  await relaunched.screenshot(join(evidenceDir, "07-relaunched-opted-in.png"));
+  await relaunched.screenshot(join(evidenceDir, "07-relaunched-opted-out.png"));
 } catch (e) {
   failed = true;
   log(`FAILED: ${e?.stack ?? e}`);

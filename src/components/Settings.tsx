@@ -969,7 +969,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
               <div className="settings-section">
                 <div className="settings-group" data-setting="telemetry_enabled">
                   <Toggle
-                    checked={settings.telemetry_enabled === "true"}
+                    checked={settings.telemetry_enabled !== "false"}
                     onChange={(on) => {
                       updateSetting("telemetry_enabled", on ? "true" : "false");
                       void setAnalyticsEnabled(on);
@@ -1055,7 +1055,7 @@ export function Settings({ onClose, initialTab, pluginRuntime, onConfirmPluginUp
                   // Apply theme + UI scale
                   applyTheme(newSettings.theme || "frosted-dark", newSettings);
                   // Sync analytics state
-                  void setAnalyticsEnabled(newSettings.telemetry_enabled === "true");
+                  void setAnalyticsEnabled(newSettings.telemetry_enabled !== "false");
                   // The import added to the person's own prompts: drop the copy read before it.
                   void import("../library/myPrompts").then((m) => m.reloadMyPrompts()).catch(() => {});
                   setFooterStatus(t("settings.imported"));

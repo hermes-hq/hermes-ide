@@ -1473,7 +1473,7 @@ export const ruPack: LanguagePack = {
     "onboarding.skip": "Пропустить",
     "onboarding.finish": "Готово",
     "onboarding.openShell": "Открыть оболочку",
-    "onboarding.usageStats": "Статистика использования: выключена",
+    "onboarding.usageStats": "Анонимная статистика использования: включена. Её можно выключить в любой момент в разделе Настройки > Приватность.",
     "onboarding.moreInSettings": "Тема и приватность — в Настройках.",
     "onboarding.resume": "Вернуться к настройке",
     "onboarding.signInNote": "Войдите в {agent} в терминале, затем вернитесь к настройке.",

@@ -42,10 +42,10 @@ export function OnboardingWizard() {
   const [providerAvailability, setProviderAvailability] = useState<Record<string, boolean>>({});
   const [detectionDone, setDetectionDone] = useState(false);
 
-  // Privacy step — private by default: the box starts unchecked, so
-  // closing the wizard without touching it (or without reaching this step)
-  // never turns analytics on.
-  const [analyticsOptIn, setAnalyticsOptIn] = useState(false);
+  // Privacy step — analytics is on by default: the box starts checked, and
+  // unticking it stores "false", which keeps analytics off until the user
+  // turns it back on in Settings > Privacy.
+  const [analyticsOptIn, setAnalyticsOptIn] = useState(true);
   const [policyAccepted, setPolicyAccepted] = useState(false);
 
   useEffect(() => {
@@ -299,7 +299,7 @@ export function OnboardingWizard() {
                     Help improve Hermes IDE by sending anonymous usage analytics
                   </span>
                   <span className="onboarding-privacy-checkbox-hint">
-                    You can change this anytime in Settings &gt; Privacy
+                    Anonymous and on by default. You can turn it off anytime in Settings &gt; Privacy
                   </span>
                 </div>
               </label>

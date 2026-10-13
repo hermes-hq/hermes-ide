@@ -12,14 +12,14 @@
 //            says why. The doctor shows each fake's version and sign-in
 //            state read from the CLI itself (Claude 2.1.300 signed in; Codex
 //            0.100.0, below the catalog minimum, signed out, with Sign in;
-//            OpenCode 1.18.2), signals and resume; "Usage stats: off"; no
+//            OpenCode 1.18.2), signals and resume; usage stats "on"; no
 //            Agent-view words. Sign in steps the welcome aside and opens a
 //            terminal running the CLI; Back to setup returns.
 //          2 Pick a repo — a folder that is not a repository cannot be
 //            picked; the test repository can.
 //          3 First task — Enter starts Claude in a terminal on a new
 //            hermes/<slug> worktree with the task as its first prompt, and
-//            the welcome is done (usage stats still off).
+//            the welcome is done (the usage stats choice is left unset).
 //          Settings > Agents shows the same doctor.
 //   run 3+4  fresh install again, with no agent on the doctor's PATH: the
 //          doctor says none was found, Continue is enabled once the Privacy
@@ -308,7 +308,7 @@ try {
   await sleep(300);
   assert((await step(bridge)).step === "agents", "Continue does nothing until it is accepted");
   const texts = await bridge.eval(`return { usage: e2e.norm(e2e.first(".setup-usage")?.innerText), all: document.querySelector(".setup-dialog").innerText };`);
-  assert(texts.usage === "Usage stats: off", "the usage stats line reads off");
+  assert(texts.usage === "Anonymous usage stats: on. Turn them off anytime in Settings > Privacy.", "the usage stats line reads on, and says how to turn it off");
   assert(!/agent view/i.test(texts.all), "no Agent-view words on the welcome");
   await bridge.screenshot(join(evidenceDir, "01-doctor.png"));
 
@@ -392,7 +392,7 @@ try {
   assert(seen.size === 3, `a fresh install reached a running first task in ${seen.size} screens (${[...seen].join(", ")})`);
   const settings = await invoke(bridge, "get_settings");
   assert(settings.onboarding_completed === "true", "the welcome is done");
-  assert(settings.telemetry_enabled !== "true", `usage stats stay off (${settings.telemetry_enabled})`);
+  assert(settings.telemetry_enabled === undefined || settings.telemetry_enabled === null || settings.telemetry_enabled === "", `the welcome leaves the usage stats choice unset (${settings.telemetry_enabled})`);
   await bridge.screenshot(join(evidenceDir, "04-task-running.png"));
 
   log("Settings > Agents shows the same doctor");

@@ -129,11 +129,22 @@ describe("Settings: every on/off is a switch, every choice a select", () => {
     fireEvent.click(autoStage);
     saved("git_auto_stage", "false");
 
+    // Analytics is on while unset; turning it off stores "false".
     fireEvent.click(screen.getByRole("tab", { name: "Privacy" }));
     const analytics = screen.getByRole("switch", { name: /analytics/i });
-    expect(analytics).toHaveAttribute("aria-checked", "false");
+    expect(analytics).toHaveAttribute("aria-checked", "true");
     fireEvent.click(analytics);
-    saved("telemetry_enabled", "true");
+    saved("telemetry_enabled", "false");
+  });
+
+  it.each([
+    ["false", "false"],
+    ["true", "true"],
+  ])('the analytics switch shows telemetry_enabled="%s" as aria-checked=%s', async (stored, shown) => {
+    await openSettings({ telemetry_enabled: stored });
+    fireEvent.click(await screen.findByRole("tab", { name: "Privacy" }));
+    const analytics = screen.getByRole("switch", { name: /analytics/i });
+    await waitFor(() => expect(analytics).toHaveAttribute("aria-checked", shown));
   });
 
   it("a select is labelled by its visible label and saves the choice", async () => {

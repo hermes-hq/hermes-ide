@@ -261,20 +261,20 @@ features:
         text: "The fake agent approval scenario changes the session status in the real app on all three OSes"
         scenarios: [N03-fake-agent.mjs]
   F04:
-    name: "Private by default"
+    name: "Analytics on by default, opt-out respected"
     # partial: the scenario proves no analytics traffic while off; a full
     # 10-minute network capture is not automated.
     status: partial
     criteria:
       F04-1:
-        text: "A fresh profile has telemetry_enabled=false"
-        scenarios: [F04-private-by-default.mjs]
+        text: "A fresh profile has no stored telemetry_enabled and sends anonymous analytics; turning it off stores telemetry_enabled=false"
+        scenarios: [F04-analytics-opt-out.mjs]
       F04-2:
-        text: "With telemetry off, a network capture during a 10-minute session shows only update-check traffic"
-        scenarios: [F04-private-by-default.mjs]
+        text: "With telemetry off, a network capture during a 10-minute session shows only update-check traffic, also after a relaunch"
+        scenarios: [F04-analytics-opt-out.mjs]
       F04-3:
         text: "Delete session data removes Hermes caches for the chosen session and leaves the repo intact"
-        scenarios: [F04-private-by-default.mjs]
+        scenarios: [F04-analytics-opt-out.mjs]
   F02:
     name: "Crash containment and startup diet"
     status: partial
@@ -1473,7 +1473,7 @@ features:
         text: "The doctor shows the version and auth state for Claude, Codex and OpenCode when installed"
         scenarios: [F16-onboarding-doctor.mjs]
       F16-4:
-        text: "The usage stats line reads 'off'"
+        text: "The usage stats line reads 'on' and says how to turn it off"
         scenarios: [F16-onboarding-doctor.mjs]
   N19:
     name: "Rate limits and handoff"

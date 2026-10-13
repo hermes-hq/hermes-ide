@@ -1473,7 +1473,7 @@ export const dePack: LanguagePack = {
     "onboarding.skip": "Überspringen",
     "onboarding.finish": "Fertig",
     "onboarding.openShell": "Shell öffnen",
-    "onboarding.usageStats": "Nutzungsstatistiken: aus",
+    "onboarding.usageStats": "Anonyme Nutzungsstatistiken: an. Du kannst sie jederzeit unter Einstellungen > Datenschutz ausschalten.",
     "onboarding.moreInSettings": "Design und Datenschutz findest du in den Einstellungen.",
     "onboarding.resume": "Zurück zur Einrichtung",
     "onboarding.signInNote": "Melde dich im Terminal bei {agent} an und kehre dann zur Einrichtung zurück.",

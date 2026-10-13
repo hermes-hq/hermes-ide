@@ -1503,7 +1503,7 @@ const ENGLISH_PACK: LanguagePack = {
     "onboarding.skip": "Skip",
     "onboarding.finish": "Finish",
     "onboarding.openShell": "Open a shell",
-    "onboarding.usageStats": "Usage stats: off",
+    "onboarding.usageStats": "Anonymous usage stats: on. Turn them off anytime in Settings > Privacy.",
     "onboarding.moreInSettings": "Theme and privacy are in Settings.",
     "onboarding.resume": "Back to setup",
     "onboarding.signInNote": "Sign in to {agent} in the terminal, then come back to setup.",

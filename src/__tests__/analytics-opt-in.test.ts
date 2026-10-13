@@ -1,7 +1,8 @@
 /**
- * F04 (private by default) — analytics only runs after an explicit opt-in,
- * and the backend decides whether it may run at all (it refuses in test
- * runs). Opting in takes effect immediately, without a restart.
+ * F04 (analytics on by default, opt-out respected) — analytics runs unless
+ * the user stored `telemetry_enabled="false"`, and the backend decides
+ * whether it may run at all (it refuses in test runs). Turning it on or off
+ * takes effect immediately, without a restart.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -46,8 +47,21 @@ beforeEach(() => {
 });
 
 describe("at startup", () => {
-  it("stays off for a fresh profile and never asks the backend to start analytics", async () => {
-    mockGetSetting.mockResolvedValue(""); // missing key
+  it.each([
+    ["an empty value", ""],
+    ["a missing key", null],
+  ])("is on for a fresh profile (%s) once the backend confirms", async (_label, stored) => {
+    mockGetSetting.mockResolvedValue(stored);
+    const analytics = await freshModule();
+    await analytics.initAnalytics();
+    analytics.trackAppStarted();
+
+    expect(enableCalls()).toBe(1);
+    expect(sent()).toEqual([{ name: "app_started", props: null }]);
+  });
+
+  it('stays off when the user turned it off ("false") and never asks the backend', async () => {
+    mockGetSetting.mockResolvedValue("false");
     const analytics = await freshModule();
     await analytics.initAnalytics();
     analytics.trackAppStarted();
@@ -55,7 +69,7 @@ describe("at startup", () => {
     expect(mockInvoke).not.toHaveBeenCalled();
   });
 
-  it("sends events for an opted-in profile once the backend confirms", async () => {
+  it('sends events when the stored choice is "true" once the backend confirms', async () => {
     mockGetSetting.mockResolvedValue("true");
     const analytics = await freshModule();
     await analytics.initAnalytics();
@@ -91,8 +105,8 @@ describe("at startup", () => {
 });
 
 describe("changing the choice while the app runs", () => {
-  it("opting in persists the choice first, then starts analytics right away", async () => {
-    mockGetSetting.mockResolvedValue("");
+  it("turning it back on persists the choice first, then starts analytics right away", async () => {
+    mockGetSetting.mockResolvedValue("false");
     const order: string[] = [];
     mockSetSetting.mockImplementation(() => {
       order.push("persist");
@@ -113,10 +127,15 @@ describe("changing the choice while the app runs", () => {
     expect(sent()).toEqual([{ name: "feature_used", props: { feature: "split-pane" } }]);
   });
 
-  it("opting out stops tracking immediately and does not call the backend", async () => {
-    mockGetSetting.mockResolvedValue("true");
+  it.each([
+    ["on by default (unset)", ""],
+    ['stored "true"', "true"],
+  ])("turning it off from %s persists \"false\", stops tracking at once and does not call the backend", async (_label, stored) => {
+    mockGetSetting.mockResolvedValue(stored);
     const analytics = await freshModule();
     await analytics.initAnalytics();
+    analytics.trackAppStarted();
+    expect(sent()).toHaveLength(1); // tracking before the switch
     mockInvoke.mockClear();
 
     await analytics.setAnalyticsEnabled(false);
@@ -127,7 +146,7 @@ describe("changing the choice while the app runs", () => {
   });
 
   it("a quick on-then-off ends up off even if the backend answers late", async () => {
-    mockGetSetting.mockResolvedValue("");
+    mockGetSetting.mockResolvedValue("false");
     let answer: (v: boolean) => void = () => {};
     mockInvoke.mockImplementation((cmd: unknown) =>
       cmd === "enable_analytics" ? new Promise<boolean>((r) => (answer = r)) : Promise.resolve(),
