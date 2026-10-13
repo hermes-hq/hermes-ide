@@ -1452,7 +1452,7 @@ export const zhCNPack: LanguagePack = {
     "onboarding.skip": "跳过",
     "onboarding.finish": "完成",
     "onboarding.openShell": "打开 shell",
-    "onboarding.usageStats": "使用统计：关闭",
+    "onboarding.usageStats": "匿名使用统计：开启。可随时在“设置 > 隐私”中关闭。",
     "onboarding.moreInSettings": "主题和隐私在设置中。",
     "onboarding.resume": "返回设置向导",
     "onboarding.signInNote": "在终端中登录 {agent}，然后返回设置向导。",

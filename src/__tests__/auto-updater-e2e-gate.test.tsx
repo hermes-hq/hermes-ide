@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * F04 (private by default) — update polling never runs in an e2e/CI build.
+ * F04 (analytics on by default, opt-out respected) — update polling never runs in an e2e/CI build.
  *
  * `useAutoUpdater` reads `VITE_HERMES_E2E` once at module load (the same
  * build-time flag `analytics.ts` and `main.tsx` use), so each scenario

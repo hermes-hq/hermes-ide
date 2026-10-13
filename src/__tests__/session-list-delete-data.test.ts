@@ -1,5 +1,5 @@
 /**
- * F04 (private by default) — "Delete Session Data" context menu action.
+ * F04 (analytics on by default, opt-out respected) — "Delete Session Data" context menu action.
  *
  * Tests the confirm-gating helper pulled out of SessionList's context-menu
  * handler: it must only call the delete API after an explicit yes, and

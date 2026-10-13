@@ -1452,7 +1452,7 @@ export const frPack: LanguagePack = {
     "onboarding.skip": "Passer",
     "onboarding.finish": "Terminer",
     "onboarding.openShell": "Ouvrir un shell",
-    "onboarding.usageStats": "Statistiques d'utilisation : désactivées",
+    "onboarding.usageStats": "Statistiques d'utilisation anonymes : activées. Vous pouvez les désactiver à tout moment dans Paramètres > Confidentialité.",
     "onboarding.moreInSettings": "Le thème et la confidentialité sont dans les Paramètres.",
     "onboarding.resume": "Retour à la configuration",
     "onboarding.signInNote": "Connectez-vous à {agent} dans le terminal, puis revenez à la configuration.",

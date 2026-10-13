@@ -1,15 +1,19 @@
-//! Usage analytics (Aptabase), private by default.
+//! Usage analytics (Aptabase), on by default; the user can turn it off.
 //!
-//! The Aptabase plugin is registered only after the user has opted in
-//! (`telemetry_enabled = "true"` in settings). Until then no Aptabase client,
-//! no HTTP client and no background flush loop exist in the process, so
-//! nothing can be sent even if a call site forgets to check the setting.
+//! An unset `telemetry_enabled` counts as on, `"true"` is on, and `"false"`
+//! (stored when the user turns analytics off in onboarding or Settings >
+//! Privacy) keeps it off until the user turns it back on.
 //!
-//! - The frontend calls `enable_analytics` at startup when the stored setting
-//!   is `"true"`, and again when the user opts in (onboarding or Settings >
-//!   Privacy), so the choice takes effect without a restart. The command
-//!   re-checks the stored setting itself.
-//! - Opting out stops the frontend from tracking anything; the plugin only
+//! The Aptabase plugin is registered only while analytics is allowed. When it
+//! is off no Aptabase client, no HTTP client and no background flush loop
+//! exist in the process, so nothing can be sent even if a call site forgets
+//! to check the setting.
+//!
+//! - The frontend calls `enable_analytics` at startup unless the stored
+//!   setting is `"false"`, and again when the user turns analytics on
+//!   (onboarding or Settings > Privacy), so the choice takes effect without a
+//!   restart. The command re-checks the stored setting itself.
+//! - Turning it off stops the frontend from tracking anything; the plugin only
 //!   ever sends events that were explicitly tracked (audited against
 //!   tauri-plugin-aptabase 1.0.0: its flush loop posts nothing while its
 //!   queue is empty, and only `track_event` fills the queue).
@@ -25,6 +29,7 @@ use std::time::Duration;
 use tauri::plugin::TauriPlugin;
 use tauri::{AppHandle, Runtime, State};
 
+use crate::db::Database;
 use crate::AppState;
 
 const APP_KEY: &str = "A-EU-1922161061";
@@ -91,18 +96,24 @@ fn plugin<R: Runtime>(destination: Destination) -> Option<TauriPlugin<R>> {
     }
 }
 
-/// Turns analytics on for the running app after the user opted in.
+/// Whether the stored choice allows analytics: anything but an explicit
+/// `"false"` (an unset setting counts as on).
+fn allowed_by_setting(db: &Database) -> Result<bool, String> {
+    Ok(db.get_setting("telemetry_enabled")?.as_deref() != Some("false"))
+}
+
+/// Turns analytics on for the running app unless the user turned it off.
 ///
 /// Returns whether analytics is active. It stays off when the stored setting
-/// is not `"true"` (the opt-in must be persisted first) or when this process
-/// may never send analytics (`HERMES_E2E=1` without a loopback sink).
+/// is `"false"` or when this process may never send analytics
+/// (`HERMES_E2E=1` without a loopback sink).
 #[tauri::command]
 pub fn enable_analytics(app: AppHandle, state: State<'_, AppState>) -> Result<bool, String> {
-    let opted_in = {
+    let allowed = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
-        db.get_setting("telemetry_enabled")?.as_deref() == Some("true")
+        allowed_by_setting(&db)?
     };
-    if !opted_in {
+    if !allowed {
         return Ok(false);
     }
     if ACTIVE
@@ -119,7 +130,7 @@ pub fn enable_analytics(app: AppHandle, state: State<'_, AppState>) -> Result<bo
         ACTIVE.store(false, Ordering::SeqCst);
         return Err(e.to_string());
     }
-    log::info!("[analytics] opted in: analytics turned on");
+    log::info!("[analytics] analytics turned on");
     Ok(true)
 }
 
@@ -156,6 +167,36 @@ mod tests {
             destination(true, Some("http://127.0.0.1".into())),
             Destination::Nowhere
         );
+    }
+
+    fn db_with(value: Option<&str>) -> (tempfile::TempDir, Database) {
+        let tmp = tempfile::tempdir().unwrap();
+        let db = Database::new(&tmp.path().join("test.db")).unwrap();
+        if let Some(v) = value {
+            db.set_setting("telemetry_enabled", v).unwrap();
+        }
+        (tmp, db)
+    }
+
+    #[test]
+    fn unset_setting_counts_as_on() {
+        let (_tmp, db) = db_with(None);
+        assert_eq!(allowed_by_setting(&db), Ok(true));
+    }
+
+    #[test]
+    fn stored_true_is_on() {
+        let (_tmp, db) = db_with(Some("true"));
+        assert_eq!(allowed_by_setting(&db), Ok(true));
+    }
+
+    #[test]
+    fn stored_false_stays_off() {
+        let (_tmp, db) = db_with(Some("false"));
+        assert_eq!(allowed_by_setting(&db), Ok(false));
+        // Turning it back on is honoured.
+        db.set_setting("telemetry_enabled", "true").unwrap();
+        assert_eq!(allowed_by_setting(&db), Ok(true));
     }
 
     #[test]

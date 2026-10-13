@@ -1452,7 +1452,7 @@ export const hiPack: LanguagePack = {
     "onboarding.skip": "छोड़ें",
     "onboarding.finish": "समाप्त करें",
     "onboarding.openShell": "शेल खोलें",
-    "onboarding.usageStats": "उपयोग आँकड़े: बंद",
+    "onboarding.usageStats": "अनाम उपयोग आँकड़े: चालू। इन्हें कभी भी सेटिंग्स > गोपनीयता में बंद कर सकते हैं।",
     "onboarding.moreInSettings": "थीम और गोपनीयता सेटिंग्स में हैं।",
     "onboarding.resume": "सेटअप पर वापस जाएँ",
     "onboarding.signInNote": "टर्मिनल में {agent} में साइन इन करें, फिर सेटअप पर लौटें।",

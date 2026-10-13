@@ -8,7 +8,8 @@
  *     shell works anyway;
  *   - the welcome is three screens: agents, repo, first task; launching the
  *     first task finishes it; Finish without a task finishes it too;
- *   - usage stats read "off" and finishing never turns them on;
+ *   - usage stats read "on" (anonymous, off in Settings > Privacy) and
+ *     finishing leaves the stored choice alone;
  *   - Sign in steps the welcome aside until "Back to setup";
  *   - OnboardingGate shows it only with the taskLauncher flag, else the
  *     classic wizard.
@@ -185,7 +186,7 @@ describe("SetupWizard", () => {
     const { onLaunch, onDone } = await openWizard();
     expect(stepTitle()).toBe("Your agents");
     expect(screen.getByText("Step 1 of 3")).toBeInTheDocument();
-    expect(screen.getByText("Usage stats: off")).toBeInTheDocument();
+    expect(screen.getByText("Anonymous usage stats: on. Turn them off anytime in Settings > Privacy.")).toBeInTheDocument();
     acceptPolicy();
     fireEvent.click(screen.getByRole("button", { name: "Continue" }));
 
@@ -207,7 +208,7 @@ describe("SetupWizard", () => {
     expect(onLaunch.mock.calls[0][0]).toMatchObject({ task: "Add a README", repoRoot: "/fixture-home/repo" });
     await waitFor(() => expect(onDone).toHaveBeenCalled());
     expect(h.settings.get("onboarding_completed")).toBe("true");
-    expect(h.settings.get("telemetry_enabled")).toBe("false");
+    expect(h.settings.has("telemetry_enabled")).toBe(false); // unset: on by default
     expect(document.querySelector(".setup-dialog")).toBeNull();
   });
 

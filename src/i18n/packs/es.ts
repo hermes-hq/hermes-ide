@@ -1452,7 +1452,7 @@ export const esPack: LanguagePack = {
     "onboarding.skip": "Omitir",
     "onboarding.finish": "Terminar",
     "onboarding.openShell": "Abrir una shell",
-    "onboarding.usageStats": "Estadísticas de uso: desactivadas",
+    "onboarding.usageStats": "Estadísticas de uso anónimas: activadas. Puedes desactivarlas cuando quieras en Configuración > Privacidad.",
     "onboarding.moreInSettings": "El tema y la privacidad están en Configuración.",
     "onboarding.resume": "Volver a la configuración",
     "onboarding.signInNote": "Inicia sesión en {agent} en el terminal y luego vuelve a la configuración.",

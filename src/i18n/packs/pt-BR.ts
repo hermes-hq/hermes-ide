@@ -1452,7 +1452,7 @@ export const ptBRPack: LanguagePack = {
     "onboarding.skip": "Pular",
     "onboarding.finish": "Concluir",
     "onboarding.openShell": "Abrir um shell",
-    "onboarding.usageStats": "Estatísticas de uso: desativadas",
+    "onboarding.usageStats": "Estatísticas de uso anônimas: ativadas. Desative quando quiser em Configurações > Privacidade.",
     "onboarding.moreInSettings": "Tema e privacidade ficam nas Configurações.",
     "onboarding.resume": "Voltar à configuração",
     "onboarding.signInNote": "Entre no {agent} pelo terminal e depois volte à configuração.",

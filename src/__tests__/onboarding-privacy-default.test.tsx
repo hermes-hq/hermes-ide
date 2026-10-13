@@ -1,10 +1,10 @@
 // @vitest-environment jsdom
 /**
- * F04 (private by default) — the onboarding wizard's analytics checkbox
- * must start unchecked, and finishing without touching it must persist
- * `telemetry_enabled=false`. Previously the checkbox defaulted to checked
- * (`useState(true)`), so a fresh profile that clicked through onboarding
- * ended up opted in to analytics.
+ * F04 (analytics on by default, opt-out respected) — the onboarding wizard's
+ * analytics checkbox starts checked and says analytics is anonymous and can
+ * be turned off in Settings > Privacy. Finishing without touching it
+ * persists `telemetry_enabled=true` and starts analytics; unticking it
+ * persists `telemetry_enabled=false` and never starts analytics.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup } from "@testing-library/react";
@@ -55,7 +55,7 @@ async function goToPrivacyStep() {
 }
 
 describe("OnboardingWizard privacy step", () => {
-  it("analytics checkbox starts unchecked", async () => {
+  it("analytics checkbox starts checked and says it is anonymous and can be turned off", async () => {
     const { OnboardingWizard } = await import("../components/OnboardingWizard");
     render(<OnboardingWizard />);
 
@@ -64,10 +64,12 @@ describe("OnboardingWizard privacy step", () => {
     const analyticsCheckbox = screen.getByRole("checkbox", {
       name: /Help improve Hermes IDE/,
     });
-    expect(analyticsCheckbox).not.toBeChecked();
+    expect(analyticsCheckbox).toBeChecked();
+    expect(analyticsCheckbox).toHaveAccessibleName(/anonymous/i);
+    expect(analyticsCheckbox).toHaveAccessibleName(/turn it off anytime in Settings > Privacy/);
   });
 
-  it("finishing without touching the checkbox persists telemetry_enabled=false", async () => {
+  it("finishing without touching the checkbox persists telemetry_enabled=true and starts analytics", async () => {
     const { OnboardingWizard } = await import("../components/OnboardingWizard");
     render(<OnboardingWizard />);
 
@@ -79,13 +81,12 @@ describe("OnboardingWizard privacy step", () => {
     fireEvent.click(screen.getByText("Finish"));
 
     await waitFor(() => {
-      expect(mockSetSetting).toHaveBeenCalledWith("telemetry_enabled", "false");
+      expect(mockInvoke).toHaveBeenCalledWith("enable_analytics");
     });
-    // Analytics is never started for a user who did not opt in.
-    expect(mockInvoke).not.toHaveBeenCalledWith("enable_analytics");
+    expect(mockSetSetting).toHaveBeenCalledWith("telemetry_enabled", "true");
   });
 
-  it("ticking the checkbox persists the opt-in and starts analytics right away", async () => {
+  it("unticking the checkbox persists telemetry_enabled=false and never starts analytics", async () => {
     const { OnboardingWizard } = await import("../components/OnboardingWizard");
     render(<OnboardingWizard />);
 
@@ -96,8 +97,8 @@ describe("OnboardingWizard privacy step", () => {
     fireEvent.click(screen.getByText("Finish"));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith("enable_analytics");
+      expect(mockSetSetting).toHaveBeenCalledWith("telemetry_enabled", "false");
     });
-    expect(mockSetSetting).toHaveBeenCalledWith("telemetry_enabled", "true");
+    expect(mockInvoke).not.toHaveBeenCalledWith("enable_analytics");
   });
 });

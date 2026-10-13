@@ -1,9 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getSetting, setSetting } from "../api/settings";
 
-// Private by default: nothing is tracked until the user opts in, and the
-// backend only creates its analytics client once the opt-in is stored. The
-// backend has the final say — it refuses in test runs (HERMES_E2E) — so
+// On by default, off for good once the user turns it off: an unset
+// `telemetry_enabled` counts as on, and only a stored "false" keeps analytics
+// off (until the user turns it back on). The backend re-checks the stored
+// value and has the final say — it refuses in test runs (HERMES_E2E) — so
 // `enabled` is only ever true when it confirmed analytics is active.
 let enabled = false;
 // Bumped on every change of mind, so a slow "on" cannot land after a later "off".
@@ -18,7 +19,7 @@ function activateAnalytics(): Promise<boolean> {
 export async function initAnalytics(): Promise<void> {
   const gen = generation;
   const stored = await getSetting("telemetry_enabled").catch(() => null);
-  const active = stored === "true" && (await activateAnalytics());
+  const active = stored !== "false" && (await activateAnalytics());
   if (gen === generation) enabled = active;
 }
 

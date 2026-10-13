@@ -8,7 +8,6 @@ import { setSetting } from "../api/settings";
 import { probeTaskRepo } from "../api/launcher";
 import { getAgentCapabilities } from "../agent/capabilities";
 import type { ProjectOrdered } from "../types/project";
-import { setAnalyticsEnabled } from "../utils/analytics";
 import { shortcutLabel } from "../utils/keymap";
 import { getAgent } from "../catalog/agentCatalog";
 import { refreshDoctor, useAgentDoctor } from "../launcher/doctorStore";
@@ -56,8 +55,8 @@ type RepoState = { path: string; root: string | null; exists: boolean; isDir: bo
  * step 1 waits for it, and the welcome only completes after it, so the
  * completed welcome (onboarding_completed, the setting both welcomes write)
  * is the record that it was accepted; nobody who finished either welcome is
- * asked again. Theme lives in Settings; usage stats are off unless turned on
- * there.
+ * asked again. Theme lives in Settings; anonymous usage stats are on unless
+ * turned off there (Settings > Privacy).
  *
  * The welcome is modal for the keyboard too: each step puts the keyboard
  * where it starts, Tab stays inside, and the menu bar does nothing behind
@@ -163,8 +162,8 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
   const anyInstalled = useMemo(() => (doctor.rows ?? []).some((r) => r.installed), [doctor.rows]);
 
   const finish = useCallback(async () => {
-    // Usage stats stay off: this screen never turns them on (Settings does).
-    await setAnalyticsEnabled(false);
+    // Usage stats are left as stored: on unless the user turned them off in
+    // Settings > Privacy. This screen never changes them.
     // The repository picked on step 2 is a project from now on (⌘N starts there).
     if (repoFolder) {
       try {
@@ -417,7 +416,7 @@ export function SetupWizard({ onLaunch, onSignIn, onOpenShell, onDone }: SetupWi
 
         <div className="setup-footer">
           <div className="setup-footer-note">
-            <span className="setup-usage" data-usage-stats="off">{t("onboarding.usageStats")}</span>
+            <span className="setup-usage" data-usage-stats="on">{t("onboarding.usageStats")}</span>
             <span className="setup-muted">{t("onboarding.moreInSettings")}</span>
           </div>
           <div className="setup-actions">

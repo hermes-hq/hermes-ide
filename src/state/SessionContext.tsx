@@ -1526,7 +1526,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     // Initialize notifications on mount
     initNotifications().catch(console.warn);
 
-    // Initialize analytics (opt-in, default off)
+    // Initialize analytics (on unless the user turned it off)
     initAnalytics().then(() => trackAppStarted()).catch(console.warn);
 
     const setup = async () => {
