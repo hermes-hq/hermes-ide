@@ -67,7 +67,7 @@ jobs:
           fi
       - name: Keep the diff for the shards
         if: steps.diff.outputs.run == 'true'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: mutants-diff
           path: ${{ runner.temp }}/changes.diff
@@ -153,7 +153,7 @@ jobs:
           esac
       - name: Upload this shard's outcomes
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: mutants-out-${{ matrix.shard }}
           path: ${{ runner.temp }}/mutants.out

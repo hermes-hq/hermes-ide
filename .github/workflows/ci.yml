@@ -486,7 +486,7 @@ jobs:
           ls -l e2e-app.tgz
 
       - name: Upload the test app
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-app-${{ matrix.name }}
           path: ${{ runner.temp }}/hermes-e2e/e2e-app.tgz
@@ -506,7 +506,7 @@ jobs:
 
       - name: Upload evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-evidence-${{ matrix.name }}-build
           overwrite: true
@@ -726,7 +726,7 @@ jobs:
 
       - name: Upload evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-evidence-${{ matrix.platform.name }}-${{ matrix.shard }}
           overwrite: true
@@ -739,7 +739,7 @@ jobs:
       # pattern the acceptance gate reads).
       - name: Keep this failed attempt's evidence
         if: failure()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: failed-attempt-${{ github.run_attempt }}-${{ matrix.platform.name }}-${{ matrix.shard }}
           path: ${{ runner.temp }}/hermes-e2e/evidence
@@ -871,7 +871,7 @@ jobs:
 
       - name: Upload evidence
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: e2e-evidence-installers-${{ matrix.name }}
           overwrite: true
@@ -881,7 +881,7 @@ jobs:
 
       - name: Upload negative-control evidence
         if: always() && runner.os == 'Linux'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: f25-negative-control-${{ matrix.name }}
           path: ${{ runner.temp }}/hermes-e2e/negative-control
