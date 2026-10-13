@@ -115,7 +115,7 @@ tar = "0.4"
 ruzstd = "0.9"
 sha2 = "0.10"
 # The prompt library's signed catalog updates (already used by the app updater).
-minisign-verify = "0.2"
+minisign-verify = "0.3"
 anyhow = "1"
 notify = "8"
 dunce = "1"

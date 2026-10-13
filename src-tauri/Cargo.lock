@@ -2000,7 +2000,7 @@ dependencies = [
  "lazy_static",
  "libc",
  "log",
- "minisign-verify",
+ "minisign-verify 0.3.0",
  "notify",
  "objc2",
  "objc2-app-kit",
@@ -2878,6 +2878,12 @@ name = "minisign-verify"
 version = "0.2.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "22f9645cb765ea72b8111f36c522475d2daa0d22c957a9826437e97534bc4e9e"
+
+[[package]]
+name = "minisign-verify"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "871285dc19d8d0ebe0eef3d0e99a205f2a71363b122632cbbfa4a6c370a960ce"
 
 [[package]]
 name = "miniz_oxide"
@@ -5341,7 +5347,7 @@ dependencies = [
  "infer",
  "libc",
  "log",
- "minisign-verify",
+ "minisign-verify 0.2.5",
  "osakit",
  "percent-encoding",
  "reqwest 0.13.4",
