@@ -1819,8 +1819,9 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 label: saved.label,
                 workingDirectory: saved.working_directory,
                 color: saved.color,
-                // A terminal agent resumes with the folders it worked in (its --add-dir).
-                workspacePaths: restoredMode === "terminal" && saved.agent_add_dirs?.length ? saved.agent_add_dirs : null,
+                workspacePaths: null,
+                // A terminal agent resumes with the launcher's extra folders (its --add-dir), nothing else.
+                extraDirs: saved.launcher_extra_dirs?.length ? saved.launcher_extra_dirs : null,
                 aiProvider: saved.ai_provider,
                 projectIds: saved.project_ids.length > 0 ? saved.project_ids : null,
                 autoApprove: saved.auto_approve ?? false,
@@ -2157,7 +2158,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         label: opts?.label || null,
         workingDirectory: opts?.workingDirectory || null,
         color: opts?.color || null,
-        workspacePaths: opts?.workspacePaths?.length ? opts.workspacePaths : null,
+        workspacePaths: null,
+        extraDirs: opts?.extraDirs?.length ? opts.extraDirs : null,
         aiProvider: opts?.aiProvider || null,
         projectIds: opts?.projectIds || null,
         autoApprove: opts?.autoApprove ?? false,
@@ -2607,6 +2609,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
             ...(agentPerm ? { agent_permission_mode: agentPerm } : {}),
             ...(agentEffort ? { agent_effort: agentEffort } : {}),
             ...(s.workspace_paths.length > 0 ? { agent_add_dirs: s.workspace_paths } : {}),
+            ...(s.extra_dirs?.length ? { launcher_extra_dirs: s.extra_dirs } : {}),
           };
         }),
       );
@@ -2716,6 +2719,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
           featureTracks: isFeatureFlagEnabled("featureTracks"),
           vendorSessionId: session.vendor_session_id ?? null,
           sessionHost: isFeatureFlagEnabled("sessionHost"),
+          extraDirs: session.extra_dirs?.length ? session.extra_dirs : null,
         });
       }
       return true;

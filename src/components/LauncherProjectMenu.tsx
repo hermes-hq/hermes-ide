@@ -155,7 +155,6 @@ export function LauncherProjectMenu({
   const listId = `${baseId}-list`;
   const optId = (i: number) => `${baseId}-opt-${i}`;
   const inputRef = useRef<HTMLInputElement>(null);
-  const confirmRef = useRef<HTMLButtonElement>(null);
   const [query, setQuery] = useState("");
   // null: the default highlight (the current project with no search, else the first row).
   const [hl, setHl] = useState<number | null>(null);
@@ -249,10 +248,6 @@ export function LauncherProjectMenu({
     wasForm.current = formOpen;
   }, [formOpen]);
 
-  useEffect(() => {
-    if (confirmId) confirmRef.current?.focus();
-  }, [confirmId]);
-
   const startRemove = (p: ProjectOrdered) => {
     setConfirmId(p.id);
     setRemoveError(null);
@@ -330,6 +325,11 @@ export function LauncherProjectMenu({
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
         e.stopPropagation();
+        // The confirm is open while the search has the keyboard: ↵ never removes (Tab to Remove does).
+        if (confirmId) {
+          cancelRemove();
+          return;
+        }
         choose(it);
         return;
       }
@@ -343,7 +343,8 @@ export function LauncherProjectMenu({
           toggleExtra(it.project);
           return;
         }
-        if (query !== "" || it?.kind !== "project") return;
+        // A held key (clearing the search) never asks to remove.
+        if (e.repeat || query !== "" || it?.kind !== "project") return;
         e.preventDefault();
         startRemove(it.project);
         return;
@@ -397,7 +398,7 @@ export function LauncherProjectMenu({
           onClick={(e) => e.stopPropagation()}
         >
           <span className="launcher-pm-confirm-text">{t("launcher.projectRemoveAsk", { name: p.name })}</span>
-          <Button ref={confirmRef} size="sm" variant="danger" className="launcher-pm-confirm-remove" loading={removing} onClick={() => void confirmRemove(p)}>
+          <Button size="sm" variant="danger" className="launcher-pm-confirm-remove" loading={removing} onClick={() => void confirmRemove(p)}>
             {t("launcher.projectRemoveConfirm")}
           </Button>
           <Button size="sm" variant="quiet" className="launcher-pm-confirm-cancel" onClick={cancelRemove}>

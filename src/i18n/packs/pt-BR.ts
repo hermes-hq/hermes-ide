@@ -1308,7 +1308,7 @@ export const ptBRPack: LanguagePack = {
     "launcher.projectUseFolder": "Usar esta pasta",
     "launcher.projectMissing": "Pasta não encontrada",
     "launcher.projectRemove": "Remover da lista",
-    "launcher.projectRemoveAsk": "Remover {name} da lista? Os arquivos continuam no disco.",
+    "launcher.projectRemoveAsk": "Remover {name} do Hermes? Os arquivos continuam no disco; as sessões que o usam perdem o vínculo.",
     "launcher.projectRemoveConfirm": "Remover",
     "launcher.projectRemoveFailed": "Não foi possível remover: {error}",
     "launcher.projectOpenFolder": "Abrir pasta…",

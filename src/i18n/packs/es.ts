@@ -1308,7 +1308,7 @@ export const esPack: LanguagePack = {
     "launcher.projectUseFolder": "Usar esta carpeta",
     "launcher.projectMissing": "Carpeta no encontrada",
     "launcher.projectRemove": "Quitar de la lista",
-    "launcher.projectRemoveAsk": "¿Quitar {name} de la lista? Los archivos se quedan en el disco.",
+    "launcher.projectRemoveAsk": "¿Quitar {name} de Hermes? Sus archivos se quedan en el disco; las sesiones que lo usan pierden el vínculo.",
     "launcher.projectRemoveConfirm": "Quitar",
     "launcher.projectRemoveFailed": "No se pudo quitar: {error}",
     "launcher.projectOpenFolder": "Abrir carpeta…",

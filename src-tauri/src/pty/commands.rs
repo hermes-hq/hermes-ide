@@ -1156,6 +1156,9 @@ pub fn create_session(
     // with (helper launch only), or "login" to run the CLI's sign-in in the
     // account's profile (Add account).
     agent_launch: Option<crate::agent_caps::AgentLaunchOptions>,
+    // The extra folders chosen in the task launcher: a terminal agent's
+    // `--add-dir` (never the projects attached later).
+    extra_dirs: Option<Vec<String>>,
 ) -> Result<SessionUpdate, String> {
     let session_mode = mode.unwrap_or(SessionMode::Terminal);
     let agent_launch = match (&ai_provider, &agent_launch) {
@@ -1317,6 +1320,7 @@ pub fn create_session(
         pending_nudge: None,
         pending_projects_nudge: false,
         agent_launch,
+        extra_dirs: extra_dirs.unwrap_or_default(),
         ssh_info: ssh_host.as_ref().map(|host| SshConnectionInfo {
             host: host.clone(),
             port: ssh_port.unwrap_or(22),

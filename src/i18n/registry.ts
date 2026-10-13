@@ -1338,7 +1338,7 @@ const ENGLISH_PACK: LanguagePack = {
     "launcher.projectUseFolder": "Use this folder",
     "launcher.projectMissing": "Folder not found",
     "launcher.projectRemove": "Remove from list",
-    "launcher.projectRemoveAsk": "Remove {name} from the list? Files stay on disk.",
+    "launcher.projectRemoveAsk": "Remove {name} from Hermes? Its files stay on disk; sessions using it lose the link.",
     "launcher.projectRemoveConfirm": "Remove",
     "launcher.projectRemoveFailed": "Couldn't remove it: {error}",
     "launcher.projectOpenFolder": "Open folder…",

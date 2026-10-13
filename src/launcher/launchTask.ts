@@ -151,7 +151,7 @@ function sessionOpts(launch: QueuedLaunch): CreateSessionOpts {
     aiProvider: agent.id,
     mode: agent.mode,
     projectIds: [projectId, ...extraIds],
-    ...(extraPaths.length > 0 ? { workspacePaths: [...extraPaths] } : {}),
+    ...(extraPaths.length > 0 ? { extraDirs: [...extraPaths] } : {}),
     workingDirectory: req.repoRoot,
     // A new worktree on a new branch, a worktree of an existing branch, or
     // (no selection) the repository's own checkout.

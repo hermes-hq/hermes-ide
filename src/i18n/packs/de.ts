@@ -1308,7 +1308,7 @@ export const dePack: LanguagePack = {
     "launcher.projectUseFolder": "Diesen Ordner verwenden",
     "launcher.projectMissing": "Ordner nicht gefunden",
     "launcher.projectRemove": "Aus der Liste entfernen",
-    "launcher.projectRemoveAsk": "{name} aus der Liste entfernen? Die Dateien bleiben auf der Festplatte.",
+    "launcher.projectRemoveAsk": "{name} aus Hermes entfernen? Die Dateien bleiben auf der Festplatte; Sitzungen, die es nutzen, verlieren die Verknüpfung.",
     "launcher.projectRemoveConfirm": "Entfernen",
     "launcher.projectRemoveFailed": "Konnte nicht entfernt werden: {error}",
     "launcher.projectOpenFolder": "Ordner öffnen…",

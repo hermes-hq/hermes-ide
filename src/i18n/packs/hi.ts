@@ -1308,7 +1308,7 @@ export const hiPack: LanguagePack = {
     "launcher.projectUseFolder": "यह फ़ोल्डर इस्तेमाल करें",
     "launcher.projectMissing": "फ़ोल्डर नहीं मिला",
     "launcher.projectRemove": "सूची से हटाएँ",
-    "launcher.projectRemoveAsk": "{name} को सूची से हटाएँ? फ़ाइलें डिस्क पर रहेंगी।",
+    "launcher.projectRemoveAsk": "{name} को Hermes से हटाएँ? इसकी फ़ाइलें डिस्क पर रहेंगी; इसका उपयोग करने वाले सत्रों से इसका लिंक हट जाएगा।",
     "launcher.projectRemoveConfirm": "हटाएँ",
     "launcher.projectRemoveFailed": "हटाया नहीं जा सका: {error}",
     "launcher.projectOpenFolder": "फ़ोल्डर खोलें…",

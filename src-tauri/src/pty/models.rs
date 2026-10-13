@@ -324,6 +324,11 @@ pub struct Session {
     /// session, so a restore resumes in the same profile.
     #[serde(default)]
     pub agent_launch: crate::agent_caps::SessionLaunch,
+    /// The extra folders chosen in the task launcher: a terminal agent's
+    /// `--add-dir`. Never the projects attached later (`workspace_paths`),
+    /// which must not widen what the agent may edit.
+    #[serde(default)]
+    pub extra_dirs: Vec<String>,
 }
 
 /// A context nudge that couldn't be delivered immediately (agent was busy).
@@ -383,6 +388,10 @@ pub struct SessionUpdate {
     /// chip shows it as "requested" until the agent reports its own.
     #[serde(default)]
     pub agent_launch: crate::agent_caps::SessionLaunch,
+    /// The launcher's extra folders (see `Session::extra_dirs`), so a save
+    /// keeps them; left out when there are none.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub extra_dirs: Vec<String>,
 }
 
 impl From<&Session> for SessionUpdate {
@@ -420,6 +429,7 @@ impl From<&Session> for SessionUpdate {
             reattached: false,
             parent_session_id: s.parent_session_id.clone(),
             agent_launch: s.agent_launch.clone(),
+            extra_dirs: s.extra_dirs.clone(),
         }
     }
 }

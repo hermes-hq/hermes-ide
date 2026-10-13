@@ -1308,7 +1308,7 @@ export const jaPack: LanguagePack = {
     "launcher.projectUseFolder": "このフォルダを使う",
     "launcher.projectMissing": "フォルダが見つかりません",
     "launcher.projectRemove": "リストから削除",
-    "launcher.projectRemoveAsk": "{name} をリストから削除しますか?ファイルはディスクに残ります。",
+    "launcher.projectRemoveAsk": "{name} を Hermes から削除しますか?ファイルはディスクに残りますが、これを使っているセッションとのリンクは解除されます。",
     "launcher.projectRemoveConfirm": "削除",
     "launcher.projectRemoveFailed": "削除できませんでした: {error}",
     "launcher.projectOpenFolder": "フォルダを開く…",

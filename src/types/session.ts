@@ -116,6 +116,9 @@ export interface SessionData {
   created_at: string;
   last_activity_at: string;
   workspace_paths: string[];
+  /** The extra folders chosen in the task launcher (a terminal agent's --add-dir);
+   *  absent when there are none. Not the projects attached later. */
+  extra_dirs?: string[];
   detected_agent: AgentInfo | null;
   metrics: SessionMetrics;
   ai_provider: string | null;
@@ -212,9 +215,9 @@ export interface CreateSessionOpts {
   /** Custom agent only: the command typed to start it. */
   agentCommand?: string;
   projectIds?: string[];
-  /** More folders the agent may work in besides its working folder (a launcher task's
-   *  extra folders): Claude's --add-dir, in the Agent view and in a terminal. */
-  workspacePaths?: string[];
+  /** A launcher task's extra folders: Claude's --add-dir in a terminal (the Agent
+   *  view gets them as the attached projects in projectIds). */
+  extraDirs?: string[];
   branchName?: string;
   createNewBranch?: boolean;
   /** Per-project branch selections: projectId -> { branch, createNew, fromRemote? } */
@@ -286,6 +289,9 @@ export interface SavedSessionInfo {
   agent_effort?: string;
   /** Currently-attached additional directories (Hermes' projects). */
   agent_add_dirs?: string[];
+  /** The extra folders chosen in the task launcher: a terminal agent's --add-dir
+   *  on restore. Older saves have none, and get no --add-dir. */
+  launcher_extra_dirs?: string[];
   // ─── Terminal-agent resume (launchHelper flag) ───────────────────
   /** The agent's own conversation id for a terminal session (Claude or
    *  Gemini session id, Codex thread id). On restore the agent is resumed
@@ -368,6 +374,9 @@ export function validateSavedWorkspace(raw: unknown): SavedWorkspace | null {
     }
     if (si.agent_add_dirs !== undefined && !Array.isArray(si.agent_add_dirs)) {
       delete si.agent_add_dirs;
+    }
+    if (si.launcher_extra_dirs !== undefined && (!Array.isArray(si.launcher_extra_dirs) || !si.launcher_extra_dirs.every((d) => typeof d === "string"))) {
+      delete si.launcher_extra_dirs;
     }
     // A conversation id is a non-empty string or nothing at all.
     if (si.vendor_session_id !== undefined && (typeof si.vendor_session_id !== "string" || !si.vendor_session_id)) {

@@ -104,7 +104,7 @@ pub struct LaunchInput<'a> {
     /// the agent as its first prompt on a fresh start.
     pub task: Option<&'a str>,
     /// More folders the agent may work in besides `cwd` (the launcher's
-    /// extra folders: the session's `workspace_paths`), for an agent whose
+    /// extra folders: `terminal_add_dirs`), for an agent whose
     /// catalog entry has an `add_dir` flag; others ignore them.
     pub add_dirs: &'a [String],
     /// A library persona for the system prompt (catalog `system_prompt`),
@@ -1578,6 +1578,41 @@ pub(crate) fn hook_trust_for(app: &AppHandle, provider: &str, cwd: &str) -> Opti
     )
 }
 
+/// The repository a folder is in, the same for a main checkout and each of
+/// its worktrees (git's common directory), resolved.
+fn repo_identity(path: &Path) -> Option<PathBuf> {
+    let repo = git2::Repository::discover(path).ok()?;
+    std::fs::canonicalize(repo.commondir()).ok()
+}
+
+/// A terminal agent's extra folders (`--add-dir`): only the ones chosen in
+/// the task launcher (`extra_dirs`, never the attached `workspace_paths`),
+/// without a folder that is gone or that is the working folder's own
+/// repository (its main checkout or another worktree of it), which would let
+/// the agent edit outside its worktree.
+pub(crate) fn terminal_add_dirs(s: &Session) -> Vec<String> {
+    if s.extra_dirs.is_empty() {
+        return Vec::new();
+    }
+    let cwd = Path::new(s.working_directory.trim());
+    let cwd_real = std::fs::canonicalize(cwd).ok();
+    let cwd_repo = repo_identity(cwd);
+    s.extra_dirs
+        .iter()
+        .map(|d| d.trim())
+        .filter(|d| !d.is_empty())
+        .filter(|d| {
+            let Ok(real) = std::fs::canonicalize(d) else {
+                return false;
+            };
+            real.is_dir()
+                && cwd_real.as_ref() != Some(&real)
+                && (cwd_repo.is_none() || repo_identity(&real) != cwd_repo)
+        })
+        .map(str::to_string)
+        .collect()
+}
+
 pub(crate) fn prepare_helper_launch(
     app: &AppHandle,
     s: &mut Session,
@@ -1639,6 +1674,7 @@ pub(crate) fn prepare_helper_launch(
         .profile_env
         .as_ref()
         .map(|p| (p.name.as_str(), p.value.as_str()));
+    let add_dirs = terminal_add_dirs(s);
     let Some(plan) = plan_launch(&LaunchInput {
         session_id: &s.id,
         provider: &provider,
@@ -1652,7 +1688,7 @@ pub(crate) fn prepare_helper_launch(
         not_git: context_path.is_some()
             && git2::Repository::discover(Path::new(&s.working_directory)).is_err(),
         task: s.task_prompt.as_deref(),
-        add_dirs: &s.workspace_paths,
+        add_dirs: &add_dirs,
         system_prompt: s.system_prompt.as_deref(),
         resume_id: s.vendor_session_id.as_deref(),
         seed_prompt: s.seed_prompt.as_deref(),
@@ -4087,6 +4123,91 @@ pub(crate) mod tests {
         assert_eq!(live_spool_actions(&check, true), (false, None));
     }
 
+    /// A repository with one commit at `path`.
+    fn git_repo_with_commit(path: &Path) -> git2::Repository {
+        let repo = git2::Repository::init(path).unwrap();
+        let sig = git2::Signature::now("Test", "test@example.com").unwrap();
+        let tree_id = repo.index().unwrap().write_tree().unwrap();
+        {
+            let tree = repo.find_tree(tree_id).unwrap();
+            repo.commit(Some("HEAD"), &sig, &sig, "init", &tree, &[])
+                .unwrap();
+        }
+        repo
+    }
+
+    #[test]
+    fn no_extra_folders_no_add_dir() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let mut s = test_session();
+        // Projects attached to the session are not the launcher's extra folders.
+        s.workspace_paths = vec![std::env::temp_dir().to_string_lossy().to_string()];
+        let add_dirs = terminal_add_dirs(&s);
+        assert!(add_dirs.is_empty());
+        for resume in [None, Some("abc")] {
+            let mut i = input("claude", resume, hi, dir);
+            i.add_dirs = &add_dirs;
+            let plan = plan_launch(&i).unwrap();
+            assert!(!plan.spec.args.iter().any(|a| a == "--add-dir"));
+            // The same line as with no extra folders at all.
+            assert_eq!(
+                plan.spec.args,
+                plan_launch(&input("claude", resume, hi, dir))
+                    .unwrap()
+                    .spec
+                    .args
+            );
+        }
+    }
+
+    #[test]
+    fn extra_folders_that_are_gone_or_the_sessions_own_repository_are_dropped() {
+        let root = tempfile::tempdir().unwrap();
+        let main = root.path().join("app");
+        std::fs::create_dir_all(&main).unwrap();
+        let repo = git_repo_with_commit(&main);
+        let wt = root.path().join("app-wt");
+        repo.worktree("task", &wt, None).unwrap();
+        std::fs::create_dir_all(main.join("sub")).unwrap();
+        let other = root.path().join("plugins");
+        std::fs::create_dir_all(&other).unwrap();
+        git_repo_with_commit(&other);
+        let plain = root.path().join("notes");
+        std::fs::create_dir_all(&plain).unwrap();
+        let gone = root.path().join("gone");
+        let s_of = |p: &Path| p.to_string_lossy().to_string();
+        let extras = vec![
+            s_of(&other),
+            s_of(&main),
+            s_of(&main.join("sub")),
+            s_of(&gone),
+            s_of(&plain),
+            s_of(&wt),
+        ];
+        // In the worktree: its main checkout (and a folder in it) is the same repository.
+        let mut s = test_session();
+        s.working_directory = s_of(&wt);
+        s.extra_dirs = extras.clone();
+        assert_eq!(terminal_add_dirs(&s), [s_of(&other), s_of(&plain)]);
+        // In the main checkout: its worktree is the same repository too.
+        s.working_directory = s_of(&main);
+        assert_eq!(terminal_add_dirs(&s), [s_of(&other), s_of(&plain)]);
+        // One --add-dir per folder kept.
+        let add_dirs = terminal_add_dirs(&s);
+        let mut i = input("claude", None, Path::new("/app/hi"), root.path());
+        i.add_dirs = &add_dirs;
+        let plan = plan_launch(&i).unwrap();
+        let pairs: Vec<&str> = plan
+            .spec
+            .args
+            .windows(2)
+            .filter(|w| w[0] == "--add-dir")
+            .map(|w| w[1].as_str())
+            .collect();
+        assert_eq!(pairs, [s_of(&other), s_of(&plain)]);
+    }
+
     #[test]
     fn a_launcher_tasks_extra_folders_are_one_add_dir_each_for_claude_only() {
         let hi = Path::new("/app/hi");
@@ -5998,6 +6119,7 @@ pub(crate) mod tests {
             pending_nudge: None,
             pending_projects_nudge: false,
             agent_launch: Default::default(),
+            extra_dirs: vec![],
             ssh_info: None,
             mode: SessionMode::Terminal,
             vendor_session_id: None,

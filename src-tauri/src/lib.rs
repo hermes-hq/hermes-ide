@@ -1575,6 +1575,7 @@ mod tests {
             reattached: false,
             parent_session_id: None,
             agent_launch: Default::default(),
+            extra_dirs: vec![],
         };
         database.create_session_v2(&update).unwrap();
 

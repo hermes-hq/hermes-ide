@@ -1308,7 +1308,7 @@ export const ruPack: LanguagePack = {
     "launcher.projectUseFolder": "Использовать эту папку",
     "launcher.projectMissing": "Папка не найдена",
     "launcher.projectRemove": "Убрать из списка",
-    "launcher.projectRemoveAsk": "Убрать {name} из списка? Файлы останутся на диске.",
+    "launcher.projectRemoveAsk": "Убрать {name} из Hermes? Файлы останутся на диске; сессии, которые его используют, потеряют связь с ним.",
     "launcher.projectRemoveConfirm": "Убрать",
     "launcher.projectRemoveFailed": "Не удалось убрать: {error}",
     "launcher.projectOpenFolder": "Открыть папку…",

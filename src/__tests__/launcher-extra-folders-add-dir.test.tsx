@@ -7,10 +7,12 @@
  *     below); the agent is spawned with them as addDirs, and the Rust test
  *     build_spawn_args_initial_emits_one_add_dir_per_path_in_input_order
  *     turns each into one --add-dir.
- *   - Terminal: the extra folders travel as workspacePaths, which become the
- *     session's workspace_paths, and the Rust test
- *     a_launcher_tasks_extra_folders_are_one_add_dir_each_for_claude_only
- *     turns each into one --add-dir on the launch line.
+ *   - Terminal: the extra folders travel as extraDirs, which become the
+ *     session's extra_dirs (never its workspace_paths: projects attached
+ *     later are not --add-dir), and the Rust tests
+ *     a_launcher_tasks_extra_folders_are_one_add_dir_each_for_claude_only and
+ *     extra_folders_that_are_gone_or_the_sessions_own_repository_are_dropped
+ *     turn each into one --add-dir on the launch line.
  * SessionProvider against a faked backend. Every path here is made up.
  */
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
@@ -159,10 +161,11 @@ describe("a launcher task's extra folders reach Claude as --add-dir", () => {
     expect(spawn?.addDirs).toEqual(expect.arrayContaining([PROJECTS["proj-a"], PROJECTS["proj-b"]]));
   });
 
-  it("Terminal: create_session gets the extra folders as the session's workspace paths (its --add-dir)", async () => {
+  it("Terminal: create_session gets the extra folders as the session's extra dirs (its --add-dir)", async () => {
     const created = await launch("terminal");
     expect(created.projectIds).toEqual(["proj-main", "proj-a", "proj-b"]);
-    expect(created.workspacePaths).toEqual([PROJECTS["proj-a"], PROJECTS["proj-b"]]);
+    expect(created.extraDirs).toEqual([PROJECTS["proj-a"], PROJECTS["proj-b"]]);
+    expect(created.workspacePaths).toBeNull();
     expect(calls.some((c) => c.cmd === "spawn_agent_session")).toBe(false);
   });
 });

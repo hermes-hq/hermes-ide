@@ -1308,7 +1308,7 @@ export const frPack: LanguagePack = {
     "launcher.projectUseFolder": "Utiliser ce dossier",
     "launcher.projectMissing": "Dossier introuvable",
     "launcher.projectRemove": "Retirer de la liste",
-    "launcher.projectRemoveAsk": "Retirer {name} de la liste ? Les fichiers restent sur le disque.",
+    "launcher.projectRemoveAsk": "Retirer {name} de Hermes ? Ses fichiers restent sur le disque ; les sessions qui l'utilisent perdent le lien.",
     "launcher.projectRemoveConfirm": "Retirer",
     "launcher.projectRemoveFailed": "Impossible de le retirer : {error}",
     "launcher.projectOpenFolder": "Ouvrir un dossier…",

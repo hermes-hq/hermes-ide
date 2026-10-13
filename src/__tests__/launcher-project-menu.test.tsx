@@ -382,7 +382,7 @@ describe("remove from list", () => {
     await openMenu();
     fireEvent.click(row(BEACON).querySelector(".launcher-pm-remove") as HTMLElement);
     await settle();
-    expect(row(BEACON)).toHaveTextContent("Remove beacon from the list? Files stay on disk.");
+    expect(row(BEACON)).toHaveTextContent("Remove beacon from Hermes? Its files stay on disk; sessions using it lose the link.");
     fireEvent.click(within(row(BEACON)).getByRole("button", { name: "Cancel" }));
     await settle();
     expect(row(BEACON)).not.toHaveClass("launcher-pm-confirm");
@@ -410,8 +410,9 @@ describe("remove from list", () => {
     fireEvent.keyDown(search(), { key: "Backspace" });
     await settle();
     expect(row(BEACON)).toHaveClass("launcher-pm-confirm");
-    expect(document.activeElement).toHaveTextContent("Remove");
-    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Escape" });
+    // The search keeps the keyboard: the destructive button is never focused for you.
+    expect(document.activeElement).toBe(search());
+    fireEvent.keyDown(search(), { key: "Escape" });
     await settle();
     expect(row(BEACON)).not.toHaveClass("launcher-pm-confirm");
     expect(menu()).not.toBeNull();
@@ -427,12 +428,60 @@ describe("remove from list", () => {
     expect(row(ATLAS)).toHaveClass("launcher-pm-confirm");
   });
 
+  it("a held Backspace (clearing the search) never asks to remove", async () => {
+    await openLauncher();
+    await openMenu();
+    await typeSearch("");
+    fireEvent.keyDown(search(), { key: "Backspace", repeat: true });
+    fireEvent.keyDown(search(), { key: "Delete", repeat: true });
+    await settle();
+    expect(document.querySelector(".launcher-pm-confirm")).toBeNull();
+    // Enter then picks the highlighted project, as it would have anyway.
+    fireEvent.keyDown(search(), { key: "Enter" });
+    await settle();
+    expect(h.deleted).toEqual([]);
+  });
+
+  it("after one Backspace, Enter does not remove; it closes the confirm", async () => {
+    await openLauncher();
+    await openMenu();
+    fireEvent.keyDown(search(), { key: "Backspace" });
+    await settle();
+    expect(row(ATLAS)).toHaveClass("launcher-pm-confirm");
+    fireEvent.keyDown(document.activeElement as HTMLElement, { key: "Enter" });
+    await settle();
+    expect(h.deleted).toEqual([]);
+    expect(row(ATLAS)).not.toHaveClass("launcher-pm-confirm");
+    expect(document.activeElement).toBe(search());
+  });
+
+  it("after one Backspace, a click on Remove (or Enter on it once tabbed to) removes", async () => {
+    await openLauncher();
+    await openMenu();
+    fireEvent.keyDown(search(), { key: "ArrowDown" });
+    fireEvent.keyDown(search(), { key: "Backspace" });
+    await settle();
+    const remove = within(row(BEACON)).getByRole("button", { name: "Remove" });
+    // Focused on purpose (Tab), Enter presses it.
+    remove.focus();
+    fireEvent.keyDown(remove, { key: "Enter" });
+    await settle();
+    expect(h.deleted).toEqual(["p-beacon"]);
+    fireEvent.keyDown(search(), { key: "Home" });
+    fireEvent.keyDown(search(), { key: "Backspace" });
+    await settle();
+    expect(row(ATLAS)).toHaveClass("launcher-pm-confirm");
+    fireEvent.click(within(row(ATLAS)).getByRole("button", { name: "Remove" }));
+    await settle();
+    expect(h.deleted).toEqual(["p-beacon", "p-atlas"]);
+  });
+
   it("a missing folder offers removal when chosen", async () => {
     await openLauncher();
     await openMenu();
     fireEvent.click(row(GONE));
     await settle();
-    expect(row(GONE)).toHaveTextContent("Remove gone-app from the list? Files stay on disk.");
+    expect(row(GONE)).toHaveTextContent("Remove gone-app from Hermes? Its files stay on disk; sessions using it lose the link.");
     fireEvent.click(within(row(GONE)).getByRole("button", { name: "Remove" }));
     await settle();
     expect(h.deleted).toEqual(["p-gone"]);
@@ -716,7 +765,7 @@ describe("extra folders in the launcher", () => {
     expect(created).toHaveLength(1);
     expect(created[0].projectIds).toEqual(["p-atlas", "p-beacon"]);
     expect(Object.keys(created[0].branchSelections ?? {})).toEqual(["p-atlas"]);
-    expect(created[0].workspacePaths).toEqual([BEACON]);
+    expect(created[0].extraDirs).toEqual([BEACON]);
   });
 
   it("with a second agent on the task, the Also line warns that both share the folders' checkouts", async () => {

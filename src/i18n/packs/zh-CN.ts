@@ -1308,7 +1308,7 @@ export const zhCNPack: LanguagePack = {
     "launcher.projectUseFolder": "使用此文件夹",
     "launcher.projectMissing": "找不到文件夹",
     "launcher.projectRemove": "从列表中移除",
-    "launcher.projectRemoveAsk": "从列表中移除 {name}?文件仍保留在磁盘上。",
+    "launcher.projectRemoveAsk": "从 Hermes 中移除 {name}?文件仍保留在磁盘上;使用它的会话将失去关联。",
     "launcher.projectRemoveConfirm": "移除",
     "launcher.projectRemoveFailed": "无法移除:{error}",
     "launcher.projectOpenFolder": "打开文件夹…",

@@ -62,6 +62,8 @@ export function createSession(opts: {
   parentSessionId?: string | null;
   /** 2.0 launch contract: model, effort and account (helper launch only). */
   agentLaunch?: AgentLaunchOptions | null;
+  /** A launcher task's extra folders: a terminal agent's --add-dir. */
+  extraDirs?: string[] | null;
 }): Promise<SessionData> {
   return invoke<SessionData>("create_session", opts);
 }
