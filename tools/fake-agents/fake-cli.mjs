@@ -4,7 +4,7 @@
 // started — so launch and resume can be tested without an account.
 //
 //   node fake-cli.mjs [--session-id <id>] [--resume <id>] [--settings <file>]
-//                     [--permission-mode <m>] [--channels <c>]... [prompt]
+//                     [--permission-mode <m>] [--channels <c>]... [--add-dir <d>]... [prompt]
 //
 // What it does, like the real CLI:
 //   - takes `--session-id` as its conversation id, or invents one;
@@ -217,7 +217,7 @@ const KEPT_ENV = [
 ];
 
 function parseArgs(argv) {
-	const out = { sessionId: null, resumeId: null, settings: null, permissionMode: null, channels: [], model: null, effort: null, config: [], positional: [], raw: argv };
+	const out = { sessionId: null, resumeId: null, settings: null, permissionMode: null, channels: [], addDirs: [], model: null, effort: null, config: [], positional: [], raw: argv };
 	for (let i = 0; i < argv.length; i++) {
 		const a = argv[i];
 		const next = () => argv[++i];
@@ -233,6 +233,7 @@ function parseArgs(argv) {
 		else if (a === "--settings") out.settings = next();
 		else if (a === "--permission-mode") out.permissionMode = next();
 		else if (a === "--channels") out.channels.push(next());
+		else if (a === "--add-dir") out.addDirs.push(next());
 		else if (a.startsWith("--")) out.positional.push(a); // unknown flags are kept visible in the record
 		else out.positional.push(a);
 	}
@@ -473,6 +474,8 @@ const record = {
 	model: args.model,
 	effort: args.effort,
 	profileDir: profileDir(),
+	/** The folders it may work in besides its own (one --add-dir each). */
+	addDirs: args.addDirs,
 	prompt: args.positional.join(" ") || null,
 	/** Prompts submitted while running (typed or pasted, then Enter). */
 	prompts: [],

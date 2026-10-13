@@ -24,6 +24,8 @@ export interface LauncherDraft {
   viewMode?: SessionMode;
   /** Files and images attached to the task. */
   attachments?: LaunchAttachment[];
+  /** The task's extra folders (edited in place). */
+  extraRoots?: string[];
 }
 
 /** Worth keeping: something was typed or chosen (an untouched sheet is not a draft). */

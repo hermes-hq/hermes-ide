@@ -41,6 +41,12 @@ export interface QueuedLaunch {
   req: TaskLaunchRequest;
   agentIndex: number;
   projectId: string;
+  /**
+   * The task's extra folders as projects, in the order of req.extraRoots:
+   * attached and edited in place (no branch, no worktree). Absent in a
+   * launch queued before extra folders existed: the main project alone.
+   */
+  extraProjectIds?: string[];
   /** Shared by the agents of one launch (pairs their records). */
   launchId: string;
   /** The first prompt the agent starts with (the track's, for a Full track). */
@@ -136,12 +142,16 @@ function sessionOpts(launch: QueuedLaunch): CreateSessionOpts {
   const { req, agentIndex, projectId } = launch;
   const agent = req.agents[agentIndex];
   const custom = getAgent(agent.id)?.custom === true;
+  const extraIds = launch.extraProjectIds ?? [];
+  // The folders the agent may work in besides its own (Claude's --add-dir).
+  const extraPaths = extraIds.length > 0 ? (req.extraRoots ?? []) : [];
   const { firstPrompt, systemPrompt } = promptsFor(launch);
   return {
     label: taskLabel(nameOf(req.task.trim(), req.library)),
     aiProvider: agent.id,
     mode: agent.mode,
-    projectIds: [projectId],
+    projectIds: [projectId, ...extraIds],
+    ...(extraPaths.length > 0 ? { workspacePaths: [...extraPaths] } : {}),
     workingDirectory: req.repoRoot,
     // A new worktree on a new branch, a worktree of an existing branch, or
     // (no selection) the repository's own checkout.
@@ -236,6 +246,15 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
   if ((!task && !req.library?.persona?.text.trim()) || req.agents.length === 0) return result;
 
   const projectId = await deps.projectFor(req.repoRoot);
+  // Extra folders become projects the same way; each is attached once.
+  const extraRoots: string[] = [];
+  const extraProjectIds: string[] = [];
+  for (const root of req.extraRoots ?? []) {
+    const id = await deps.projectFor(root);
+    if (id === projectId || extraProjectIds.includes(id)) continue;
+    extraRoots.push(root);
+    extraProjectIds.push(id);
+  }
   const label = taskLabel(nameOf(task, req.library));
   const launchId = newLaunchId(deps);
   result.launchId = launchId;
@@ -252,7 +271,14 @@ export async function launchTask(req: TaskLaunchRequest, deps: LaunchTaskDeps): 
   }
   // Attached files and images: their paths follow the task.
   firstPrompt = promptWithAttachments(firstPrompt, req.attachments);
-  const plan = (agentIndex: number): QueuedLaunch => ({ req: { ...req, task }, agentIndex, projectId, launchId, firstPrompt });
+  const plan = (agentIndex: number): QueuedLaunch => ({
+    req: { ...req, task, ...(req.extraRoots ? { extraRoots } : {}) },
+    agentIndex,
+    projectId,
+    ...(extraProjectIds.length > 0 ? { extraProjectIds } : {}),
+    launchId,
+    firstPrompt,
+  });
 
   const started: { sessionId: string; launch: QueuedLaunch }[] = [];
   for (const i of req.agents.keys()) {

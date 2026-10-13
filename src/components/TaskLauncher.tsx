@@ -5,7 +5,7 @@ import { homeDir } from "@tauri-apps/api/path";
 import { useI18n } from "../i18n/I18nProvider";
 import { Button, Checkbox, Chip, CloseButton, IconButton, Input, Segmented, Select, Textarea, type SelectOption } from "./ui";
 import { NewFolderForm } from "./NewFolderForm";
-import { LauncherProjectMenu } from "./LauncherProjectMenu";
+import { LauncherProjectMenu, type LauncherExtras } from "./LauncherProjectMenu";
 import type { ControlAttrs } from "./ui/attrs";
 import { cx } from "./ui/Button";
 import { CloseGlyph } from "./ui/icons";
@@ -66,6 +66,7 @@ import { LaunchAttachments, useFileDrop, useLaunchAttachmentInput } from "./Laun
 import { FILE_DROP_TARGET } from "../utils/fileDropTarget";
 import { attachmentFromPath, type LaunchAttachment } from "../launcher/attachments";
 import { useModalTabTrap } from "../hooks/useFocusTrap";
+import { extraBlock, takesExtraFolders, type ExtraBlock, type FolderRef } from "../launcher/extraFolders";
 import { queuedNewBranches, useTaskQueue } from "../fleet/taskQueue";
 import {
   TASK_LAUNCHES_KEY,
@@ -111,6 +112,11 @@ export interface TaskLaunchRequest {
   task: string;
   /** The repository's main checkout. */
   repoRoot: string;
+  /**
+   * More folders the task works in, edited in place on whatever branch
+   * they are on (only the main project gets the task's branch and worktree).
+   */
+  extraRoots?: string[];
   /** The first entry is the main agent; a second one runs the same task on its own branch. */
   agents: PlannedAgent[];
   track: TaskTrack;
@@ -286,6 +292,9 @@ export function TaskLauncher({
   const [choice, setChoice] = useState<LaunchChoice | null>(null);
   const [repoPath, setRepoPath] = useState(defaultRepo ?? "");
   const [probe, setProbe] = useState<{ path: string; result: RepoProbe } | null>(null);
+  // More folders the task works in (edited in place), and what was read about each.
+  const [extraRoots, setExtraRoots] = useState<string[]>([]);
+  const [extraProbes, setExtraProbes] = useState<Record<string, RepoProbe>>({});
   const [branch, setBranch] = useState("");
   const [branchEdited, setBranchEditedState] = useState(false);
   // Also read by the branch effect, which can run in the same flush as a
@@ -557,6 +566,7 @@ export function TaskLauncher({
       setChecksEdited(draft.checksEdited);
       setExpanded(draft.expanded);
       if (draft.attachments) setAttachments(draft.attachments);
+      if (draft.extraRoots) setExtraRoots(draft.extraRoots);
       if (draft.viewMode) viewFromDraft.current = { agentId: draft.choice.agentId, mode: draft.viewMode };
       // The draft's choice is the person's own: a project switch only offers that project's usual.
       userTouched.current = true;
@@ -916,6 +926,86 @@ export function TaskLauncher({
     return list;
   }, [effective, branch, viewMode, capsOf, where, task, backend, fallbackId, plainFolder, takenBranches]);
 
+  // ── extra folders ───────────────────────────────────────────────
+  // Only an agent that can be given more folders gets them (Claude's
+  // --add-dir); for any other the checkboxes are hidden and nothing is sent.
+  const extrasOk = !!choice && takesExtraFolders(choice.agentId, hasAgentView(choice.agentId) ? viewMode : "terminal");
+  const activeExtras = useMemo(() => (extrasOk ? extraRoots : []), [extrasOk, extraRoots]);
+  const projectName = useCallback((path: string) => projects.find((p) => samePath(p.path, path))?.name || baseName(path), [projects]);
+  const mainRef = useMemo((): FolderRef | null => (repoPath.trim() ? { path: probed?.resolved || repoPath.trim(), name: projectName(repoPath), gitRoot } : null), [repoPath, probed, gitRoot, projectName]);
+  const refOf = useCallback((path: string): FolderRef => ({ path, name: projectName(path), gitRoot: extraProbes[path]?.git_root }), [projectName, extraProbes]);
+  const blockText = (b: ExtraBlock): string =>
+    b.kind === "missing"
+      ? t("launcher.projectMissing")
+      : b.kind === "cap"
+        ? t("launcher.extraCap", { max: b.max })
+        : t(b.kind === "inside" ? "launcher.extraInside" : b.kind === "contains" ? "launcher.extraContains" : "launcher.extraSameRepo", { name: b.name });
+  /** "⎇ dev ●3", "not git": an extra folder's branch and uncommitted changes, once read. */
+  const extraDetail = (path: string): string | undefined => {
+    const p = extraProbes[path];
+    if (!p) return undefined;
+    if (!p.git_root) return t("launcher.extraNotGit");
+    const dirty = p.dirty_count ?? 0;
+    return `⎇ ${p.current_branch || "HEAD"}${dirty > 0 ? ` ●${dirty}` : ""}`;
+  };
+  /** Adds a folder to the task's extra ones (read first: its repository decides), or takes it out. */
+  const toggleExtra = async (path: string) => {
+    userTouched.current = true;
+    if (extraRoots.some((p) => samePath(p, path))) {
+      setExtraRoots((cur) => cur.filter((p) => !samePath(p, path)));
+      return;
+    }
+    const exists = projects.find((p) => samePath(p.path, path))?.path_exists !== false;
+    const check = (extras: string[], probes: Record<string, RepoProbe>) =>
+      extraBlock(
+        { path, name: projectName(path), gitRoot: probes[path]?.git_root, exists },
+        { main: mainRef, extras: extras.map((p) => ({ path: p, name: projectName(p), gitRoot: probes[p]?.git_root })), windows: PLATFORM === "win" },
+      );
+    if (check(extraRoots, extraProbes)) return;
+    let read = extraProbes[path];
+    if (!read) {
+      read = await probeTaskRepo(path, undefined, true).catch(
+        (): RepoProbe => ({ git_root: null, branch_exists: false, local_branches: [], worktree_toml: null, current_branch: null, dirty_count: null }),
+      );
+      const probes = { ...extraProbes, [path]: read };
+      setExtraProbes((cur) => ({ ...cur, [path]: read }));
+      // A worktree of the main project's repository (or of another extra one's): not added, and its row says why.
+      setExtraRoots((cur) => (cur.some((p) => samePath(p, path)) || check(cur, probes) ? cur : [...cur, path]));
+      return;
+    }
+    setExtraRoots((cur) => (cur.some((p) => samePath(p, path)) ? cur : [...cur, path]));
+  };
+  // An extra folder that came back with a draft is read once too (its branch, its changes, its repository).
+  const extraReading = useRef(new Set<string>());
+  useEffect(() => {
+    for (const path of extraRoots) {
+      if (extraProbes[path] || extraReading.current.has(path)) continue;
+      extraReading.current.add(path);
+      probeTaskRepo(path, undefined, true)
+        .then((r) => setExtraProbes((cur) => ({ ...cur, [path]: r })))
+        .catch(() => {})
+        .finally(() => extraReading.current.delete(path));
+    }
+  }, [extraRoots, extraProbes]);
+  // Another main project: an extra folder that is now that project, inside it or of its repository leaves the task.
+  useEffect(() => {
+    setExtraRoots((cur) => {
+      const next = cur.filter((p) => !mainRef || (!samePath(p, mainRef.path) && !samePath(p, repoPath) && !extraBlock({ ...refOf(p), exists: true }, { main: mainRef, extras: [], windows: PLATFORM === "win" })));
+      return next.length === cur.length ? cur : next;
+    });
+  }, [mainRef, repoPath, refOf]);
+  const extrasMenu: LauncherExtras | null = extrasOk
+    ? {
+        paths: extraRoots,
+        detail: extraDetail,
+        blocked: (p) => {
+          const b = extraBlock({ path: p.path, name: p.name, gitRoot: extraProbes[p.path]?.git_root, exists: p.path_exists !== false }, { main: mainRef, extras: extraRoots.map(refOf), windows: PLATFORM === "win" });
+          return b ? blockText(b) : null;
+        },
+        onToggle: (path) => void toggleExtra(path),
+      }
+    : null;
+
   /** Whether the account an agent runs on is signed in, as the capability backend says (undefined: not known). */
   const accountSignedIn = useCallback(
     (agentId: string, accountId: string | null | undefined): boolean | undefined => capsOf(agentId, accountId)?.accounts.find((x) => x.id === accountId)?.signedIn,
@@ -1018,7 +1108,7 @@ export function TaskLauncher({
   draftNow.current = () => {
     if (inline || forgetDraft.current || !choice) return;
     if (!isDraftWorthKeeping({ task, touched: userTouched.current || attachments.length > 0, expanded, branchEdited, checksEdited, restored })) return;
-    saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode, ...(attachments.length > 0 ? { attachments } : {}) });
+    saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode, ...(attachments.length > 0 ? { attachments } : {}), ...(extraRoots.length > 0 ? { extraRoots } : {}) });
   };
   useEffect(() => () => draftNow.current(), []);
 
@@ -1058,6 +1148,7 @@ export function TaskLauncher({
         result = await onLaunch({
           task: trimmed,
           repoRoot: root,
+          ...(activeExtras.length > 0 ? { extraRoots: activeExtras } : {}),
           agents: plannedAgents,
           track: effective.trackAsFeature ? "Full" : "Quick",
           doneWhen: checks.map((c) => c.trim()).filter(Boolean),
@@ -1118,7 +1209,7 @@ export function TaskLauncher({
       }
       onClose?.({ keepDraft: false });
     },
-    [canGo, effective, root, plannedAgents, modePrefs, task, onLaunch, checks, backend, presets, inline, onClose, defaultPresetName, focusTask, setBranchEdited, libPrompt, libPersona, attachments],
+    [canGo, effective, root, plannedAgents, modePrefs, task, onLaunch, checks, backend, presets, inline, onClose, defaultPresetName, focusTask, setBranchEdited, libPrompt, libPersona, attachments, activeExtras],
   );
 
   /**
@@ -1279,6 +1370,7 @@ export function TaskLauncher({
     await deleteProject(project.id);
     const rest = projects.filter((p) => p.id !== project.id);
     setProjects((prev) => prev.filter((p) => p.id !== project.id));
+    setExtraRoots((cur) => cur.filter((p) => !samePath(p, project.path)));
     if (samePath(project.path, repoPathRef.current)) {
       const next = startProject(rest)?.path ?? "";
       repoPathRef.current = next;
@@ -1325,7 +1417,7 @@ export function TaskLauncher({
     controlRef.current = {
       launch: () => launch(false),
       keepAsDraft: () => {
-        if (choice) saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode, ...(attachments.length > 0 ? { attachments } : {}) });
+        if (choice) saveLauncherDraft({ task, choice, repoPath, branch, branchEdited, checks, checksEdited, expanded, viewMode, ...(attachments.length > 0 ? { attachments } : {}), ...(extraRoots.length > 0 ? { extraRoots } : {}) });
       },
     };
   }
@@ -2031,7 +2123,10 @@ export function TaskLauncher({
               onChange={(e) => update({ extraArgs: e.target.value })}
             />
           )}
-          {menuChip("project", repoPath.trim() ? baseName(repoPath) : t("launcher.projectNone"), { danger: !!repoPath.trim() && gitRoot === null && !plainFolder })}
+          {menuChip("project", repoPath.trim() ? `${baseName(repoPath)}${activeExtras.length > 0 ? ` +${activeExtras.length}` : ""}` : t("launcher.projectNone"), {
+            danger: !!repoPath.trim() && gitRoot === null && !plainFolder,
+            title: activeExtras.length > 0 ? [root ?? repoPath.trim(), ...activeExtras].join("\n") : undefined,
+          })}
           {!plainFolder && menuChip("where", whereChipText, { danger: unisolated })}
           {!isCustom &&
             menuChip("approval", approvalLabel(choice.agentId, choice.approvalModeId), {
@@ -2059,6 +2154,38 @@ export function TaskLauncher({
           >
             {expanded ? t("launcher.fewerOptions") : t("launcher.moreOptions", { shortcut: fmt("{mod}.") })}
           </Button>
+        </div>
+      )}
+
+      {choice && activeExtras.length > 0 && (
+        <div className="task-launcher-extras" role="group" aria-label={t("launcher.extrasAlso")}>
+          <span className="task-launcher-extras-label">{t("launcher.extrasAlso")}</span>
+          {activeExtras.map((path) => {
+            const detail = extraDetail(path);
+            return (
+              <Chip
+                key={path}
+                size="sm"
+                className="task-launcher-extra"
+                onRemove={() => {
+                  userTouched.current = true;
+                  setExtraRoots((cur) => cur.filter((p) => p !== path));
+                }}
+                removeLabel={t("launcher.extraRemove", { name: projectName(path) })}
+                title={path}
+                data-extra-path={path}
+              >
+                {projectName(path)}
+                {detail && <span className="task-launcher-extra-detail">{detail}</span>}
+              </Chip>
+            );
+          })}
+          <span className="task-launcher-muted">{t("launcher.extrasInPlace")}</span>
+          {choice.alsoOn && (
+            <span className="task-launcher-extras-shared" role="note">
+              {t("launcher.extrasShared")}
+            </span>
+          )}
         </div>
       )}
 
@@ -2135,11 +2262,14 @@ export function TaskLauncher({
               home={home}
               onPick={(path) => {
                 setRepoPath(path);
+                // An extra folder made the main project is not an extra any more.
+                setExtraRoots((cur) => cur.filter((p) => !samePath(p, path)));
                 pickDone();
               }}
               onOpenFolder={() => void chooseFolder()}
               onNewProject={() => setNewFolderOpen(true)}
               onRemove={removeProject}
+              extras={extrasMenu}
               newProject={
                 newFolderOpen ? (
                   <NewFolderForm

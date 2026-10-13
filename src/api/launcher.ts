@@ -18,6 +18,8 @@ export interface RepoProbe {
   has_commits?: boolean;
   /** The path as it was read: trimmed, "~" expanded. */
   resolved?: string;
+  /** Uncommitted changes (ignored files left out); null when not a repository or not asked for. */
+  dirty_count?: number | null;
 }
 
 /**
@@ -29,8 +31,9 @@ export function writeTaskDoneWhen(checkout: string, commands: string[]): Promise
   return invoke<string>("task_write_done_when", { checkout, commands });
 }
 
-export function probeTaskRepo(path: string, branch?: string): Promise<RepoProbe> {
-  return invoke<RepoProbe>("task_repo_probe", { path, branch: branch ?? null });
+/** `dirty`: also count the uncommitted changes (a status walk; asked for a task's extra folders only). */
+export function probeTaskRepo(path: string, branch?: string, dirty = false): Promise<RepoProbe> {
+  return invoke<RepoProbe>("task_repo_probe", { path, branch: branch ?? null, ...(dirty ? { dirty: true } : {}) });
 }
 
 /** Writes `<checkout>/.hermes/features/<slug>/feature.md` unless it exists; returns its path. */

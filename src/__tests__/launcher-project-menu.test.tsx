@@ -9,7 +9,11 @@
  *     the second closes; ⌘P opens the menu on its search;
  *   - remove from list: asked in the row, Cancel / Esc keep it, Remove calls
  *     delete_project, the launcher's own project falls back;
- *   - no projects, projects that cannot be read (Retry), New project….
+ *   - no projects, projects that cannot be read (Retry), New project…;
+ *   - extra folders: the checkbox / ⇧↵ adds one (In this task on top), ↵ on
+ *     one makes it the main project, ⌘⌫ removes it, the rows that cannot be
+ *     one say why, at most 5, an agent that works in one folder has none;
+ *     the chip says +N, the Also line removes, and the launch carries them.
  * Every path and name here is made up.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -18,6 +22,7 @@ import "@testing-library/jest-dom/vitest";
 import type { DoctorRow } from "../api/doctor";
 import type { RepoProbe } from "../api/launcher";
 import type { FakeCapabilityCommands } from "./fakes/capabilityCommands";
+import type { CreateSessionOpts, SessionData } from "../types/session";
 
 interface FixtureProject {
   id: string;
@@ -101,7 +106,8 @@ const GONE = "/Users/test/old/gone-app";
 function doctorRow(id: string, name: string): DoctorRow {
   return { id, name, installed: true, version: "1.2.3", min_version: null, version_ok: null, signed_in: "yes", signals: "exact", resume: true, retired: false, retired_note: null, beta: false };
 }
-const repoProbe = (root: string): RepoProbe => ({ git_root: root, branch_exists: false, local_branches: ["main"], worktree_toml: null, current_branch: "main" }) as RepoProbe;
+const repoProbe = (root: string, branch = "main", dirty = 0): RepoProbe =>
+  ({ git_root: root, branch_exists: false, local_branches: [branch], worktree_toml: null, current_branch: branch, dirty_count: dirty }) as RepoProbe;
 
 beforeEach(() => {
   h.doctor = [doctorRow("claude", "Claude Code")];
@@ -179,8 +185,12 @@ describe("the project menu with no search", () => {
     await openMenu();
     expect(document.activeElement).toBe(search());
     const groups = [...document.querySelectorAll(".launcher-pm-group")];
-    expect(groups.map((g) => g.querySelector(".launcher-pm-section")?.textContent)).toEqual(["Recent", "All projects"]);
-    expect(within(groups[0] as HTMLElement).getAllByRole("option").map((o) => o.querySelector(".launcher-pm-name")?.textContent)).toEqual(["atlas", "beacon", "cobalt", "delta", "ember"]);
+    // The launcher's project sits on top, under In this task (not repeated in Recent).
+    expect(groups.map((g) => g.querySelector(".launcher-pm-section")?.textContent)).toEqual(["In this task", "Recent", "All projects"]);
+    const names = (g: Element) => within(g as HTMLElement).getAllByRole("option").map((o) => o.querySelector(".launcher-pm-name")?.textContent);
+    expect(names(groups[0])).toEqual(["atlas"]);
+    expect(groups[0].querySelector(".launcher-pm-main")).toHaveTextContent("main");
+    expect(names(groups[1])).toEqual(["beacon", "cobalt", "delta", "ember", "fjord"]);
     expect(rowNames()).toEqual(["atlas", "beacon", "cobalt", "delta", "ember", "fjord", "zephyr-docs", "gone-app"]);
 
     // One line: the name, the parent folder with ~ for home (the full path as the title), when it was last used.
@@ -453,5 +463,273 @@ describe("remove from list", () => {
     // gone-app has more sessions than cobalt but its folder is missing; beacon is next.
     expect(chip()).toHaveTextContent("beacon");
     expect(row(BEACON)).toHaveAttribute("data-current");
+  });
+});
+
+const DELTA = "/Users/test/code/delta";
+const EMBER = "/Users/test/code/ember";
+const FJORD = "/Users/test/notes/fjord";
+const ZEPHYR = "/Users/test/code/zephyr/docs";
+const sectionNames = (label: string) => {
+  const group = [...document.querySelectorAll(".launcher-pm-group")].find((g) => g.querySelector(".launcher-pm-section")?.textContent === label);
+  return group ? [...group.querySelectorAll("[data-project-path] .launcher-pm-name")].map((n) => n.textContent) : null;
+};
+const check = (path: string) => row(path).querySelector(".launcher-pm-check") as HTMLInputElement;
+const detail = (path: string) => row(path).querySelector(".launcher-pm-ago")?.textContent;
+const alsoLine = () => document.querySelector(".task-launcher-extras") as HTMLElement | null;
+async function toggle(path: string) {
+  fireEvent.click(check(path));
+  await settle();
+}
+
+describe("extra folders in the project menu", () => {
+  beforeEach(() => {
+    h.probe.set(BEACON, repoProbe(BEACON, "dev", 3));
+  });
+
+  it("the checkbox adds a folder: In this task on top with its branch and changes, the search clears, the menu stays open", async () => {
+    await openLauncher();
+    await openMenu();
+    // Every row but the main project has a checkbox; the hints say both keys.
+    expect(row(ATLAS).querySelector(".launcher-pm-check")).toBeNull();
+    expect(check(BEACON)).not.toBeChecked();
+    expect(document.querySelector(".launcher-pm")).not.toHaveAttribute("data-extras");
+    const hints = document.querySelector(".launcher-pm-hints");
+    expect(hints).toHaveTextContent("↵ main");
+    expect(hints).toHaveTextContent("⇧↵ add folder");
+    expect(hints).toHaveTextContent("launch");
+    expect(hints).toHaveTextContent("esc close");
+
+    await typeSearch("bea");
+    await toggle(BEACON);
+    expect(menu()).not.toBeNull();
+    expect(search().value).toBe("");
+    expect(document.activeElement).toBe(search());
+    expect(sectionNames("In this task")).toEqual(["atlas", "beacon"]);
+    expect(sectionNames("Recent")).toEqual(["cobalt", "delta", "ember", "fjord"]);
+    expect(check(BEACON)).toBeChecked();
+    expect(row(BEACON)).toHaveAttribute("data-extra");
+    expect(detail(BEACON)).toBe("⎇ dev ●3");
+    // Once one is checked, every row shows its checkbox.
+    expect(document.querySelector(".launcher-pm")).toHaveAttribute("data-extras");
+
+    // Clicking it again takes it out.
+    await toggle(BEACON);
+    expect(sectionNames("In this task")).toEqual(["atlas"]);
+    expect(check(BEACON)).not.toBeChecked();
+  });
+
+  it("⇧↵ adds the highlighted folder (a folder that is not git says so), and ↵ still picks", async () => {
+    const { onLaunch } = await openLauncher();
+    await openMenu();
+    await typeSearch("del");
+    expect(highlighted()).toBe(row(DELTA));
+    fireEvent.keyDown(search(), { key: "Enter", shiftKey: true });
+    await settle();
+    expect(menu()).not.toBeNull();
+    expect(search().value).toBe("");
+    expect(sectionNames("In this task")).toEqual(["atlas", "delta"]);
+    expect(detail(DELTA)).toBe("not git");
+    expect(chip()).toHaveTextContent("atlas +1");
+    expect(onLaunch).not.toHaveBeenCalled();
+  });
+
+  it("↵ on an extra folder makes it the main project, and it is no longer an extra", async () => {
+    await openLauncher();
+    await openMenu();
+    await toggle(BEACON);
+    fireEvent.keyDown(search(), { key: "ArrowDown" });
+    expect(highlighted()).toBe(row(BEACON));
+    fireEvent.keyDown(search(), { key: "Enter" });
+    await settle();
+    expect(menu()).toBeNull();
+    expect(chip()).toHaveTextContent("beacon");
+    expect(chip()).not.toHaveTextContent("+");
+    await openMenu();
+    expect(sectionNames("In this task")).toEqual(["beacon"]);
+    expect(row(BEACON)).toHaveAttribute("data-current");
+    expect(check(ATLAS)).not.toBeChecked();
+  });
+
+  it("⌘⌫ takes the highlighted extra folder out; it never removes the project from the list", async () => {
+    await openLauncher();
+    await openMenu();
+    await toggle(BEACON);
+    await toggle(COBALT);
+    expect(sectionNames("In this task")).toEqual(["atlas", "beacon", "cobalt"]);
+    fireEvent.keyDown(search(), { key: "ArrowDown" });
+    expect(highlighted()).toBe(row(BEACON));
+    fireEvent.keyDown(search(), { key: "Backspace", ...modKey });
+    await settle();
+    expect(sectionNames("In this task")).toEqual(["atlas", "cobalt"]);
+    expect(document.querySelector(".launcher-pm-confirm")).toBeNull();
+    expect(h.deleted).toEqual([]);
+    // On a row that is not an extra it does nothing.
+    fireEvent.keyDown(search(), { key: "Home" });
+    fireEvent.keyDown(search(), { key: "Backspace", ...modKey });
+    await settle();
+    expect(document.querySelector(".launcher-pm-confirm")).toBeNull();
+    expect(chip()).toHaveTextContent("atlas +1");
+  });
+
+  it("says why a folder cannot be one: same repository (a worktree of it), inside or around the main project, missing", async () => {
+    const WORKTREE = "/Users/test/wt/atlas-fix";
+    h.probe.set(WORKTREE, repoProbe(ATLAS, "fix"));
+    h.projects.push(
+      project("p-wt", "atlas-fix", WORKTREE, 0, null),
+      project("p-inside", "atlas-site", "/Users/test/code/atlas/site", 0, null),
+      project("p-around", "code", "/Users/test/code", 0, null),
+    );
+    await openLauncher();
+    await openMenu();
+    const blocked = (path: string, why: string) => {
+      expect(check(path)).toBeDisabled();
+      expect(row(path)).toHaveAttribute("title", why);
+      expect(detail(path)).toBe(why);
+    };
+    blocked("/Users/test/code/atlas/site", "inside atlas");
+    blocked("/Users/test/code", "contains atlas");
+    blocked(GONE, "Folder not found");
+    // The worktree is read when it is checked: the same repository as atlas, so it is not added.
+    expect(check(WORKTREE)).not.toBeDisabled();
+    await toggle(WORKTREE);
+    expect(sectionNames("In this task")).toEqual(["atlas"]);
+    blocked(WORKTREE, "same repository as atlas");
+    // ⇧↵ on a disabled row does nothing.
+    await typeSearch("atlas-site");
+    fireEvent.keyDown(search(), { key: "Enter", shiftKey: true });
+    await settle();
+    expect(search().value).toBe("atlas-site");
+    expect(chip()).toHaveTextContent("atlas");
+    expect(chip()).not.toHaveTextContent("+");
+  });
+
+  it("a second folder of the same repository as an extra one is refused too", async () => {
+    const OTHER = "/Users/test/wt/beacon-fix";
+    h.probe.set(OTHER, repoProbe(BEACON, "fix"));
+    h.projects.push(project("p-bwt", "beacon-fix", OTHER, 0, null));
+    await openLauncher();
+    await openMenu();
+    await toggle(BEACON);
+    await toggle(OTHER);
+    expect(sectionNames("In this task")).toEqual(["atlas", "beacon"]);
+    expect(check(OTHER)).toBeDisabled();
+    expect(detail(OTHER)).toBe("same repository as beacon");
+  });
+
+  it("takes at most 5 extra folders", async () => {
+    await openLauncher();
+    await openMenu();
+    for (const path of [BEACON, COBALT, DELTA, EMBER, FJORD]) await toggle(path);
+    expect(sectionNames("In this task")).toEqual(["atlas", "beacon", "cobalt", "delta", "ember", "fjord"]);
+    expect(check(ZEPHYR)).toBeDisabled();
+    expect(detail(ZEPHYR)).toBe("Up to 5 extra folders");
+    expect(chip()).toHaveTextContent("atlas +5");
+    // A checked one can still be unchecked, and then there is room again.
+    await toggle(FJORD);
+    expect(check(ZEPHYR)).not.toBeDisabled();
+  });
+
+  it("an agent that works in one folder has no checkboxes, says so, and its launch sends no extras", async () => {
+    h.doctor = [doctorRow("claude", "Claude Code"), doctorRow("codex", "Codex CLI")];
+    const { onLaunch } = await openLauncher();
+    await openMenu();
+    await toggle(BEACON);
+    fireEvent.keyDown(search(), { key: "Escape" });
+    await settle();
+    expect(chip()).toHaveTextContent("atlas +1");
+    fireEvent.click(document.querySelector('[data-chip="agent"]') as HTMLElement);
+    await settle();
+    fireEvent.click(document.querySelector('[data-agent-id="codex"]') as HTMLElement);
+    await settle();
+    expect(chip()).toHaveTextContent("atlas");
+    expect(chip()).not.toHaveTextContent("+");
+    expect(alsoLine()).toBeNull();
+    await openMenu();
+    expect(document.querySelector(".launcher-pm-check")).toBeNull();
+    expect(sectionNames("In this task")).toEqual(["atlas"]);
+    expect(document.querySelector(".launcher-pm-hints")).toHaveTextContent("This agent works in one folder");
+    expect(document.querySelector(".launcher-pm-hints")).not.toHaveTextContent("add folder");
+    fireEvent.keyDown(search(), { key: "Escape" });
+    await settle();
+    fireEvent.change(task(), { target: { value: "Fix the flaky test" } });
+    await settle();
+    fireEvent.keyDown(task(), { key: "Enter", ...modKey });
+    await settle();
+    expect(onLaunch).toHaveBeenCalledTimes(1);
+    expect(onLaunch.mock.calls[0][0].extraRoots).toBeUndefined();
+  });
+});
+
+describe("extra folders in the launcher", () => {
+  beforeEach(() => {
+    h.probe.set(BEACON, repoProbe(BEACON, "dev", 3));
+  });
+
+  it("the chip says +N with every path in its title; the Also line removes one; the launch sends projectIds in order, a branch for the main project only", async () => {
+    const { onLaunch } = await openLauncher();
+    await openMenu();
+    await toggle(BEACON);
+    await toggle(DELTA);
+    fireEvent.keyDown(search(), { key: "Escape" });
+    await settle();
+    expect(chip()).toHaveTextContent("atlas +2");
+    expect(chip()).toHaveAttribute("title", [ATLAS, BEACON, DELTA].join("\n"));
+    const also = alsoLine() as HTMLElement;
+    expect(also).toHaveTextContent("Also:");
+    expect(also.querySelector(`[data-extra-path="${BEACON}"]`)).toHaveTextContent("beacon⎇ dev ●3");
+    expect(also.querySelector(`[data-extra-path="${DELTA}"]`)).toHaveTextContent("deltanot git");
+    expect(also).toHaveTextContent("— edited in place, not on the task branch");
+    // The branch chip is about the main project only.
+    expect(document.querySelector('[data-chip="where"]')).not.toHaveTextContent("beacon");
+    expect(also.querySelector(".task-launcher-extras-shared")).toBeNull();
+
+    fireEvent.click(within(also).getByRole("button", { name: "Remove delta from this task" }));
+    await settle();
+    expect(chip()).toHaveTextContent("atlas +1");
+    expect(alsoLine()).not.toHaveTextContent("delta");
+
+    fireEvent.change(task(), { target: { value: "Fix the login bug" } });
+    await settle();
+    fireEvent.keyDown(task(), { key: "Enter", ...modKey });
+    await settle();
+    expect(onLaunch).toHaveBeenCalledTimes(1);
+    const req = onLaunch.mock.calls[0][0];
+    expect(req.repoRoot).toBe(ATLAS);
+    expect(req.extraRoots).toEqual([BEACON]);
+
+    // What the app does with it: every folder a project, the main one first; the branch and worktree are the main project's.
+    const { launchTask } = await import("../launcher/launchTask");
+    const created: CreateSessionOpts[] = [];
+    const ids: Record<string, string> = { [ATLAS]: "p-atlas", [BEACON]: "p-beacon" };
+    await launchTask(req, {
+      projectFor: async (root) => ids[root],
+      createSession: async (opts) => (created.push(opts), { id: `s${created.length}` } as SessionData),
+      place: () => {},
+      worktreePath: async () => null,
+      writeFeatureFile: async () => "",
+      copyText: async () => {},
+      readRecords: async () => "",
+      writeRecords: async () => {},
+      now: () => 1,
+    });
+    expect(created).toHaveLength(1);
+    expect(created[0].projectIds).toEqual(["p-atlas", "p-beacon"]);
+    expect(Object.keys(created[0].branchSelections ?? {})).toEqual(["p-atlas"]);
+    expect(created[0].workspacePaths).toEqual([BEACON]);
+  });
+
+  it("with a second agent on the task, the Also line warns that both share the folders' checkouts", async () => {
+    h.doctor = [doctorRow("claude", "Claude Code"), doctorRow("codex", "Codex CLI")];
+    await openLauncher();
+    await openMenu();
+    await toggle(BEACON);
+    fireEvent.keyDown(search(), { key: "Escape" });
+    await settle();
+    fireEvent.click(document.querySelector(".task-launcher-expand") as HTMLElement);
+    await settle();
+    fireEvent.click(document.querySelector(".task-launcher-also-toggle") as HTMLElement);
+    await settle();
+    expect(alsoLine()?.querySelector(".task-launcher-extras-shared")).toHaveTextContent("2 agents will share these folders' checkouts");
   });
 });

@@ -20,6 +20,7 @@
         "new_session_id": ["--session-id", "{session_id}"],
         "initial_prompt": ["{prompt}"],
         "system_prompt": ["--append-system-prompt", "{prompt}"],
+        "add_dir": ["--add-dir", "{dir}"],
         "paste_fold": { "chars": 800, "lines": 3 },
         "signals": {
           "method": "settings_file",

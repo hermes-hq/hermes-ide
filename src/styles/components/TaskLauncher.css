@@ -159,6 +159,22 @@
 }
 .task-launcher-chips .h-chip { max-width: calc(var(--space-1) * 80); }
 
+/* Also: the task's extra folders, edited in place (one compact line under the chips). */
+.task-launcher-extras {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-1) var(--space-2);
+  font-size: var(--text-xs);
+}
+.task-launcher-extras-label { color: var(--text-2); }
+.task-launcher-extra-detail {
+  margin-left: var(--space-1);
+  color: var(--text-3);
+  font-family: var(--font-code);
+}
+.task-launcher-extras-shared { color: var(--warning-ink); }
+
 .task-launcher-menu {
   display: flex;
   flex-direction: column;

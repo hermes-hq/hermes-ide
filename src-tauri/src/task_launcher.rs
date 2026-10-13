@@ -40,6 +40,9 @@ pub struct RepoProbe {
     pub has_commits: bool,
     /// The path as it was read: trimmed, a leading `~` as the home folder.
     pub resolved: String,
+    /// Uncommitted changes in the folder's own checkout (ignored files left
+    /// out), when they were asked for; None when not asked or not a repository.
+    pub dirty_count: Option<u32>,
 }
 
 /// A path as typed: surrounding spaces trimmed, and `~` or `~/…` (`~\…` on
@@ -69,7 +72,25 @@ fn main_checkout(repo: &Repository) -> Option<PathBuf> {
     repo.workdir().map(Path::to_path_buf)
 }
 
+/// How many files `git status` would list in the checkout `repo` is
+/// (changed, staged or untracked; ignored files left out).
+pub fn dirty_count(repo: &Repository) -> Option<u32> {
+    let mut opts = git2::StatusOptions::new();
+    opts.include_untracked(true)
+        .include_ignored(false)
+        .exclude_submodules(true);
+    let statuses = repo.statuses(Some(&mut opts)).ok()?;
+    Some(u32::try_from(statuses.len()).unwrap_or(u32::MAX))
+}
+
+#[cfg(test)]
 pub fn probe_repo(path: &Path, branch: Option<&str>) -> RepoProbe {
+    probe_repo_with(path, branch, false)
+}
+
+/// `probe_repo`, also counting the uncommitted changes when `dirty` is set
+/// (a status walk: asked only for a folder added to a task, not on every probe).
+pub fn probe_repo_with(path: &Path, branch: Option<&str>, dirty: bool) -> RepoProbe {
     let meta = std::fs::metadata(path).ok();
     let exists = meta.is_some();
     let is_dir = meta.as_ref().is_some_and(|m| m.is_dir());
@@ -92,6 +113,7 @@ pub fn probe_repo(path: &Path, branch: Option<&str>) -> RepoProbe {
             is_dir,
             has_commits: false,
             resolved,
+            dirty_count: None,
         };
     };
     // An unborn HEAD (git init, nothing committed yet): nothing to cut a branch from.
@@ -146,14 +168,19 @@ pub fn probe_repo(path: &Path, branch: Option<&str>) -> RepoProbe {
         is_dir,
         has_commits,
         resolved,
+        dirty_count: if dirty { dirty_count(&repo) } else { None },
     }
 }
 
 #[tauri::command]
-pub async fn task_repo_probe(path: String, branch: Option<String>) -> Result<RepoProbe, String> {
+pub async fn task_repo_probe(
+    path: String,
+    branch: Option<String>,
+    dirty: Option<bool>,
+) -> Result<RepoProbe, String> {
     tokio::task::spawn_blocking(move || {
         let path = resolve_typed_path(&path, crate::platform::home_dir().as_deref());
-        probe_repo(&path, branch.as_deref())
+        probe_repo_with(&path, branch.as_deref(), dirty.unwrap_or(false))
     })
     .await
     .map_err(|e| e.to_string())
@@ -378,6 +405,24 @@ mod tests {
         assert!(!wt_path.join(".hermes").exists());
         let plain = tempfile::tempdir().unwrap();
         assert!(write_done_when(plain.path(), &["x".to_string()]).is_err());
+    }
+
+    #[test]
+    fn the_dirty_count_is_what_git_status_lists_without_ignored_files() {
+        let dir = tempfile::tempdir().unwrap();
+        repo_with_commit(dir.path());
+        assert_eq!(probe_repo_with(dir.path(), None, true).dirty_count, Some(0));
+        // Not asked for: not counted.
+        assert_eq!(probe_repo(dir.path(), None).dirty_count, None);
+        std::fs::write(dir.path().join(".gitignore"), "build/\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("build")).unwrap();
+        std::fs::write(dir.path().join("build").join("out.bin"), "x").unwrap();
+        std::fs::write(dir.path().join("notes.md"), "draft").unwrap();
+        std::fs::write(dir.path().join("todo.txt"), "x").unwrap();
+        // .gitignore, notes.md and todo.txt; build/ is ignored.
+        assert_eq!(probe_repo_with(dir.path(), None, true).dirty_count, Some(3));
+        let plain = tempfile::tempdir().unwrap();
+        assert_eq!(probe_repo_with(plain.path(), None, true).dirty_count, None);
     }
 
     #[test]

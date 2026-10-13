@@ -1889,6 +1889,9 @@ features:
       QA-launcher-15:
         text: "New folder… in ⌘N and the New Session wizard makes a new project folder, like an IDE's New Project: a name, where it goes, and a git repository, .gitignore, AGENTS.md (with CLAUDE.md importing it) and README as chosen; an existing folder is refused and left untouched; the agent starts in the new folder"
         scenarios: [QA-launcher-new-project-folder.mjs]
+      QA-launcher-16:
+        text: "A task can take extra folders besides its project: a checkbox in ⌘N's project menu adds one, the project chip says +1, and the agent starts in the project's task checkout with both projects attached and the extra folder as an --add-dir, which gets no worktree"
+        scenarios: [QA-launcher-extra-folder.mjs]
   REAL-HOD:
     name: "The prompt library with the real Claude Code and Codex CLIs"
     # Local only, like REAL above: needs the signed-in CLIs and costs a tiny

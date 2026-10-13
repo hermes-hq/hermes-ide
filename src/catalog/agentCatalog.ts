@@ -48,6 +48,8 @@ export interface AgentTerminal {
 	initial_prompt: AgentArgs | null;
 	/** Arguments that add a persona to the system prompt (`{prompt}`), proven with the real CLI; absent: first message. */
 	system_prompt?: AgentArgs | null;
+	/** Arguments that add one more folder the agent may work in (`{dir}`, once per folder), proven with the real CLI; absent: one folder only. */
+	add_dir?: AgentArgs | null;
 	/** The CLI folds a paste this long into a placeholder and needs a typed line to act on it (see agents.schema.json). */
 	paste_fold?: { chars: number; lines: number } | null;
 	signals: AgentSignals;

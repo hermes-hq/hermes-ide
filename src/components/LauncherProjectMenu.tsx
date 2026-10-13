@@ -5,7 +5,7 @@ import type { ProjectOrdered } from "../types/project";
 import { fuzzyRank } from "../utils/fuzzy";
 import { tildePath } from "../utils/paths";
 import { fmt } from "../utils/platform";
-import { Button, IconButton, ListRow } from "./ui";
+import { Button, Checkbox, IconButton, ListRow } from "./ui";
 import { cx } from "./ui/Button";
 import { moveBy, PAGE_SIZE } from "./ui/listNav";
 import { CloseGlyph, FolderGlyph, PlusGlyph, SearchGlyph } from "./ui/icons";
@@ -53,13 +53,25 @@ const byName = (a: ProjectOrdered, b: ProjectOrdered) => a.name.localeCompare(b.
 
 type Item =
   | { kind: "use"; path: string }
-  | { kind: "project"; project: ProjectOrdered; hits?: number[] }
+  | { kind: "project"; project: ProjectOrdered; hits?: number[]; main?: boolean }
   | { kind: "open" }
   | { kind: "new" };
 
 interface Group {
   label: string | null;
   items: Item[];
+}
+
+/** The task's extra folders, as the menu shows and changes them. */
+export interface LauncherExtras {
+  /** The extra folders, in the order they were added. */
+  paths: string[];
+  /** An extra folder's state ("⎇ dev ●3", "not git"); undefined while it is read. */
+  detail: (path: string) => string | undefined;
+  /** Why a project cannot be an extra folder now (its row's detail and title), or null. */
+  blocked: (project: ProjectOrdered) => string | null;
+  /** Checks or unchecks a folder as an extra one. */
+  onToggle: (path: string) => void;
 }
 
 interface LauncherProjectMenuProps {
@@ -84,6 +96,8 @@ interface LauncherProjectMenuProps {
   onRemove: (project: ProjectOrdered) => Promise<void>;
   /** The typed-path field, under the actions. */
   typedPath?: ReactNode;
+  /** The task's extra folders; null: the agent works in one folder (no checkboxes, said in the hints). */
+  extras: LauncherExtras | null;
   /** Test seam: the time "last used" is measured from. */
   now?: number;
 }
@@ -118,6 +132,8 @@ function Marked({ text, hits }: { text: string; hits?: number[] }) {
  * folder… and New project… pinned under the list. Arrows move the
  * highlight, Enter picks, the first Esc clears the search. A project can be
  * removed from the list (its files stay) after a confirm in its own row.
+ * Each row's checkbox (or ⇧↵) adds it to the task as an extra folder; the
+ * main project and the extra ones sit on top, under "In this task".
  */
 export function LauncherProjectMenu({
   projects,
@@ -131,6 +147,7 @@ export function LauncherProjectMenu({
   newProject,
   onRemove,
   typedPath,
+  extras,
   now: nowProp,
 }: LauncherProjectMenuProps) {
   const { t } = useI18n();
@@ -150,6 +167,8 @@ export function LauncherProjectMenu({
   const pathQuery = /^[~/]/.test(q);
 
   const shownPath = (path: string) => tildePath(path, home);
+  const extraPaths = useMemo(() => extras?.paths ?? [], [extras]);
+  const isExtra = (path: string) => extraPaths.includes(path);
 
   const groups = useMemo((): Group[] => {
     if (pathQuery) {
@@ -177,19 +196,32 @@ export function LauncherProjectMenu({
       const gone = ranked.filter((it) => it.kind === "project" && missing(it.project));
       return [{ label: null, items: [...live, ...gone] }];
     }
+    // In this task: the main project, then the extra folders (not repeated below).
+    const main = projects.find((p) => !missing(p) && isCurrent(p.path));
+    const extraRows = extraPaths.map((path) => projects.find((p) => p.path === path)).filter((p): p is ProjectOrdered => !!p && p !== main);
+    const inTask = new Set<ProjectOrdered>(main ? [main, ...extraRows] : extraRows);
+    const taskGroup: Group[] =
+      inTask.size > 0
+        ? [{ label: t("launcher.projectsInTask"), items: [...(main ? [{ kind: "project", project: main, main: true } as Item] : []), ...extraRows.map((project): Item => ({ kind: "project", project }))] }]
+        : [];
     const recent = scored
+      .filter((x) => !inTask.has(x.p))
       .filter((x) => !missing(x.p) && x.s > 0)
       .sort((a, b) => b.s - a.s || (b.p.session_count ?? 0) - (a.p.session_count ?? 0) || a.i - b.i)
       .slice(0, RECENT_MAX)
       .map((x) => x.p);
     const inRecent = new Set(recent);
-    const rest = [...projects.filter((p) => !missing(p) && !inRecent.has(p)).sort(byName), ...projects.filter(missing).sort(byName)];
+    const shown = (p: ProjectOrdered) => !inRecent.has(p) && !inTask.has(p);
+    const rest = [...projects.filter((p) => !missing(p) && shown(p)).sort(byName), ...projects.filter((p) => missing(p) && shown(p)).sort(byName)];
     const asItems = (list: ProjectOrdered[]) => list.map((project): Item => ({ kind: "project", project }));
-    if (recent.length === 0) return [{ label: null, items: asItems(rest) }];
-    const out: Group[] = [{ label: t("launcher.projectsRecent"), items: asItems(recent) }];
+    if (recent.length === 0) {
+      if (taskGroup.length === 0) return [{ label: null, items: asItems(rest) }];
+      return rest.length ? [...taskGroup, { label: t("launcher.projectsAll"), items: asItems(rest) }] : taskGroup;
+    }
+    const out: Group[] = [...taskGroup, { label: t("launcher.projectsRecent"), items: asItems(recent) }];
     if (rest.length) out.push({ label: t("launcher.projectsAll"), items: asItems(rest) });
     return out;
-  }, [projects, q, pathQuery, home, now, t]);
+  }, [projects, q, pathQuery, home, now, t, isCurrent, extraPaths]);
 
   const listItems = useMemo(() => groups.flatMap((g) => g.items), [groups]);
   const items = useMemo((): Item[] => [...listItems, { kind: "open" }, { kind: "new" }], [listItems]);
@@ -255,6 +287,17 @@ export function LauncherProjectMenu({
     else onNewProject();
   };
 
+  /** Checks or unchecks a row as an extra folder: the menu stays open and the search clears. */
+  const toggleExtra = (p: ProjectOrdered) => {
+    if (!extras || isCurrent(p.path)) return;
+    if (!isExtra(p.path) && extras.blocked(p)) return;
+    extras.onToggle(p.path);
+    setQuery("");
+    setHl(null);
+    setConfirmId(null);
+    inputRef.current?.focus();
+  };
+
   const onInputKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.nativeEvent.isComposing) return;
     const move = (to: number) => {
@@ -274,16 +317,32 @@ export function LauncherProjectMenu({
         return move(0);
       case "End":
         return move(items.length - 1);
-      case "Enter":
+      case "Enter": {
+        // ⇧↵: the highlighted project is added to (or taken out of) the task's extra folders.
+        const it = items[active];
+        if (e.shiftKey && !e.metaKey && !e.ctrlKey && !e.altKey && extras && it?.kind === "project") {
+          e.preventDefault();
+          e.stopPropagation();
+          toggleExtra(it.project);
+          return;
+        }
         // ⌘↵ / Ctrl+↵ goes on to the sheet: it launches.
         if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         e.preventDefault();
         e.stopPropagation();
-        choose(items[active]);
+        choose(it);
         return;
+      }
       case "Delete":
       case "Backspace": {
         const it = items[active];
+        // ⌘⌫ / Ctrl+⌫: the highlighted extra folder leaves the task.
+        if (e.metaKey || e.ctrlKey) {
+          if (it?.kind !== "project" || !isExtra(it.project.path)) return;
+          e.preventDefault();
+          toggleExtra(it.project);
+          return;
+        }
         if (query !== "" || it?.kind !== "project") return;
         e.preventDefault();
         startRemove(it.project);
@@ -354,24 +413,47 @@ export function LauncherProjectMenu({
     }
     const at = lastOpenedMs(p.last_opened_at);
     const ago = at === null ? null : agoParts(at, now);
+    const main = !gone && isCurrent(p.path);
+    const extra = isExtra(p.path);
+    const blocked = extras && !main && !extra ? extras.blocked(p) : null;
+    const extraDetail = extra ? extras?.detail(p.path) : undefined;
+    const detail = blocked ?? extraDetail ?? (gone ? t("launcher.projectMissing") : ago ? t(ago.key, { n: ago.n }) : "");
     return (
       <ListRow
         key={p.id}
         size="sm"
         {...rowProps(i)}
-        current={!gone && isCurrent(p.path)}
-        className={cx("launcher-pm-row", gone && "launcher-pm-missing")}
+        current={main}
+        className={cx("launcher-pm-row", gone && "launcher-pm-missing", blocked && "launcher-pm-blocked")}
         data-project-path={p.path}
-        title={p.path}
+        data-extra={extra || undefined}
+        title={blocked ?? p.path}
         aria-label={parent ? `${p.name}, ${parent}` : p.name}
       >
+        {extras && (
+          // The checkbox is its own target: a click on it never picks the row, and the search keeps the keyboard.
+          <span className="launcher-pm-gutter" onMouseDown={(e) => e.preventDefault()} onClick={(e) => e.stopPropagation()}>
+            {!main && (
+              <Checkbox
+                inputClassName="launcher-pm-check"
+                tabIndex={-1}
+                checked={extra}
+                disabled={!!blocked}
+                title={blocked ?? undefined}
+                onChange={() => toggleExtra(p)}
+                label={<span className="h-visually-hidden">{t("launcher.extraToggle", { name: p.name })}</span>}
+              />
+            )}
+          </span>
+        )}
         <span className="launcher-pm-name">
           <Marked text={p.name} hits={it.hits} />
         </span>
+        {it.main && <span className="launcher-pm-main">{t("launcher.projectMain")}</span>}
         <span className="launcher-pm-path">
           <bdi>{parent}</bdi>
         </span>
-        <span className="launcher-pm-ago">{gone ? t("launcher.projectMissing") : ago ? t(ago.key, { n: ago.n }) : ""}</span>
+        <span className={cx("launcher-pm-ago", (blocked || extraDetail) && "launcher-pm-detail")}>{detail}</span>
         <IconButton
           size="sm"
           tabIndex={-1}
@@ -425,7 +507,7 @@ export function LauncherProjectMenu({
   const activeId = items[active] ? optId(active) : undefined;
 
   return (
-    <div className="launcher-pm" onKeyDown={onRootKey}>
+    <div className="launcher-pm" onKeyDown={onRootKey} data-extras={extraPaths.length > 0 || undefined}>
       {newProject ? (
         newProject
       ) : (
@@ -498,17 +580,20 @@ export function LauncherProjectMenu({
           {typedPath}
           <div className="h-menu-footer launcher-pm-hints">
             <span>
-              <kbd>↑↓</kbd> {t("launcher.projectHintMove")}
+              <kbd>↵</kbd> {extras ? t("launcher.projectHintMain") : t("launcher.projectHintChoose")}
             </span>
-            <span>
-              <kbd>↵</kbd> {t("launcher.projectHintChoose")}
-            </span>
+            {extras && (
+              <span>
+                <kbd>⇧↵</kbd> {t("launcher.projectHintAddFolder")}
+              </span>
+            )}
             <span>
               <kbd>{fmt("{mod}↵")}</kbd> {t("launcher.projectHintLaunch")}
             </span>
             <span>
               <kbd>{ESC_KEY}</kbd> {query ? t("launcher.projectHintClear") : t("launcher.projectHintClose")}
             </span>
+            {!extras && <span className="launcher-pm-one-folder">{t("launcher.projectOneFolder")}</span>}
           </div>
         </>
       )}

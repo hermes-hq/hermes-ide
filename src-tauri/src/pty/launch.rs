@@ -103,6 +103,10 @@ pub struct LaunchInput<'a> {
     /// The task the user described in the task launcher (F15), handed to
     /// the agent as its first prompt on a fresh start.
     pub task: Option<&'a str>,
+    /// More folders the agent may work in besides `cwd` (the launcher's
+    /// extra folders: the session's `workspace_paths`), for an agent whose
+    /// catalog entry has an `add_dir` flag; others ignore them.
+    pub add_dirs: &'a [String],
     /// A library persona for the system prompt (catalog `system_prompt`),
     /// on a fresh start only.
     pub system_prompt: Option<&'a str>,
@@ -932,6 +936,19 @@ pub fn plan_launch(input: &LaunchInput<'_>) -> Option<LaunchPlan> {
     let (choice_args, choice_env) =
         crate::agent_caps::choice::model_effort_args(agent, input.model_id, input.effort);
     permission.extend(choice_args);
+    // One more folder per extra one (Claude's --add-dir), on the fresh
+    // command and on a resume alike. It goes right after the permission
+    // flags: Claude's --add-dir takes several values, so it must be followed
+    // by another flag (--settings, always there) and never by the prompt.
+    if let Some(template) = &terminal.add_dir {
+        for dir in input.add_dirs {
+            let dir = dir.trim();
+            if dir.is_empty() || dir == input.cwd.trim() {
+                continue;
+            }
+            permission.extend(fill(template, &[("dir", dir)]));
+        }
+    }
 
     // The command head: an optional wrapper (caffeinate, nice, wsl) then the
     // agent program and its fixed arguments.
@@ -1635,6 +1652,7 @@ pub(crate) fn prepare_helper_launch(
         not_git: context_path.is_some()
             && git2::Repository::discover(Path::new(&s.working_directory)).is_err(),
         task: s.task_prompt.as_deref(),
+        add_dirs: &s.workspace_paths,
         system_prompt: s.system_prompt.as_deref(),
         resume_id: s.vendor_session_id.as_deref(),
         seed_prompt: s.seed_prompt.as_deref(),
@@ -3817,6 +3835,7 @@ pub(crate) mod tests {
             context_path: None,
             not_git: false,
             task: None,
+            add_dirs: &[],
             system_prompt: None,
             resume_id,
             seed_prompt: None,
@@ -4066,6 +4085,56 @@ pub(crate) mod tests {
         assert_eq!(live_spool_actions(&SpoolEvent::Ended, false), (false, None));
         assert_eq!(live_spool_actions(&fallback, true), (false, None));
         assert_eq!(live_spool_actions(&check, true), (false, None));
+    }
+
+    #[test]
+    fn a_launcher_tasks_extra_folders_are_one_add_dir_each_for_claude_only() {
+        let hi = Path::new("/app/hi");
+        let dir = Path::new("/data/launch/hermes-1");
+        let extras = vec![
+            "/fixture-home/plugins".to_string(),
+            "/fixture-home/docs".to_string(),
+            // The working folder itself is not added again.
+            "/fixture-home/repo".to_string(),
+        ];
+        let mut i = input("claude", None, hi, dir);
+        i.add_dirs = &extras;
+        i.task = Some("Fix the login bug");
+        let plan = plan_launch(&i).unwrap();
+        let args = &plan.spec.args;
+        let pairs: Vec<(&str, &str)> = args
+            .windows(2)
+            .filter(|w| w[0] == "--add-dir")
+            .map(|w| (w[0].as_str(), w[1].as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            [
+                ("--add-dir", "/fixture-home/plugins"),
+                ("--add-dir", "/fixture-home/docs")
+            ]
+        );
+        // --add-dir takes several values: a flag follows it, never the prompt.
+        let last = args.iter().rposition(|a| a == "--add-dir").unwrap();
+        assert!(args[last + 2].starts_with("--"), "{args:?}");
+        assert_eq!(args.last().map(String::as_str), Some("Fix the login bug"));
+        // A resume keeps them.
+        let mut r = input("claude", Some("abc"), hi, dir);
+        r.add_dirs = &extras;
+        let plan = plan_launch(&r).unwrap();
+        assert_eq!(
+            plan.spec.args.iter().filter(|a| *a == "--add-dir").count(),
+            2
+        );
+        // An agent with no add_dir flag in the catalog gets none.
+        let mut c = input("codex", None, hi, dir);
+        c.add_dirs = &extras;
+        let plan = plan_launch(&c).unwrap();
+        assert!(!plan
+            .spec
+            .args
+            .iter()
+            .any(|a| a.contains("/fixture-home/plugins")));
     }
 
     #[test]

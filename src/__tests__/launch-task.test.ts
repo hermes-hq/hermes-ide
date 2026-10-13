@@ -431,3 +431,41 @@ describe("launchTask in a folder that is not a git repository", () => {
     expect(writeDoneWhen).not.toHaveBeenCalled();
   });
 });
+
+describe("launchTask with extra folders", () => {
+  const ids: Record<string, string> = { "/fixture-home/repo": "proj-1", "/fixture-home/plugins": "proj-2", "/fixture-home/docs": "proj-3" };
+  const projectFor = vi.fn(async (root: string) => ids[root]);
+
+  it("attaches every folder, the main one first; only the main project gets a branch and a worktree, and each agent gets them all", async () => {
+    const f = fakeDeps({ projectFor });
+    await launchTask(
+      req({ extraRoots: ["/fixture-home/plugins", "/fixture-home/docs", "/fixture-home/plugins"], agents: [agent("claude", "agent", "hermes/x"), agent("codex", "terminal", "hermes/x-codex")] }),
+      f.deps,
+    );
+    expect(f.created.map((o) => [o.projectIds, Object.keys(o.branchSelections ?? {}), o.workspacePaths])).toEqual([
+      [["proj-1", "proj-2", "proj-3"], ["proj-1"], ["/fixture-home/plugins", "/fixture-home/docs"]],
+      [["proj-1", "proj-2", "proj-3"], ["proj-1"], ["/fixture-home/plugins", "/fixture-home/docs"]],
+    ]);
+  });
+
+  it("an extra folder that is the main project is not attached twice", async () => {
+    const f = fakeDeps({ projectFor });
+    await launchTask(req({ extraRoots: ["/fixture-home/repo"] }), f.deps);
+    expect(f.created[0].projectIds).toEqual(["proj-1"]);
+    expect(f.created[0].workspacePaths).toBeUndefined();
+  });
+
+  it("a queued launch keeps its extra folders across a quit; one queued before they existed starts with the main project alone", async () => {
+    const launches: QueuedLaunch[] = [];
+    const f = fakeDeps({ projectFor, queue: (_o, _l, launch) => (launches.push(launch), true) });
+    await launchTask(req({ extraRoots: ["/fixture-home/docs"] }), f.deps);
+    const stored: QueuedLaunch = JSON.parse(JSON.stringify(launches[0]));
+    expect(stored.extraProjectIds).toEqual(["proj-3"]);
+    expect(queuedLaunchOpts(stored)).toMatchObject({ projectIds: ["proj-1", "proj-3"], workspacePaths: ["/fixture-home/docs"], branchSelections: { "proj-1": { branch: "hermes/fix-the-login-bug", createNew: true } } });
+    // An entry stored by an earlier version: no extraProjectIds, no extraRoots.
+    const old: QueuedLaunch = { req: req(), agentIndex: 0, projectId: "proj-1", launchId: "L0", firstPrompt: "Fix the login bug" };
+    const opts = queuedLaunchOpts(JSON.parse(JSON.stringify(old)));
+    expect(opts.projectIds).toEqual(["proj-1"]);
+    expect(opts.workspacePaths).toBeUndefined();
+  });
+});

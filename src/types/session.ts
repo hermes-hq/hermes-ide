@@ -212,6 +212,9 @@ export interface CreateSessionOpts {
   /** Custom agent only: the command typed to start it. */
   agentCommand?: string;
   projectIds?: string[];
+  /** More folders the agent may work in besides its working folder (a launcher task's
+   *  extra folders): Claude's --add-dir, in the Agent view and in a terminal. */
+  workspacePaths?: string[];
   branchName?: string;
   createNewBranch?: boolean;
   /** Per-project branch selections: projectId -> { branch, createNew, fromRemote? } */

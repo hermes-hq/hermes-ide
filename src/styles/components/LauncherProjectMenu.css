@@ -101,6 +101,28 @@
 .h-row[data-highlighted] .launcher-pm-remove,
 .launcher-pm-remove:focus-visible { visibility: visible; }
 
+/* Extra folder: the checkbox in the row's left gutter, shown on the hovered
+   and the highlighted row, and on every row once one extra is checked. */
+.launcher-pm-gutter { display: inline-flex; align-items: center; flex-shrink: 0; width: var(--choice-size); overflow: hidden; visibility: hidden; }
+.h-row:hover .launcher-pm-gutter,
+.h-row[data-highlighted] .launcher-pm-gutter,
+.launcher-pm[data-extras] .launcher-pm-gutter { visibility: visible; }
+
+/* "main": the task's main project, under In this task. */
+.launcher-pm-main {
+  flex-shrink: 0;
+  color: var(--text-3);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+}
+
+/* An extra folder's branch and changes, or why a row cannot be one. */
+.launcher-pm-detail { min-width: 0; overflow: hidden; text-overflow: ellipsis; font-family: var(--font-code); }
+.launcher-pm-blocked .launcher-pm-detail { font-family: var(--font-ui); }
+.launcher-pm-one-folder { color: var(--text-3); }
+
 /* A folder that is gone: greyed and struck through, at the end of the list. */
 .launcher-pm-missing .launcher-pm-name {
   color: var(--text-3);

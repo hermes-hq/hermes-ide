@@ -1819,7 +1819,8 @@ export function SessionProvider({ children }: { children: ReactNode }) {
                 label: saved.label,
                 workingDirectory: saved.working_directory,
                 color: saved.color,
-                workspacePaths: null,
+                // A terminal agent resumes with the folders it worked in (its --add-dir).
+                workspacePaths: restoredMode === "terminal" && saved.agent_add_dirs?.length ? saved.agent_add_dirs : null,
                 aiProvider: saved.ai_provider,
                 projectIds: saved.project_ids.length > 0 ? saved.project_ids : null,
                 autoApprove: saved.auto_approve ?? false,
@@ -2156,7 +2157,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         label: opts?.label || null,
         workingDirectory: opts?.workingDirectory || null,
         color: opts?.color || null,
-        workspacePaths: null,
+        workspacePaths: opts?.workspacePaths?.length ? opts.workspacePaths : null,
         aiProvider: opts?.aiProvider || null,
         projectIds: opts?.projectIds || null,
         autoApprove: opts?.autoApprove ?? false,

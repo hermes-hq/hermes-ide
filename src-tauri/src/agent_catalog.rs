@@ -220,6 +220,11 @@ pub struct Terminal {
     /// prompt instead. Only flags proven with the real CLI.
     #[serde(default)]
     pub system_prompt: Option<Vec<String>>,
+    /// Arguments that let the agent work in one more folder besides its
+    /// working folder (`{dir}`), repeated once per folder; null: one folder
+    /// only. Only flags proven with the real CLI.
+    #[serde(default)]
+    pub add_dir: Option<Vec<String>>,
     /// How the agent tells Hermes what it is doing, per launch.
     pub signals: Signals,
     /// Permission mode (`default`, `acceptEdits`, ...) -> extra arguments.
@@ -472,6 +477,13 @@ mod tests {
                 assert!(
                     system.iter().any(|x| x == "{prompt}"),
                     "{}: system_prompt has no {{prompt}}",
+                    a.id
+                );
+            }
+            if let Some(add_dir) = &a.terminal.add_dir {
+                assert!(
+                    add_dir.iter().any(|x| x == "{dir}"),
+                    "{}: add_dir has no {{dir}}",
                     a.id
                 );
             }
