@@ -1969,6 +1969,10 @@ features:
         # any shell with suggestions of its own.
         text: "Typing the start of an earlier command shows the rest as ghost text, → accepts it, and a prefix that matches nothing shows none"
         scenarios: ["ghost-text.mjs@darwin,linux"]
+      README-7b:
+        # Same platforms as README-7.
+        text: "Suggestions and ghost text never offer back a secret: a line holding a key, token or password is never suggested, and what is typed at a hidden password prompt is never remembered"
+        scenarios: ["QA-no-secret-suggestions.mjs@darwin,linux"]
       README-9:
         text: "Scanning two projects finds each one's languages, frameworks, architecture and conventions; both attach to one session, and the agent is pointed at a context file holding both, kept within the project's token budget"
         scenarios: [project-scanning.mjs]

@@ -1,4 +1,5 @@
 import { readShellHistory, getSessionCommands } from "../../api/intelligence";
+import { looksSecret } from "./secrets";
 
 export interface HistoryMatch {
   command: string;
@@ -24,6 +25,8 @@ export function createHistoryProvider(): HistoryProvider {
   function addToMaps(command: string): void {
     const trimmed = command.trim();
     if (!trimmed) return;
+    // Never offer a secret back as a suggestion or ghost text.
+    if (looksSecret(trimmed)) return;
 
     frequencyMap.set(trimmed, (frequencyMap.get(trimmed) ?? 0) + 1);
 

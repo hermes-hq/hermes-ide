@@ -9,6 +9,7 @@
  * This file contains the input handling & intelligence logic that ties everything together.
  */
 
+import type { IBuffer } from "@xterm/xterm";
 import { listen } from "@tauri-apps/api/event";
 import { writeToSession, resizeSession } from "../api/sessions";
 import { noteUserInput } from "../agent/status/userInput";
@@ -326,7 +327,36 @@ function recordInputInHistory(entry: PoolEntry): void {
   if (!command) return;
   if (!entry.shellIsForeground) return;
   if (entry.terminal.buffer.active.type === "alternate") return;
-  entry.historyProvider.addCommand(command);
+  // Mark the line now and read it back once the echo has caught up: an Enter
+  // typed fast can arrive before the echo of the last keys.
+  const marker = entry.terminal.registerMarker(0);
+  setTimeout(() => {
+    const shown = !marker.isDisposed && lineShows(entry.terminal.buffer.normal, marker.line, command);
+    marker.dispose();
+    if (shown) entry.historyProvider.addCommand(command);
+  }, ECHO_SETTLE_MS);
+}
+
+/** How long after Enter the typed line is read back from the screen. */
+const ECHO_SETTLE_MS = 500;
+
+/**
+ * Whether `command` is on screen on line `row`. A password prompt (sudo,
+ * ssh, `read -s`) turns echo off, so what is typed there never appears: a
+ * line the terminal did not show is never remembered. This holds even when
+ * the shell itself asks, or the foreground check is a beat behind.
+ */
+function lineShows(buf: IBuffer, row: number, command: string): boolean {
+  // A long line wraps across rows: join the rows it continues from and onto.
+  let first = row;
+  while (first > 0 && buf.getLine(first)?.isWrapped) first--;
+  let last = row;
+  while (buf.getLine(last + 1)?.isWrapped) last++;
+  let text = "";
+  for (let r = first; r <= last; r++) {
+    text += buf.getLine(r)?.translateToString(r === last) ?? "";
+  }
+  return text.includes(command);
 }
 
 function updateInputBuffer(entry: PoolEntry, data: string): void {

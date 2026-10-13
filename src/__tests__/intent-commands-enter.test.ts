@@ -60,7 +60,7 @@ interface FakeEntry {
 	cwd: string;
 	shellIsForeground: boolean;
 	userScrolledUp: boolean;
-	terminal: { buffer: { active: { type: string } } };
+	terminal: { buffer: { active: { type: string }; normal: { getLine: () => undefined } }; registerMarker: () => { line: number; isDisposed: boolean; dispose: () => void } };
 	historyProvider: { addCommand: ReturnType<typeof vi.fn>; match: () => never[]; loaded: boolean; markLoaded: () => void };
 }
 
@@ -75,7 +75,7 @@ function makeEntry(over: Partial<FakeEntry> = {}): FakeEntry {
 		cwd: "/tmp",
 		shellIsForeground: true,
 		userScrolledUp: false,
-		terminal: { buffer: { active: { type: "normal" } } },
+		terminal: { buffer: { active: { type: "normal" }, normal: { getLine: () => undefined } }, registerMarker: () => ({ line: 0, isDisposed: false, dispose: () => {} }) },
 		historyProvider: { addCommand: vi.fn(), match: () => [], loaded: true, markLoaded: () => {} },
 		...over,
 	};
