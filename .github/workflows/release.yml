@@ -648,7 +648,7 @@ jobs:
           node-version: 22
 
       - name: Download all artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: artifacts/
 
@@ -807,7 +807,7 @@ jobs:
           esac
           echo "enabled=$E" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         if: steps.check.outputs.enabled == 'true'
         with:
           name: hermes-ide-${{ matrix.key }}-installer
@@ -943,7 +943,7 @@ jobs:
       attestations: write
     steps:
       - name: Download installer artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           pattern: hermes-ide-*-installer
           path: provenance-files/
@@ -1001,7 +1001,7 @@ jobs:
           gh release view "$TAG" --json isDraft,isPrerelease,tagName,targetCommitish
 
       - name: Download manifests
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: release-manifests
           path: manifests
