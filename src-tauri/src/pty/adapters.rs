@@ -120,6 +120,9 @@ pub(crate) fn extract_model_name(line: &str) -> Option<String> {
         return Some("o4".into());
     }
     // Google models
+    if lower.contains("gemini-4") && lower.contains("argon") {
+        return Some("gemini-4-argon".into());
+    }
     if lower.contains("gemini-3") && lower.contains("pro") {
         return Some("gemini-3-pro".into());
     }
@@ -153,11 +156,25 @@ pub(crate) fn estimate_cost(provider: &str, model: &str, input: u64, output: u64
         ("openai", m) if m.contains("gpt-4o") => (2.5, 10.0),
         ("openai", m) if m.contains("gpt-4") => (30.0, 60.0),
         ("openai", m) if m.contains("o1") => (15.0, 60.0),
+        ("google", m) if m.contains("argon") => {
+            gemini_4_argon_price(chrono::Utc::now().date_naive())
+        }
         ("google", m) if m.contains("pro") => (1.25, 5.0),
         ("google", m) if m.contains("flash") => (0.075, 0.30),
         _ => (3.0, 15.0),
     };
     (input as f64 / 1_000_000.0) * in_price + (output as f64 / 1_000_000.0) * out_price
+}
+
+/// Gemini 4 Argon's price per million tokens (input, output): the launch
+/// price holds through 2026-11-30, then it doubles.
+fn gemini_4_argon_price(today: chrono::NaiveDate) -> (f64, f64) {
+    let launch_price_ends = chrono::NaiveDate::from_ymd_opt(2026, 11, 30).expect("a valid date");
+    if today <= launch_price_ends {
+        (2.0, 10.0)
+    } else {
+        (4.0, 20.0)
+    }
 }
 
 pub(crate) fn slash_label(cmd: &str) -> String {
@@ -1996,6 +2013,32 @@ impl ProviderRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn gemini_4_argon_is_named_and_priced_at_its_own_rate() {
+        assert_eq!(
+            extract_model_name("Model: gemini-4-argon").as_deref(),
+            Some("gemini-4-argon")
+        );
+        let day = |m, d| chrono::NaiveDate::from_ymd_opt(2026, m, d).unwrap();
+        assert_eq!(gemini_4_argon_price(day(10, 13)), (2.0, 10.0));
+        assert_eq!(gemini_4_argon_price(day(11, 30)), (2.0, 10.0));
+        assert_eq!(gemini_4_argon_price(day(12, 1)), (4.0, 20.0));
+        // Not the catch-all $3 / $15.
+        let cost = estimate_cost("google", "gemini-4-argon", 1_000_000, 1_000_000);
+        assert!(cost == 12.0 || cost == 24.0, "Argon priced at {cost}");
+    }
+
+    #[test]
+    fn a_gemini_cli_stats_row_for_argon_is_a_google_token_update() {
+        let a = GeminiAdapter.analyze_line("gemini-4-argon  3  1,200  0  800");
+        let tu = a.token_update.expect("a token update");
+        assert_eq!(
+            (tu.provider.as_str(), tu.model.as_str()),
+            ("google", "gemini-4-argon")
+        );
+        assert_eq!((tu.input_tokens, tu.output_tokens), (1_200, 800));
+    }
 
     #[test]
     fn copilot_quick_actions_are_copilot_cli_slash_commands() {
