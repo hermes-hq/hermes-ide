@@ -1,60 +1,71 @@
 /* ─── Turn bar (F20) — under a terminal session ─────────────────── */
 
 .turn-bar {
+  container: turn-bar / inline-size;
   display: flex;
   align-items: center;
   gap: var(--space-2);
   flex-shrink: 0;
-  min-height: 26px;
-  padding: 2px var(--space-2);
-  border-top: 1px solid var(--border);
+  min-height: calc(var(--chip-h-sm) + 2 * var(--space-0-5));
+  padding: var(--space-0-5) var(--space-2);
+  border-top: var(--control-border-width) solid var(--border);
   background: var(--bg-1);
   font-size: var(--text-xs);
   color: var(--text-2);
   overflow: hidden;
 }
 
+/* "Agent replies (i)": the tooltip says what the chips are. */
 .turn-bar-title {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
   flex-shrink: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  font-size: 10px;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  color: var(--text-2);
+  cursor: help;
+  white-space: nowrap;
+}
+/* The (i): a letter in a ring, drawn here so it costs no startup script. */
+.turn-bar-help {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--icon-size-xs);
+  height: var(--icon-size-xs);
+  border: var(--control-border-width) solid currentColor;
+  border-radius: var(--radius-full);
   color: var(--text-3);
+  font-family: var(--font-ui);
+  font-size: var(--text-2xs);
+  font-style: italic;
+  font-weight: var(--weight-semibold);
+  line-height: var(--leading-none);
+}
+.turn-bar-title:hover .turn-bar-help { color: var(--text-1); }
+/* A narrow pane keeps the (i) and its tooltip, and gives the chips the room. */
+@container turn-bar (max-width: 360px) {
+  .turn-bar-title-text { display: none; }
 }
 
+/* The newest chips that fit, newest on the right; never clipped mid-chip. */
 .turn-bar-turns {
   display: flex;
   align-items: center;
-  gap: 4px;
+  justify-content: flex-start;
+  gap: var(--space-1);
   flex: 1;
   min-width: 0;
-  overflow-x: auto;
-  scrollbar-width: none;
+  overflow: hidden;
 }
-.turn-bar-turns::-webkit-scrollbar { display: none; }
 
-.turn-bar-turn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
+/* The control set's small chip (24 px); only how it sits in the row here. */
+.turn-bar-turn,
+.turn-bar-more {
   flex-shrink: 0;
-  padding: 1px 8px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg-2);
-  color: var(--text-1);
-  font: inherit;
-  font-family: var(--font-mono);
-  cursor: pointer;
-  line-height: 1.6;
-}
-.turn-bar-turn:hover:not(:disabled) {
-  border-color: var(--accent);
-  color: var(--text-0);
-}
-.turn-bar-turn:disabled {
-  cursor: default;
-  opacity: 0.6;
+  gap: var(--space-1-5);
 }
 .turn-bar-turn-degraded .turn-bar-turn-label::after {
   content: " ~";
@@ -64,23 +75,54 @@
 .turn-bar-turn-stat,
 .turn-sheet-stat {
   display: inline-flex;
-  gap: 5px;
+  gap: var(--space-1);
   font-family: var(--font-mono);
   font-size: var(--text-xs);
 }
 .turn-bar-add { color: var(--green); }
 .turn-bar-del { color: var(--red); }
-.turn-bar-checks { margin-left: 4px; }
 .turn-bar-checks-passed { color: var(--green); }
 .turn-bar-checks-failed,
 .turn-bar-checks-error { color: var(--red); }
 
+/* ─── Every turn, newest first (the "+N earlier" list) ──────────── */
+
+.turn-list { width: calc(var(--control-h-lg) * 9); max-width: calc(100vw - 2 * var(--space-2)); }
+.turn-list-header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  padding: var(--space-1) var(--space-2) var(--space-1-5);
+  border-bottom: var(--control-border-width) solid var(--rule-hair);
+}
+.turn-list-title { color: var(--text-1); font-size: var(--text-sm); font-weight: var(--weight-medium); }
+.turn-list-scope { color: var(--text-2); font-size: var(--text-xs); white-space: normal; }
+.turn-list-rows {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  min-height: 0;
+  overflow-y: auto;
+}
+/* The list keeps focus and marks the active row (aria-activedescendant):
+ * the highlighted row is the focus indicator, as in a menu. */
+/* stylelint-disable-next-line declaration-property-value-disallowed-list */
+.turn-list-rows:focus-visible { outline: none; }
+.turn-list-row { padding: 0 var(--space-2); font-size: var(--text-sm); }
+.turn-list-row[aria-disabled="true"] { color: var(--text-3); cursor: default; }
+.turn-list-name { flex: 1; min-width: 0; color: var(--text-0); white-space: nowrap; }
+.turn-list-ago,
+.turn-list-files { flex-shrink: 0; color: var(--text-2); font-size: var(--text-xs); white-space: nowrap; }
+.turn-list-row .turn-bar-checks { flex-shrink: 0; width: var(--icon-size-xs); text-align: center; }
+
 .turn-bar-notice {
-  flex-shrink: 0;
+  flex-shrink: 1;
+  min-width: 0;
   color: var(--green);
   font-weight: 600;
   animation: turn-bar-notice-fade 4s ease-out forwards;
 }
+.turn-bar-notice-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* A restore's notice carries Undo: it stays long enough to use it. */
 .turn-bar-notice-undo {
   display: inline-flex;

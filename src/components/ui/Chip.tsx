@@ -46,6 +46,8 @@ interface ActionChip extends ChipBase {
   /** What it opens (aria-haspopup). */
   haspopup?: "dialog" | "menu" | "listbox";
   disabled?: boolean;
+  /** The button, e.g. to anchor the popover it opens. */
+  buttonRef?: Ref<HTMLButtonElement>;
   selected?: undefined;
   onToggle?: undefined;
 }
@@ -76,10 +78,11 @@ export function Chip(props: ChipProps) {
   );
 
   if (onClick !== undefined) {
-    const { expanded, haspopup, disabled, ...attrs } = rest as Omit<ActionChip, "children" | "size" | "tone" | "className" | "onClick">;
+    const { expanded, haspopup, disabled, buttonRef, ...attrs } = rest as Omit<ActionChip, "children" | "size" | "tone" | "className" | "onClick">;
     return (
       <button
         {...attrs}
+        ref={buttonRef}
         type="button"
         className={cx(classes, "h-chip--action")}
         aria-expanded={expanded}

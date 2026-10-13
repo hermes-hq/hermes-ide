@@ -10,12 +10,16 @@
  *   on confirmation and shows "Restored to Tn"
  * - a `hermes:turn-ledger` event for this session reloads the list; one
  *   for another session does not
+ * - the "Agent replies" label and its help text; the "only <project>" note
+ *   when the session has folders the ledger does not snapshot
+ * - overflow: only the newest chips that fit render, "+N earlier" opens a
+ *   list of every turn (newest first) that works with the keyboard
  *
  * The snapshots themselves (git, the private index, restore) are covered
  * in src-tauri/src/turn_ledger, and the whole journey on the real app in
  * e2e/app/scenarios/F20-turn-ledger.mjs.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach, type MockInstance } from "vitest";
 import { render, screen, fireEvent, waitFor, cleanup, act } from "@testing-library/react";
 
 type Handler = (event: { payload: unknown }) => void;
@@ -74,7 +78,10 @@ beforeEach(() => {
     }
   });
 });
-afterEach(() => cleanup());
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
 
 const chips = () => screen.queryAllByRole("button", { name: /^Turn \d+/ });
 
@@ -91,7 +98,7 @@ describe("TurnBar", () => {
     await waitFor(() => expect(chips()).toHaveLength(3));
     const [t1, , t3] = chips();
     expect(t1.getAttribute("data-turn-n")).toBe("1");
-    expect(t1.textContent).toContain("T1");
+    expect(t1.querySelector(".turn-bar-turn-label")?.textContent).toBe("T1");
     expect(t1.textContent).toContain("+2");
     expect(t1.textContent).toContain("−0");
     expect(t1.getAttribute("title")).toBe("Turn 1: 1 file changed, +2 −0");
@@ -218,5 +225,158 @@ describe("TurnBar", () => {
     await waitFor(() => expect(t2().dataset.checks).toBe("failed"));
     expect(t2().getAttribute("title")).toContain("npm test");
     expect(t2().querySelector(".turn-bar-checks")?.textContent).toBe("✗");
+  });
+});
+
+describe("TurnBar: what it is, and which folder it covers", () => {
+  it("is labelled Agent replies, with a help text that says what a chip is and does", async () => {
+    turns = [turn(1)];
+    const { container } = render(<TurnBar sessionId="s1" />);
+    const bar = await screen.findByRole("toolbar", { name: "Agent replies" });
+    const help =
+      "Each chip is one reply from the agent and the lines it changed (+added −removed). Click one to see its changes or restore your files to that point.";
+    expect(bar.getAttribute("aria-description")).toBe(help);
+    const label = container.querySelector(".turn-bar-title") as HTMLElement;
+    expect(label.querySelector(".turn-bar-title-text")?.textContent).toBe("Agent replies");
+    expect(label.getAttribute("title")).toBe(help);
+    expect(label.querySelector(".turn-bar-help")?.getAttribute("aria-hidden")).toBe("true");
+    // The chip keeps the full sentence as its title.
+    expect(chips()[0].getAttribute("title")).toBe("Turn 1: 1 file changed, +2 −0");
+  });
+
+  it("says the changes are the main project's only when the session has other folders", async () => {
+    turns = [turn(1)];
+    const { rerender } = render(<TurnBar sessionId="s1" workingDirectory="/fixture-home/app" folders={["/fixture-home/app", "/fixture-home/app/packages/ui/"]} />);
+    const bar = await screen.findByRole("toolbar");
+    // A folder inside the working directory is in the snapshot: no note.
+    expect(bar.dataset.scope).toBeUndefined();
+    expect(document.querySelector(".turn-bar-title")?.getAttribute("title")).not.toMatch(/only/);
+    rerender(<TurnBar sessionId="s1" workingDirectory="/fixture-home/app" folders={["/fixture-home/app", "/fixture-home/lib"]} />);
+    await waitFor(() => expect(bar.dataset.scope).toBe("main-only"));
+    const note = "Changes in app only. The session's other folders are not tracked.";
+    expect(document.querySelector(".turn-bar-title")?.getAttribute("title")).toContain(note);
+    expect(bar.getAttribute("aria-description")).toContain(note);
+  });
+});
+
+describe("TurnBar: more turns than fit", () => {
+  let observers: Array<() => void> = [];
+  let width = 200;
+  const realRO = globalThis.ResizeObserver;
+
+  /** 60 px a chip, 70 px the "+N earlier" chip, `width` px for the chips' row. */
+  function layout() {
+    (vi.spyOn(HTMLElement.prototype, "offsetWidth", "get") as MockInstance<() => number>).mockImplementation(function (this: HTMLElement) {
+      if (this.classList.contains("turn-bar-more")) return 70;
+      if (this.classList.contains("turn-bar-turn")) return 60;
+      return 0;
+    });
+    (vi.spyOn(Element.prototype, "clientWidth", "get") as MockInstance<() => number>).mockImplementation(function (this: Element) {
+      return this.classList.contains("turn-bar-turns") ? width : 0;
+    });
+  }
+
+  beforeEach(() => {
+    observers = [];
+    width = 200;
+    globalThis.ResizeObserver = class {
+      constructor(cb: () => void) {
+        observers.push(cb);
+      }
+      observe() {}
+      unobserve() {}
+      disconnect() {}
+    } as unknown as typeof ResizeObserver;
+    layout();
+  });
+  afterEach(() => {
+    globalThis.ResizeObserver = realRO;
+  });
+
+  const more = () => screen.queryByRole("button", { name: /^All agent replies/ });
+
+  it("shows the newest chips that fit, newest on the right, and +N earlier for the rest", async () => {
+    turns = [1, 2, 3, 4, 5].map((n) => turn(n));
+    render(<TurnBar sessionId="s1" />);
+    // 200 px: the 70 px "+N earlier" chip and two 60 px chips.
+    await waitFor(() => expect(chips().map((c) => c.dataset.turnN)).toEqual(["4", "5"]));
+    expect(more()?.textContent).toBe("+3 earlier");
+    expect(more()?.getAttribute("aria-label")).toBe("All agent replies (5)");
+    // The pane grows: every chip fits and the overflow chip goes.
+    width = 400;
+    act(() => observers.forEach((cb) => cb()));
+    await waitFor(() => expect(chips()).toHaveLength(5));
+    expect(more()).toBeNull();
+    // A narrow split pane still shows the newest chip.
+    width = 100;
+    act(() => observers.forEach((cb) => cb()));
+    await waitFor(() => expect(chips().map((c) => c.dataset.turnN)).toEqual(["5"]));
+    expect(more()?.textContent).toBe("+4 earlier");
+  });
+
+  it("+N earlier opens every turn, newest first; a row opens that turn's diff", async () => {
+    turns = [1, 2, 3, 4, 5].map((n) => turn(n, n === 3 ? { checks: { state: "passed", failed: [] } } : {}));
+    render(<TurnBar sessionId="s1" />);
+    await waitFor(() => expect(more()).not.toBeNull());
+    fireEvent.click(more()!);
+    const list = await screen.findByRole("listbox", { name: "All agent replies (5)" });
+    const rows = screen.getAllByRole("option");
+    expect(rows.map((r) => r.dataset.turnN)).toEqual(["5", "4", "3", "2", "1"]);
+    expect(rows[3].getAttribute("aria-label")).toBe("Turn 2: 2 files changed, +4 −1");
+    expect(rows[3].querySelector(".turn-list-name")?.textContent).toBe("Turn 2");
+    expect(rows[3].querySelector(".turn-list-files")?.textContent).toBe("2 files");
+    expect(rows[3].querySelector(".turn-bar-add")?.textContent).toBe("+4");
+    expect(rows[3].querySelector(".turn-bar-del")?.textContent).toBe("−1");
+    expect(rows[3].querySelector(".turn-list-ago")?.textContent).not.toBe("");
+    expect(rows[2].querySelector(".turn-bar-checks-passed")?.textContent).toBe("✓");
+    expect(list.getAttribute("aria-description")).toBeNull();
+    fireEvent.click(rows[3]);
+    const sheet = await screen.findByRole("dialog");
+    expect(sheet.getAttribute("data-turn-n")).toBe("2");
+    await waitFor(() => expect(h.invoke).toHaveBeenCalledWith("get_turn_diff", { sessionId: "s1", n: 2 }));
+    expect(screen.queryByRole("listbox")).toBeNull();
+  });
+
+  it("the list works with the keyboard: arrows, Home/End, Enter, Esc back to the chip", async () => {
+    turns = [1, 2, 3, 4, 5].map((n) => turn(n));
+    render(<TurnBar sessionId="s1" />);
+    await waitFor(() => expect(more()).not.toBeNull());
+    fireEvent.click(more()!);
+    const list = await screen.findByRole("listbox");
+    expect(document.activeElement).toBe(list);
+    const activeN = () => document.getElementById(list.getAttribute("aria-activedescendant") ?? "")?.dataset.turnN;
+    expect(activeN()).toBe("5");
+    fireEvent.keyDown(list, { key: "ArrowDown" });
+    fireEvent.keyDown(list, { key: "ArrowDown" });
+    expect(activeN()).toBe("3");
+    fireEvent.keyDown(list, { key: "End" });
+    expect(activeN()).toBe("1");
+    fireEvent.keyDown(list, { key: "ArrowDown" });
+    expect(activeN()).toBe("1");
+    fireEvent.keyDown(list, { key: "Home" });
+    fireEvent.keyDown(list, { key: "ArrowDown" });
+    expect(activeN()).toBe("4");
+    fireEvent.keyDown(list, { key: "Escape" });
+    await waitFor(() => expect(screen.queryByRole("listbox")).toBeNull());
+    expect(document.activeElement).toBe(more());
+    expect(screen.queryByRole("dialog")).toBeNull();
+    // Enter picks the highlighted turn.
+    fireEvent.click(more()!);
+    const again = await screen.findByRole("listbox");
+    fireEvent.keyDown(again, { key: "ArrowDown" });
+    fireEvent.keyDown(again, { key: "Enter" });
+    const sheet = await screen.findByRole("dialog");
+    expect(sheet.getAttribute("data-turn-n")).toBe("4");
+  });
+
+  it("the list header says when only the main project is tracked", async () => {
+    turns = [1, 2, 3, 4, 5].map((n) => turn(n));
+    render(<TurnBar sessionId="s1" workingDirectory="/fixture-home/app" folders={["/fixture-home/docs"]} />);
+    await waitFor(() => expect(more()).not.toBeNull());
+    fireEvent.click(more()!);
+    const list = await screen.findByRole("listbox");
+    const note = "Changes in app only. The session's other folders are not tracked.";
+    expect(document.querySelector(".turn-list-scope")?.textContent).toBe(note);
+    expect(list.getAttribute("aria-description")).toBe(note);
   });
 });

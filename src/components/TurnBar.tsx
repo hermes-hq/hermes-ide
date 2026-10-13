@@ -1,13 +1,15 @@
 import "../styles/components/TurnBar.css";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { translate } from "../i18n/registry";
 import { translatePlural } from "../i18n/plural";
-import { Button, CloseButton } from "./ui/Button";
+import { Button, CloseButton, cx } from "./ui/Button";
+import { Chip } from "./ui/Chip";
 import { getTurnDiff, listTurns, type Turn, type TurnChecks } from "../agent/contract/turns";
 import { getSessionEventSnapshot } from "../agent/contract/sessionEventStore";
 import { withTurnChecks } from "../agent/turns/turnChecks";
 import { useDoneWhen } from "../doneWhen/store";
+import { basename } from "../utils/paths";
 import {
   previewRestoreTurn,
   restoreTurn,
@@ -20,7 +22,10 @@ import {
 /**
  * F20 — the turn bar under a terminal session (feature flag `turnLedger`).
  *
- * One chip per recorded turn (T1, T2, ...) with its diffstat. A chip opens
+ * Labelled "Agent replies", with an (i) that says what the chips are. One
+ * chip per recorded turn (T1, T2, ...) with its diffstat, as many of the
+ * newest as fit (a ResizeObserver measures); the rest sit behind a leading
+ * "+N earlier" chip that opens a list of every turn. A chip opens
  * the turn's diff; from there "Restore to Tn" previews what restoring would
  * change and only restores after a confirmation; what was there before (the
  * person's own edits included) is set aside, and the notice that follows
@@ -32,6 +37,44 @@ import {
 
 interface TurnBarProps {
   sessionId: string;
+  /** The session's working directory: the only folder the ledger snapshots. */
+  workingDirectory?: string;
+  /** The session's other folders (extra folders, attached projects); the
+   *  ones outside the working directory are not tracked, and the bar says so. */
+  folders?: readonly string[];
+}
+
+const TurnList = lazy(() => import("./TurnList"));
+
+/** Whether a folder lies outside `cwd` (one inside it is in the snapshot). */
+function anyOutside(cwd: string, folders: readonly string[]): boolean {
+  const root = cwd.replace(/[\\/]+$/, "");
+  return folders.some((f) => {
+    const p = f.replace(/[\\/]+$/, "");
+    return !!p && p !== root && !p.startsWith(`${root}/`) && !p.startsWith(`${root}\\`);
+  });
+}
+
+/**
+ * How many of the newest chips fit in `avail` px: all of them, or as many
+ * as fit beside the "+N earlier" chip (at least one). An unmeasured chip
+ * counts as the widest measured one; nothing laid out (avail 0) shows all.
+ */
+function fitCount(ns: readonly number[], widths: ReadonlyMap<number, number>, avail: number, gap: number, more: number): number {
+  if (avail <= 0) return ns.length;
+  const guess = Math.max(0, ...widths.values());
+  const w = (n: number) => widths.get(n) ?? guess;
+  const all = ns.reduce((sum, n) => sum + w(n), 0) + gap * Math.max(0, ns.length - 1);
+  if (all <= avail) return ns.length;
+  let used = more;
+  let k = 0;
+  for (let i = ns.length - 1; i >= 0; i--) {
+    const next = used + gap + w(ns[i]);
+    if (next > avail) break;
+    used = next;
+    k++;
+  }
+  return Math.max(1, k);
 }
 
 type Sheet =
@@ -77,7 +120,7 @@ function Patch({ patch }: { patch: string }) {
   );
 }
 
-export function TurnBar({ sessionId }: TurnBarProps) {
+export function TurnBar({ sessionId, workingDirectory, folders }: TurnBarProps) {
   const [ledgerTurns, setTurns] = useState<Turn[]>([]);
   const doneWhen = useDoneWhen(sessionId);
   // Turn.checks (F20 x F27): the Done-When result of each recorded turn.
@@ -90,6 +133,18 @@ export function TurnBar({ sessionId }: TurnBarProps) {
   const noticeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   /** The restore this bar asked for: its own notice (with Undo) stands. */
   const ownRestore = useRef<number | null>(null);
+  const turnsRef = useRef<HTMLDivElement>(null);
+  const moreRef = useRef<HTMLButtonElement>(null);
+  const chipWidths = useRef(new Map<number, number>());
+  const moreWidth = useRef(0);
+  const [avail, setAvail] = useState(0);
+  const [fit, setFit] = useState(Number.POSITIVE_INFINITY);
+  const [listOpen, setListOpen] = useState(false);
+
+  const scopeNote =
+    workingDirectory && anyOutside(workingDirectory, folders ?? []) ? translate("turnBar.onlyProject", { project: basename(workingDirectory) }) : null;
+  // What the chips are (the label's tooltip), and which folder they cover.
+  const help = translate("turnBar.help") + (scopeNote ? `\n\n${scopeNote}` : "");
 
   const showNotice = useCallback((text: string, undo?: number) => {
     setNotice({ text, undo });
@@ -206,24 +261,86 @@ export function TurnBar({ sessionId }: TurnBarProps) {
     return () => window.removeEventListener("keydown", onKey);
   }, [sheet, close]);
 
-  if (turns.length === 0 && !notice) return null;
+  const visible = turns.length > 0 || !!notice;
+  // The space the chips have, followed as the pane is resized.
+  useEffect(() => {
+    const el = turnsRef.current;
+    if (!visible || !el) return;
+    setAvail(el.clientWidth);
+    if (typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => setAvail(el.clientWidth));
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [visible]);
+
+  // Measure the chips on screen and keep the newest that fit (before paint).
+  useLayoutEffect(() => {
+    const el = turnsRef.current;
+    if (!el) return;
+    for (const chip of el.querySelectorAll<HTMLElement>(".turn-bar-turn")) chipWidths.current.set(Number(chip.dataset.turnN), chip.offsetWidth);
+    if (moreRef.current) moreWidth.current = moreRef.current.offsetWidth;
+    const gap = parseFloat(getComputedStyle(el).columnGap) || 0;
+    setFit(fitCount(turns.map((t) => t.n), chipWidths.current, avail, gap, moreWidth.current));
+  }, [turns, avail, fit]);
+
+  const titleOf = useCallback((turn: Turn) => {
+    const { files, insertions, deletions } = turn.diffstat;
+    const base = turn.degraded
+      ? translate("turnBar.summaryOnly", { n: turn.n })
+      : translatePlural("turnBar.turnChanged", files, { n: turn.n, insertions, deletions });
+    return turn.checks ? `${base} · ${checksText(turn.checks)}` : base;
+  }, []);
+
+  const closeList = useCallback((focusAnchor: boolean) => {
+    setListOpen(false);
+    if (focusAnchor) moreRef.current?.focus();
+  }, []);
+
+  if (!visible) return null;
+
+  const shown = turns.slice(Math.max(0, turns.length - fit));
+  const hidden = turns.length - shown.length;
+  const allLabel = translate("turnBar.allReplies", { count: turns.length });
 
   return (
     <>
-      <div className="turn-bar" role="toolbar" aria-label={translate("turnBar.title")} data-session-id={sessionId}>
-        <span className="turn-bar-title">{translate("turnBar.title")}</span>
-        <div className="turn-bar-turns">
-          {turns.map((turn) => {
+      <div
+        className="turn-bar"
+        role="toolbar"
+        aria-label={translate("turnBar.title")}
+        aria-description={help}
+        data-session-id={sessionId}
+        data-scope={scopeNote ? "main-only" : undefined}
+      >
+        <span className="turn-bar-title" title={help}>
+          <span className="turn-bar-title-text">{translate("turnBar.title")}</span>
+          <span className="turn-bar-help" aria-hidden="true">
+            i
+          </span>
+        </span>
+        <div className="turn-bar-turns" ref={turnsRef}>
+          {hidden > 0 && (
+            <Chip
+              size="sm"
+              className="turn-bar-more"
+              buttonRef={moreRef}
+              title={allLabel}
+              aria-label={allLabel}
+              haspopup="listbox"
+              expanded={listOpen}
+              onClick={() => setListOpen((o) => !o)}
+            >
+              {translatePlural("turnBar.earlier", hidden)}
+            </Chip>
+          )}
+          {shown.map((turn) => {
             const { files, insertions, deletions } = turn.diffstat;
-            const base = turn.degraded
-              ? translate("turnBar.summaryOnly", { n: turn.n })
-              : translatePlural("turnBar.turnChanged", files, { n: turn.n, insertions, deletions });
-            const title = turn.checks ? `${base} · ${checksText(turn.checks)}` : base;
+            const title = titleOf(turn);
             return (
-              <button
+              <Chip
                 key={turn.n}
-                type="button"
-                className={`turn-bar-turn${turn.degraded ? " turn-bar-turn-degraded" : ""}`}
+                size="sm"
+                className={cx("turn-bar-turn", turn.degraded && "turn-bar-turn-degraded")}
                 data-turn-n={turn.n}
                 data-files={files}
                 data-checks={turn.checks?.state}
@@ -242,13 +359,13 @@ export function TurnBar({ sessionId }: TurnBarProps) {
                     {turn.checks.state === "passed" ? "✓" : "✗"}
                   </span>
                 )}
-              </button>
+              </Chip>
             );
           })}
         </div>
         {notice && (
-          <span className={`turn-bar-notice${notice.undo !== undefined ? " turn-bar-notice-undo" : ""}`} role="status">
-            {notice.text}
+          <span className={`turn-bar-notice${notice.undo !== undefined ? " turn-bar-notice-undo" : ""}`} role="status" title={notice.text}>
+            <span className="turn-bar-notice-text">{notice.text}</span>
             {notice.undo !== undefined && (
               <Button size="sm" variant="quiet" className="turn-bar-undo" onClick={() => undoRestore(notice.undo as number)}>
                 {translate("turnBar.undo")}
@@ -257,6 +374,12 @@ export function TurnBar({ sessionId }: TurnBarProps) {
           </span>
         )}
       </div>
+
+      {listOpen && hidden > 0 && (
+        <Suspense fallback={null}>
+          <TurnList turns={turns} anchorRef={moreRef} titleOf={titleOf} scopeNote={scopeNote} onChoose={openDiff} onClose={closeList} />
+        </Suspense>
+      )}
 
       {sheet && (
         <div className="turn-sheet-overlay" onClick={close}>

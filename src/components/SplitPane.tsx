@@ -425,7 +425,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
       </div>
       {/* F20: the turn bar (Diff / Restore per agent turn) under a terminal
           session, behind the turnLedger flag. */}
-      {session.mode !== "agent" && isFeatureFlagEnabled("turnLedger") && <TurnBar sessionId={sessionId} />}
+      {session.mode !== "agent" && isFeatureFlagEnabled("turnLedger") && (
+        <TurnBar sessionId={sessionId} workingDirectory={session.working_directory} folders={[...(session.extra_dirs ?? []), ...session.workspace_paths]} />
+      )}
 
       {/* Drag capture overlay — sits above xterm canvas during drags */}
       <div className="split-pane-drag-capture" />
