@@ -1,0 +1,130 @@
+/* ─── Launcher project menu ──────────────────────────────────────────
+ * The launcher's project chip menu: a search field, the list (Recent, All
+ * projects) that scrolls, Open folder… and New project… pinned below it.
+ * Rows are the control set's ListRow (32 px; highlight and the current
+ * project's brass rail come from src/styles/ui/row.css).
+ * ──────────────────────────────────────────────────────────────────── */
+
+.launcher-pm { display: flex; flex-direction: column; min-width: 0; }
+
+.launcher-pm-search {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  border-bottom: var(--control-border-width) solid var(--rule-hair);
+}
+.launcher-pm-search-icon,
+.launcher-pm-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--text-3);
+}
+.launcher-pm-search-icon svg,
+.launcher-pm-icon svg { width: var(--icon-size-sm); height: var(--icon-size-sm); }
+.launcher-pm-icon { color: var(--text-2); }
+
+/* The field itself: borderless like the command palette's; its focus ring drawn inside. */
+.launcher-pm-input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h-lg);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text-0);
+  font-family: var(--font-ui);
+  font-size: var(--control-font-md);
+}
+.launcher-pm-input::placeholder { color: var(--text-3); }
+.launcher-pm-input:focus-visible { outline-offset: calc(-1 * var(--focus-ring-width)); }
+
+.launcher-pm-list {
+  max-height: var(--popover-max-h);
+  overflow-y: auto;
+  padding: var(--space-1) 0;
+}
+.launcher-pm-group { display: flex; flex-direction: column; gap: var(--space-0-5); }
+
+.launcher-pm-section {
+  display: flex;
+  align-items: center;
+  min-height: var(--space-5);
+  padding: 0 var(--space-3);
+  color: var(--text-3);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-widest);
+  text-transform: uppercase;
+}
+
+.launcher-pm-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 46%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: var(--weight-medium);
+}
+/* The matched characters: semibold in the strongest ink, no fill. */
+.launcher-pm-hit { color: var(--text-0); font-weight: var(--weight-semibold); }
+
+/* The parent folder, cut from the left so the part that tells projects apart stays. */
+.launcher-pm-path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+  color: var(--text-3);
+  font-family: var(--font-code);
+  font-size: var(--text-sm);
+}
+.launcher-pm-path bdi { direction: ltr; unicode-bidi: isolate; }
+
+.launcher-pm-ago {
+  flex-shrink: 0;
+  min-width: var(--space-6);
+  text-align: right;
+  color: var(--text-3);
+  font-size: var(--text-sm);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* Remove from list: shown on the hovered and the highlighted row. */
+.launcher-pm-remove { flex-shrink: 0; visibility: hidden; }
+.h-row:hover .launcher-pm-remove,
+.h-row[data-highlighted] .launcher-pm-remove,
+.launcher-pm-remove:focus-visible { visibility: visible; }
+
+/* A folder that is gone: greyed and struck through, at the end of the list. */
+.launcher-pm-missing .launcher-pm-name {
+  color: var(--text-3);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-3);
+}
+
+/* Remove <name> from the list? — asked in the row itself. */
+.launcher-pm-confirm { flex-wrap: wrap; padding-top: var(--space-1); padding-bottom: var(--space-1); cursor: default; }
+.launcher-pm-confirm-text { flex: 1; min-width: 0; color: var(--text-0); }
+.launcher-pm-confirm-error { flex-basis: 100%; color: var(--danger-fg); font-size: var(--text-xs); }
+
+.launcher-pm-action-label { flex: 1; min-width: 0; }
+.launcher-pm-actions { display: flex; flex-direction: column; gap: var(--space-0-5); }
+
+.launcher-pm-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-5) var(--space-3);
+  color: var(--text-2);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+.launcher-pm-hints { display: flex; flex-wrap: wrap; gap: var(--space-3); }

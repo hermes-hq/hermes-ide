@@ -291,7 +291,10 @@ describe("TaskLauncher: the defaults and Enter", () => {
     fireEvent.click(chip("project"));
     const items = [...document.querySelectorAll(".task-launcher-menu [data-project-path]")].map((b) => b.getAttribute("data-project-path"));
     expect(items).toEqual([OTHER, REPO]);
-    expect(screen.getByRole("button", { name: "Browse…" })).toBeInTheDocument();
+    // The starting project is the current row; Open folder… and New project… stay under the list.
+    expect(document.querySelector(`.task-launcher-menu [data-project-path="${OTHER}"]`)).toHaveAttribute("data-current");
+    expect(screen.getByRole("option", { name: "Open folder…" })).toBeInTheDocument();
+    expect(screen.getByRole("option", { name: "New project…" })).toHaveClass("task-launcher-new-folder");
   });
 
   it("Shift+Enter is a new line, not a launch; Enter in any field launches", async () => {

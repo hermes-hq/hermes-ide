@@ -140,7 +140,9 @@ export function useNativeMenuEvents(handlers: MenuEventHandlers): void {
           }
           break;
         case "view.process-panel":
-          dispatch({ type: "TOGGLE_PROCESS_PANEL" });
+          // ⌘P in the launcher opens its project menu (the panel is behind the sheet).
+          if (topOverlay() === "launcher") window.dispatchEvent(new CustomEvent("hermes:launcher-project"));
+          else dispatch({ type: "TOGGLE_PROCESS_PANEL" });
           break;
         case "view.git-panel":
           if (toggleReviewDesk) toggleReviewDesk();

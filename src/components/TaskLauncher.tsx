@@ -1,18 +1,21 @@
 import "../styles/components/TaskLauncher.css";
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
+import { homeDir } from "@tauri-apps/api/path";
 import { useI18n } from "../i18n/I18nProvider";
 import { Button, Checkbox, Chip, CloseButton, IconButton, Input, Segmented, Select, Textarea, type SelectOption } from "./ui";
 import { NewFolderForm } from "./NewFolderForm";
+import { LauncherProjectMenu } from "./LauncherProjectMenu";
 import type { ControlAttrs } from "./ui/attrs";
 import { cx } from "./ui/Button";
 import { CloseGlyph } from "./ui/icons";
 import { customAgent, getAgent, installCommand, listAgents } from "../catalog/agentCatalog";
 import { getSetting, setSetting } from "../api/settings";
 import { getDiskStatus } from "../api/git";
-import { getProjectsOrdered } from "../api/projects";
+import { deleteProject, getProjectsOrdered } from "../api/projects";
 import { probeTaskRepo, type RepoProbe } from "../api/launcher";
 import type { DiskStatus } from "../types/git";
+import type { ProjectOrdered } from "../types/project";
 import type { SessionMode } from "../types/session";
 import type { AgentCapabilities, CheckedPreset, ChoiceIssue, LaunchChoice } from "../agent/capabilities/types";
 import { reconcileChoice } from "../agent/capabilities/choice";
@@ -194,6 +197,13 @@ function baseName(path: string): string {
   return parts[parts.length - 1] || path;
 }
 
+/** The project a launcher without an active session starts on: the most used one whose folder is there. */
+function startProject(list: ProjectOrdered[]): ProjectOrdered | undefined {
+  let best: ProjectOrdered | undefined;
+  for (const p of list) if (p.path_exists !== false && (!best || (p.session_count ?? 0) > (best.session_count ?? 0))) best = p;
+  return best;
+}
+
 /**
  * Arrow keys move the focus between the buttons of an open menu. A control
  * that takes the arrow keys itself (a field, a Select, a segmented control)
@@ -327,7 +337,10 @@ export function TaskLauncher({
   const [suggestCount, setSuggestCount] = useState(0);
   const [suggestName, setSuggestName] = useState("");
   const [saving, setSaving] = useState<string | null>(null);
-  const [projects, setProjects] = useState<{ path: string; name: string }[]>([]);
+  const [projects, setProjects] = useState<ProjectOrdered[]>([]);
+  const [projectsFailed, setProjectsFailed] = useState(false);
+  const [projectsAttempt, setProjectsAttempt] = useState(0);
+  const [home, setHome] = useState<string | null>(null);
   const [newFolderOpen, setNewFolderOpen] = useState(false);
   const [recents, setRecents] = useState<string[]>([]);
   const [prefixes, setPrefixes] = useState<Record<string, string>>({});
@@ -482,29 +495,41 @@ export function TaskLauncher({
     [backend],
   );
 
-  // Projects, most used first (every launch is a session of its project).
+  // Projects, most used first (every launch is a session of its project);
+  // the menu shows missing folders too, the starting one is never one of them.
   useEffect(() => {
     let cancelled = false;
     getProjectsOrdered()
-      .catch(() => [])
-      .then((list) => {
-        if (cancelled) return;
-        const sorted = list
-          .filter((p) => p.path_exists !== false)
-          .map((p, i) => ({ path: p.path, name: p.name || baseName(p.path), i, s: p.session_count ?? 0 }))
-          .sort((a, b) => b.s - a.s || a.i - b.i);
-        setProjects(sorted.map(({ path, name }) => ({ path, name })));
-        if (!repoPathRef.current.trim() && sorted[0]) {
-          repoPathRef.current = sorted[0].path;
-          setRepoPath(sorted[0].path);
-        }
-        setProjectsLoaded(true);
-      })
+      .then(
+        (list) => {
+          if (cancelled) return;
+          const named = list.map((p) => ({ ...p, name: p.name || baseName(p.path) }));
+          setProjects(named);
+          setProjectsFailed(false);
+          const start = startProject(named);
+          if (!repoPathRef.current.trim() && start) {
+            repoPathRef.current = start.path;
+            setRepoPath(start.path);
+          }
+          setProjectsLoaded(true);
+        },
+        () => {
+          if (cancelled) return;
+          setProjectsFailed(true);
+          setProjectsLoaded(true);
+        },
+      )
       .catch(() => setProjectsLoaded(true));
     return () => {
       cancelled = true;
     };
-  }, [backend]);
+  }, [backend, projectsAttempt]);
+  useEffect(() => {
+    homeDir().then(
+      (h) => setHome(h.replace(/[\\/]+$/, "")),
+      () => setHome(null),
+    );
+  }, []);
   const repoPathRef = useRef(repoPath);
   repoPathRef.current = repoPath;
 
@@ -1164,6 +1189,7 @@ export function TaskLauncher({
       const root = menuRef.current;
       if (!root) return;
       const target =
+        root.querySelector<HTMLElement>("[data-autofocus]") ??
         root.querySelector<HTMLElement>("[aria-pressed='true'], [aria-checked='true']") ??
         root.querySelector<HTMLElement>("button:not([disabled]):not([tabindex='-1']), input, [role='combobox']");
       target?.focus();
@@ -1175,6 +1201,17 @@ export function TaskLauncher({
     setMenu(null);
     if (m) requestAnimationFrame(() => chipRefs.current[m]?.focus());
   }, [menu]);
+  /** ⌘P / Ctrl+P: the project menu opens on its search (also when it is open already). */
+  const openProjectMenu = useCallback(() => {
+    setMenu("project");
+    setNewFolderOpen(false);
+    requestAnimationFrame(() => menuRef.current?.querySelector<HTMLElement>("[data-autofocus]")?.focus());
+  }, []);
+  useEffect(() => {
+    // ⌘P reaches the app as a menu key too: with the launcher in front it opens the project menu.
+    window.addEventListener("hermes:launcher-project", openProjectMenu);
+    return () => window.removeEventListener("hermes:launcher-project", openProjectMenu);
+  }, [openProjectMenu]);
   /** A value picked in a menu: it closes and the task field has the keyboard (the next Enter launches). */
   const pickDone = useCallback(() => {
     setMenu(null);
@@ -1198,6 +1235,12 @@ export function TaskLauncher({
       e.preventDefault();
       e.stopPropagation();
       if (preset && Number(e.key) <= PRESET_SHORTCUTS) applyPreset(preset);
+      return;
+    }
+    if (mod && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "p") {
+      e.preventDefault();
+      e.stopPropagation();
+      if (choice) openProjectMenu();
       return;
     }
     if (mod && e.key === ".") {
@@ -1228,6 +1271,18 @@ export function TaskLauncher({
       e.preventDefault();
       e.stopPropagation();
       void launch(false);
+    }
+  };
+
+  /** Removes a project from the list (its files stay); the launcher's own project falls back to the starting one. */
+  const removeProject = async (project: ProjectOrdered) => {
+    await deleteProject(project.id);
+    const rest = projects.filter((p) => p.id !== project.id);
+    setProjects((prev) => prev.filter((p) => p.id !== project.id));
+    if (samePath(project.path, repoPathRef.current)) {
+      const next = startProject(rest)?.path ?? "";
+      repoPathRef.current = next;
+      setRepoPath(next);
     }
   };
 
@@ -2072,81 +2127,78 @@ export function TaskLauncher({
             </>
           )}
           {menu === "project" && (
-            <>
-              <div className="task-launcher-menu-caption">{t("launcher.projectsCaption")}</div>
-              <div className="task-launcher-menu-items task-launcher-menu-column">
-                {projects.map((p) =>
-                  optionChip(
-                    p.path,
-                    samePath(p.path, repoPath),
-                    () => {
-                      setRepoPath(p.path);
+            <LauncherProjectMenu
+              projects={projects}
+              loadFailed={projectsFailed}
+              onRetry={() => setProjectsAttempt((n) => n + 1)}
+              isCurrent={(path) => samePath(path, repoPath)}
+              home={home}
+              onPick={(path) => {
+                setRepoPath(path);
+                pickDone();
+              }}
+              onOpenFolder={() => void chooseFolder()}
+              onNewProject={() => setNewFolderOpen(true)}
+              onRemove={removeProject}
+              newProject={
+                newFolderOpen ? (
+                  <NewFolderForm
+                    projects={projects}
+                    onCreated={(project) => {
+                      setProjects((prev) => [
+                        { ...project, session_count: 0, last_opened_at: null, path_exists: true },
+                        ...prev.filter((p) => !samePath(p.path, project.path)),
+                      ]);
+                      setNewFolderOpen(false);
+                      setRepoPath(project.path);
+                      // A new repository has no commit to make a worktree from:
+                      // its first task works in the folder itself.
+                      setWhere("current-checkout");
                       pickDone();
-                    },
-                    p.name,
-                    { "data-project-path": p.path, title: p.path },
-                    { note: p.path },
-                  ),
-                )}
-                <span className="task-launcher-folder-actions">
-                  <Button size="sm" className="task-launcher-browse" onClick={() => void chooseFolder()}>
-                    {t("launcher.browse")}
-                  </Button>
-                  <Button size="sm" className="task-launcher-new-folder" onClick={() => setNewFolderOpen(true)} disabled={newFolderOpen}>
-                    {t("newFolder.open")}
-                  </Button>
-                </span>
-              </div>
-              {newFolderOpen && (
-                <NewFolderForm
-                  projects={projects}
-                  onCreated={(project) => {
-                    setProjects((prev) => [{ path: project.path, name: project.name }, ...prev.filter((p) => !samePath(p.path, project.path))]);
-                    setNewFolderOpen(false);
-                    setRepoPath(project.path);
-                    // A new repository has no commit to make a worktree from:
-                    // its first task works in the folder itself.
-                    setWhere("current-checkout");
-                    pickDone();
-                  }}
-                  onCancel={() => setNewFolderOpen(false)}
-                />
-              )}
-              <label className="task-launcher-inline-label" htmlFor="task-launcher-repo">{t("launcher.repoTyped")}</label>
-              {/* Enter here confirms the folder (it never launches): the menu closes, the task field has the keyboard. */}
-              <span className="task-launcher-repo-field" data-own-enter="true">
-                <Input
-                  id="task-launcher-repo"
-                  code
-                  className="task-launcher-repo"
-                  value={repoPath}
-                  spellCheck={false}
-                  placeholder={t("launcher.repoPlaceholder")}
-                  aria-describedby={resolvedPath || (repoPath.trim() && gitRoot === null) ? "task-launcher-repo-state" : undefined}
-                  onChange={(e) => setRepoPath(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.nativeEvent.isComposing && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
-                      e.preventDefault();
-                      e.stopPropagation();
-                      pickDone();
-                    }
-                  }}
-                />
-              </span>
-              {(resolvedPath || (repoPath.trim() && gitRoot === null)) && (
-                <div id="task-launcher-repo-state" className="task-launcher-muted task-launcher-repo-state" role="status">
-                  {resolvedPath ? t("launcher.repoResolved", { path: resolvedPath }) : null}
-                  {resolvedPath && gitRoot === null ? " · " : null}
-                  {gitRoot === null
-                    ? folder && !folder.exists
-                      ? t("launcher.block.noFolder")
-                      : folder && !folder.isDir
-                        ? t("launcher.block.notAFolder")
-                        : t("folder.notGitHint")
-                    : null}
+                    }}
+                    onCancel={() => setNewFolderOpen(false)}
+                  />
+                ) : null
+              }
+              typedPath={
+                <div className="task-launcher-typed-path">
+                  <label className="task-launcher-inline-label" htmlFor="task-launcher-repo">{t("launcher.repoTyped")}</label>
+                  {/* Enter here confirms the folder (it never launches): the menu closes, the task field has the keyboard. */}
+                  <span className="task-launcher-repo-field" data-own-enter="true">
+                    <Input
+                      id="task-launcher-repo"
+                      code
+                      className="task-launcher-repo"
+                      value={repoPath}
+                      spellCheck={false}
+                      placeholder={t("launcher.repoPlaceholder")}
+                      aria-describedby={resolvedPath || (repoPath.trim() && gitRoot === null) ? "task-launcher-repo-state" : undefined}
+                      onChange={(e) => setRepoPath(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" && !e.nativeEvent.isComposing && !e.shiftKey && !e.altKey && !e.metaKey && !e.ctrlKey) {
+                          e.preventDefault();
+                          e.stopPropagation();
+                          pickDone();
+                        }
+                      }}
+                    />
+                  </span>
+                  {(resolvedPath || (repoPath.trim() && gitRoot === null)) && (
+                    <div id="task-launcher-repo-state" className="task-launcher-muted task-launcher-repo-state" role="status">
+                      {resolvedPath ? t("launcher.repoResolved", { path: resolvedPath }) : null}
+                      {resolvedPath && gitRoot === null ? " · " : null}
+                      {gitRoot === null
+                        ? folder && !folder.exists
+                          ? t("launcher.block.noFolder")
+                          : folder && !folder.isDir
+                            ? t("launcher.block.notAFolder")
+                            : t("folder.notGitHint")
+                        : null}
+                    </div>
+                  )}
                 </div>
-              )}
-            </>
+              }
+            />
           )}
           {menu === "where" && !plainFolder && whereBlock}
           {menu === "approval" && approvalBlock}
