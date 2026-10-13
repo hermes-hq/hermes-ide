@@ -48,6 +48,7 @@ export const CI_EXCLUDED = {
   "REAL-agent-view-resume.mjs": "local only: needs a signed-in real claude and costs two tiny turns; it says SKIP in CI",
   "REAL-context-codex.mjs": "local only: needs a signed-in real codex (and agy, when installed) and costs a few tiny turns; it says SKIP in CI",
   "REAL-library-agents.mjs": "local only: needs a signed-in real claude and/or codex and costs a tiny turn each; it says SKIP in CI",
+  "REAL-attach-nudge-claude.mjs": "local only: needs a signed-in real claude and costs a few tiny turns; it says SKIP in CI",
 };
 
 /**

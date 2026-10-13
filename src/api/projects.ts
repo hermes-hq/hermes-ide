@@ -57,7 +57,8 @@ export function scanProject(id: string, depth: string): Promise<void> {
   return invoke("scan_project", { id, depth });
 }
 
-export function nudgeProjectContext(sessionId: string): Promise<void> {
+/** Typed and sent, kept until the agent waits with an empty line, or not sent (no agent holds the terminal). */
+export function nudgeProjectContext(sessionId: string): Promise<"sent" | "deferred" | "no_agent"> {
   return invoke("nudge_project_context", { sessionId });
 }
 

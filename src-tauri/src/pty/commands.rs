@@ -1861,6 +1861,7 @@ pub fn create_session(
                                                 &writer_for_reader,
                                                 &mut s,
                                                 a.typed_line.pending(),
+                                                a.bracketed_paste,
                                             );
                                         }
                                     }
@@ -2129,6 +2130,15 @@ pub fn create_session(
                         );
                     }
                 }
+
+                // A nudge kept for later goes out once the agent waits
+                // with an empty line, also when it was waiting all along.
+                super::PtyManager::deliver_pending_nudge_when_waiting(
+                    &writer_for_silence,
+                    &session_silence,
+                    &analyzer_silence,
+                    || shell_holds_prompt(shell_pid),
+                );
             }
         });
     }
@@ -2613,7 +2623,7 @@ pub(crate) fn counts_as_shell_child(shell_started: u64, started: u64, name: &str
 pub fn nudge_project_context(
     state: State<'_, AppState>,
     session_id: String,
-) -> Result<bool, String> {
+) -> Result<super::ProjectsNudge, String> {
     // Check if there are projects attached
     let has_context = {
         let db = state.db.lock().map_err(|e| e.to_string())?;
@@ -2622,10 +2632,10 @@ pub fn nudge_project_context(
     };
 
     if !has_context {
-        return Ok(false);
+        return Ok(super::ProjectsNudge::NoAgent);
     }
 
-    // Only once an agent is detected, and never into the person's line.
+    // Only to an agent, and never into the person's line.
     let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
     mgr.send_projects_nudge(&session_id)
 }

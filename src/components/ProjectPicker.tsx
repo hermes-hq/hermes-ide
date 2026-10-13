@@ -22,6 +22,14 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
   const [scanning, setScanning] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
   const changed = useRef(false);
+  // Attaches and detaches still on their way: Done can be pressed while one
+  // runs (the row shows it attached before it has finished), and the nudge
+  // waits for them instead of being skipped.
+  const changes = useRef<Promise<unknown>[]>([]);
+  const track = (change: Promise<unknown>) => {
+    changes.current.push(change);
+    return change;
+  };
 
   useEffect(() => {
     getProjectsOrdered()
@@ -32,11 +40,9 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
 
   const handleClose = () => {
     // Only nudge if the attached projects actually changed
-    if (changed.current) {
-      nudgeProjectContext(sessionId).catch((err) =>
-        console.warn("[ProjectPicker] Failed to nudge project context:", err)
-      );
-    }
+    Promise.allSettled(changes.current)
+      .then(() => (changed.current ? nudgeProjectContext(sessionId) : null))
+      .catch((err) => console.warn("[ProjectPicker] Failed to nudge project context:", err));
     onClose();
   };
 
@@ -104,12 +110,12 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
     }
   };
 
-  const handleScanNew = () => scanNewPath(scanPath);
+  const handleScanNew = () => track(scanNewPath(scanPath));
 
   const handleBrowse = async () => {
     const selected = await open({ directory: true, multiple: false });
     if (selected) {
-      await scanNewPath(selected);
+      await track(scanNewPath(selected));
     }
   };
 
@@ -169,7 +175,7 @@ export function ProjectPicker({ sessionId, onClose }: ProjectPickerProps) {
               className={`project-picker-item ${attachedIds.has(project.id) ? "project-picker-item-attached" : ""} ${"path_exists" in project && !project.path_exists ? "project-picker-item-missing" : ""}`}
               onClick={() => {
                 if ("path_exists" in project && !project.path_exists) return;
-                toggleProject(project);
+                track(toggleProject(project));
               }}
             >
               <span className="project-picker-check">

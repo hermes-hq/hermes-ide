@@ -338,6 +338,19 @@ pub struct PendingNudge {
     pub file_path: String,
 }
 
+/// What became of a projects nudge (`nudge_project_context`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProjectsNudge {
+    /// Typed into the agent and sent.
+    Sent,
+    /// Kept: it goes out the next time the agent waits with an empty line.
+    Deferred,
+    /// Not sent and not kept: no agent holds the terminal, or the session
+    /// has no projects to point at.
+    NoAgent,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SessionUpdate {
     pub id: String,

@@ -1566,6 +1566,10 @@ features:
       REAL-7:
         text: "The context gauge equals the real codex's own /status (window, tokens used within 0.1K) and footer percent; the real agy shows no gauge"
         scenarios: ["REAL-context-codex.mjs@darwin,linux"]
+      REAL-7b:
+        # e2e/app/scenarios/REAL-attach-nudge-claude.mjs, local only like the others.
+        text: "A project attached through the pane's + reaches the real claude as a sent prompt pointing at $HERMES_CONTEXT: idle, busy (queued), after typed-and-deleted text once it waits again, and after the app restarts, also for a long session"
+        scenarios: ["REAL-attach-nudge-claude.mjs@darwin,linux"]
       REAL-8:
         # e2e/app/scenarios/REAL-agent-view-resume.mjs, local only like the others.
         text: "An Agent-view session with the real claude comes back after a restart with its earlier messages drawn from claude's transcript, no STDERR panel, and the resumed claude remembers the earlier turn"
@@ -1838,6 +1842,9 @@ features:
       QA-HOST-16:
         text: "On macOS, Ctrl+C with split panes interrupts the command in the pane that has focus and leaves the other pane alone"
         scenarios: [QA-host-mac-ctrl-c-split.mjs@darwin]
+      QA-HOST-17:
+        text: "A project attached through the pane's + reaches the terminal agent as one sent prompt: when it waits, after its turn, once the person's line is cleared (never into it), and after the app restarts, also for a long session"
+        scenarios: ["QA-host-attach-nudge.mjs@darwin,linux"]
   QA-launcher:
     # Bug fixes from the QA pass over the task launcher, its accounts,
     # presets and queue, the first-run welcome and the overlays (not new

@@ -237,7 +237,11 @@ impl PtyManager {
 
         // Read before the session lock: the reader thread holds the analyzer
         // while it takes the session.
-        let typing = pty.analyzer.lock().is_ok_and(|a| a.typed_line.pending());
+        let (typing, bracketed_paste) = pty
+            .analyzer
+            .lock()
+            .map(|a| (a.typed_line.pending(), a.bracketed_paste))
+            .unwrap_or((false, false));
 
         let mut session_guard = match pty.session.lock() {
             Ok(g) => g,
@@ -282,38 +286,74 @@ impl PtyManager {
             return (false, Some("Text on the line — nudge deferred".to_string()));
         }
 
-        Self::write_nudge(pty, &mut session_guard, version, file_path)
+        Self::write_nudge(pty, &mut session_guard, version, file_path, bracketed_paste)
     }
 
     /// The attached projects changed: point the agent at its context file.
     /// Never into a line the person is writing; then it goes out the next
-    /// time the agent waits. Returns whether it was typed now.
-    pub fn send_projects_nudge(&self, session_id: &str) -> Result<bool, String> {
+    /// time the agent waits.
+    pub fn send_projects_nudge(&self, session_id: &str) -> Result<ProjectsNudge, String> {
         let Some(pty) = self.sessions.get(session_id) else {
-            return Ok(false);
+            return Ok(ProjectsNudge::NoAgent);
         };
         // Before the session lock, as in `send_versioned_nudge`.
-        let typing = pty.analyzer.lock().is_ok_and(|a| a.typed_line.pending());
+        let (typing, bracketed_paste) = pty
+            .analyzer
+            .lock()
+            .map(|a| (a.typed_line.pending(), a.bracketed_paste))
+            .unwrap_or((false, false));
         let mut session = pty
             .session
             .lock()
             .map_err(|e| format!("Session lock failed: {}", e))?;
-        if session.detected_agent.is_none() || Self::shell_has_terminal(pty) {
-            return Ok(false);
+        // The agent Hermes started counts as well as one recognised from its
+        // output: a session reattached after a restart reads back only the
+        // host's last output, which no longer shows a long session's banner.
+        let agent = session.detected_agent.is_some() || session.ai_provider.is_some();
+        if !agent || Self::shell_has_terminal(pty) {
+            return Ok(ProjectsNudge::NoAgent);
         }
         if typing {
             session.pending_projects_nudge = true;
-            return Ok(false);
+            return Ok(ProjectsNudge::Deferred);
         }
-        let mut w = pty
-            .writer
-            .lock()
-            .map_err(|e| format!("Writer lock failed: {}", e))?;
-        w.write_all(PROJECTS_NUDGE.as_bytes())
+        Self::submit_line(&pty.writer, PROJECTS_NUDGE, bracketed_paste)
             .map_err(|e| format!("Write failed: {}", e))?;
-        w.flush().map_err(|e| format!("Flush failed: {}", e))?;
         session.pending_projects_nudge = false;
-        Ok(true)
+        Ok(ProjectsNudge::Sent)
+    }
+
+    /// Type `line` into the program in the terminal and press Enter. A
+    /// program with bracketed paste on (Claude Code, Codex) reads a fast
+    /// burst of text as a paste, in which a trailing Enter is only a new
+    /// line: the line sat in its input, never sent. It gets the line as a
+    /// bracketed paste, then Enter (as the Review Desk sends its line); any
+    /// other program, or one whose mode was lost with a reattach replay,
+    /// gets the line and then Enter as a write of its own a moment later.
+    pub(crate) fn submit_line(
+        writer: &Arc<StdMutex<Box<dyn Write + Send>>>,
+        line: &str,
+        bracketed_paste: bool,
+    ) -> std::io::Result<()> {
+        let mut w = writer
+            .lock()
+            .map_err(|_| std::io::Error::other("writer lock poisoned"))?;
+        if bracketed_paste {
+            w.write_all(format!("\x1b[200~{line}\x1b[201~\r").as_bytes())?;
+            return w.flush();
+        }
+        w.write_all(line.as_bytes())?;
+        w.flush()?;
+        drop(w);
+        let writer = Arc::clone(writer);
+        std::thread::spawn(move || {
+            std::thread::sleep(ENTER_AFTER_LINE);
+            if let Ok(mut w) = writer.lock() {
+                let _ = w.write_all(b"\r");
+                let _ = w.flush();
+            }
+        });
+        Ok(())
     }
 
     /// The shell itself holds the terminal's foreground (it is at its
@@ -334,6 +374,7 @@ impl PtyManager {
         session: &mut Session,
         version: i64,
         file_path: &str,
+        bracketed_paste: bool,
     ) -> (bool, Option<String>) {
         let provider_name = session
             .detected_agent
@@ -342,31 +383,27 @@ impl PtyManager {
             .unwrap_or_default();
 
         let nudge_msg = match provider_name.to_lowercase().as_str() {
-            "aider" => format!("/read {}\r", file_path),
+            "aider" => format!("/read {}", file_path),
             "claude" | "claude code" | "claude-code" | "anthropic" => format!(
-                "Read the file at {} — it contains updated project context (v{}).\r",
+                "Read the file at {} — it contains updated project context (v{}).",
                 file_path, version
             ),
             "copilot" | "github-copilot" => format!(
-                "@workspace Context updated to v{}. The context file is at {}.\r",
+                "@workspace Context updated to v{}. The context file is at {}.",
                 version, file_path
             ),
             _ => format!(
-                "Context updated to v{}. Read the file at {} for project context.\r",
+                "Context updated to v{}. Read the file at {} for project context.",
                 version, file_path
             ),
         };
 
-        match pty.writer.lock() {
-            Ok(mut w) => match w.write_all(nudge_msg.as_bytes()) {
-                Ok(_) => {
-                    let _ = w.flush();
-                    session.last_nudged_version = version;
-                    (true, None)
-                }
-                Err(e) => (false, Some(format!("Write failed: {}", e))),
-            },
-            Err(e) => (false, Some(format!("Writer lock failed: {}", e))),
+        match Self::submit_line(&pty.writer, &nudge_msg, bracketed_paste) {
+            Ok(()) => {
+                session.last_nudged_version = version;
+                (true, None)
+            }
+            Err(e) => (false, Some(format!("Write failed: {}", e))),
         }
     }
 
@@ -374,10 +411,12 @@ impl PtyManager {
     /// (for use inside the reader thread which doesn't have PtySession).
     /// `typing`: the person has text on the line (`typed_line`); the nudge
     /// then stays pending for the next time the agent waits.
+    /// `bracketed_paste`: the agent turned it on (see `submit_line`).
     pub(crate) fn deliver_pending_nudge_with_writer(
         writer: &Arc<StdMutex<Box<dyn Write + Send>>>,
         session: &mut Session,
         typing: bool,
+        bracketed_paste: bool,
     ) {
         if typing {
             return;
@@ -391,39 +430,68 @@ impl PtyManager {
                     .unwrap_or_default();
 
                 let nudge_msg = match provider_name.to_lowercase().as_str() {
-                    "aider" => format!("/read {}\r", nudge.file_path),
+                    "aider" => format!("/read {}", nudge.file_path),
                     "claude" | "claude code" | "claude-code" | "anthropic" => format!(
-                        "Read the file at {} — it contains updated project context (v{}).\r",
+                        "Read the file at {} — it contains updated project context (v{}).",
                         nudge.file_path, nudge.version
                     ),
                     "copilot" | "github-copilot" => format!(
-                        "@workspace Context updated to v{}. The context file is at {}.\r",
+                        "@workspace Context updated to v{}. The context file is at {}.",
                         nudge.version, nudge.file_path
                     ),
                     _ => format!(
-                        "Context updated to v{}. Read the file at {} for project context.\r",
+                        "Context updated to v{}. Read the file at {} for project context.",
                         nudge.version, nudge.file_path
                     ),
                 };
 
-                if let Ok(mut w) = writer.lock() {
-                    if w.write_all(nudge_msg.as_bytes()).is_ok() {
-                        let _ = w.flush();
-                        session.last_nudged_version = nudge.version;
-                        // It names the same file: the projects nudge is covered.
-                        session.pending_projects_nudge = false;
-                    }
+                if Self::submit_line(writer, &nudge_msg, bracketed_paste).is_ok() {
+                    session.last_nudged_version = nudge.version;
+                    // It names the same file: the projects nudge is covered.
+                    session.pending_projects_nudge = false;
                 }
                 return;
             }
         }
-        if session.pending_projects_nudge {
-            if let Ok(mut w) = writer.lock() {
-                if w.write_all(PROJECTS_NUDGE.as_bytes()).is_ok() {
-                    let _ = w.flush();
-                    session.pending_projects_nudge = false;
-                }
-            }
+        if session.pending_projects_nudge
+            && Self::submit_line(writer, PROJECTS_NUDGE, bracketed_paste).is_ok()
+        {
+            session.pending_projects_nudge = false;
+        }
+    }
+
+    /// The silence thread's check, every tick: a nudge kept for later (the
+    /// person had text on the line, or the agent was busy) goes out once the
+    /// agent waits, quiet, with an empty line. The reader thread delivers
+    /// only on its own change to NeedsInput, but an agent's idle is mostly
+    /// found by the silence thread, and an agent already waiting changes
+    /// phase no more: the nudge used to stay kept for good.
+    /// `shell_at_prompt` is asked last: should the agent have exited, nothing
+    /// is typed into the shell.
+    pub(crate) fn deliver_pending_nudge_when_waiting(
+        writer: &Arc<StdMutex<Box<dyn Write + Send>>>,
+        session: &StdMutex<Session>,
+        analyzer: &StdMutex<OutputAnalyzer>,
+        shell_at_prompt: impl FnOnce() -> bool,
+    ) {
+        // One lock at a time (the reader thread takes the analyzer, then the session).
+        let Some(bracketed_paste) = analyzer
+            .lock()
+            .ok()
+            .filter(|a| !a.is_busy && !a.typed_line.pending())
+            .map(|a| a.bracketed_paste)
+        else {
+            return;
+        };
+        let due = session.lock().is_ok_and(|s| {
+            (s.pending_projects_nudge || s.pending_nudge.is_some())
+                && matches!(s.phase, SessionPhase::NeedsInput | SessionPhase::Idle)
+        });
+        if !due || shell_at_prompt() {
+            return;
+        }
+        if let Ok(mut s) = session.lock() {
+            Self::deliver_pending_nudge_with_writer(writer, &mut s, false, bracketed_paste);
         }
     }
 }
@@ -431,7 +499,12 @@ impl PtyManager {
 /// Typed when the attached projects change (`nudge_project_context`); the
 /// variable is set in the agent's environment.
 const PROJECTS_NUDGE: &str =
-    "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.\r";
+    "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.";
+
+/// How long after a line `submit_line` presses Enter for a program without
+/// bracketed paste, so the two arrive as separate reads (measured with
+/// Claude Code 2.1.296: 30 ms is enough; together they are a paste).
+const ENTER_AFTER_LINE: std::time::Duration = std::time::Duration::from_millis(100);
 
 // ─── Helper Functions ───────────────────────────────────────────────
 
@@ -575,8 +648,9 @@ pub(crate) fn get_working_directory() -> String {
 mod tests {
     use super::adapters::{is_input_needed_line, is_shell_prompt, LineAnalysis, PhaseHint};
     use super::analyzer::OutputAnalyzer;
-    use super::models::{PendingNudge, SessionPhase};
+    use super::models::{PendingNudge, ProjectsNudge, SessionPhase};
     use super::{Opening, PtyManager, PROJECTS_NUDGE};
+    use std::sync::{Arc, Mutex as StdMutex};
 
     // ── resizing ──
 
@@ -716,12 +790,22 @@ mod tests {
         // Delivered at the next prompt only once the line is empty.
         let writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> =
             Arc::new(Mutex::new(Box::new(typed.clone())));
-        PtyManager::deliver_pending_nudge_with_writer(&writer, &mut session.lock().unwrap(), true);
+        PtyManager::deliver_pending_nudge_with_writer(
+            &writer,
+            &mut session.lock().unwrap(),
+            true,
+            false,
+        );
         assert_eq!(typed.text(), "");
         assert!(session.lock().unwrap().pending_nudge.is_some());
 
         analyzer.lock().unwrap().typed_line.feed(b"g\r");
-        PtyManager::deliver_pending_nudge_with_writer(&writer, &mut session.lock().unwrap(), false);
+        PtyManager::deliver_pending_nudge_with_writer(
+            &writer,
+            &mut session.lock().unwrap(),
+            false,
+            false,
+        );
         assert!(
             typed.text().starts_with("Read the file at /ctx.md"),
             "{}",
@@ -766,6 +850,7 @@ mod tests {
         let writer: Arc<Mutex<Box<dyn std::io::Write + Send>>> =
             Arc::new(Mutex::new(Box::new(typed.clone())));
         let mut analyzer = OutputAnalyzer::new();
+        analyzer.process(b"\x1b[?2004h");
         analyzer.typed_line.feed(b"fix the bu");
         let session = Arc::new(Mutex::new(waiting_claude()));
         let analyzer = Arc::new(Mutex::new(analyzer));
@@ -784,22 +869,33 @@ mod tests {
                 sized: Arc::new(std::sync::atomic::AtomicBool::new(true)),
             },
         );
-        assert_eq!(mgr.send_projects_nudge("s1"), Ok(false));
+        assert_eq!(mgr.send_projects_nudge("s1"), Ok(ProjectsNudge::Deferred));
         assert_eq!(typed.text(), "");
         assert!(session.lock().unwrap().pending_projects_nudge);
 
         // Still writing at the next wait: kept.
-        PtyManager::deliver_pending_nudge_with_writer(&writer, &mut session.lock().unwrap(), true);
+        PtyManager::deliver_pending_nudge_with_writer(
+            &writer,
+            &mut session.lock().unwrap(),
+            true,
+            true,
+        );
         assert_eq!(typed.text(), "");
 
         analyzer.lock().unwrap().typed_line.feed(b"g\r");
-        PtyManager::deliver_pending_nudge_with_writer(&writer, &mut session.lock().unwrap(), false);
-        assert_eq!(typed.text(), PROJECTS_NUDGE);
+        PtyManager::deliver_pending_nudge_with_writer(
+            &writer,
+            &mut session.lock().unwrap(),
+            false,
+            true,
+        );
+        let sent = format!("\x1b[200~{PROJECTS_NUDGE}\x1b[201~\r");
+        assert_eq!(typed.text(), sent);
         assert!(!session.lock().unwrap().pending_projects_nudge);
 
         // An empty line: typed at once.
-        assert_eq!(mgr.send_projects_nudge("s1"), Ok(true));
-        assert_eq!(typed.text(), PROJECTS_NUDGE.repeat(2));
+        assert_eq!(mgr.send_projects_nudge("s1"), Ok(ProjectsNudge::Sent));
+        assert_eq!(typed.text(), sent.repeat(2));
     }
 
     /// The agent was detected once and has exited: a nudge would be typed
@@ -827,7 +923,7 @@ mod tests {
             },
         );
         assert!(!mgr.send_versioned_nudge("s1", 1, "/ctx.md").0);
-        assert_eq!(mgr.send_projects_nudge("s1"), Ok(false));
+        assert_eq!(mgr.send_projects_nudge("s1"), Ok(ProjectsNudge::NoAgent));
         assert_eq!(typed.text(), "");
         let s = session.lock().unwrap();
         assert!(s.pending_nudge.is_none() && !s.pending_projects_nudge);
@@ -845,8 +941,10 @@ mod tests {
             version: 2,
             file_path: "/ctx.md".into(),
         });
-        PtyManager::deliver_pending_nudge_with_writer(&writer, &mut s, false);
-        assert!(typed.text().starts_with("Read the file at /ctx.md"));
+        PtyManager::deliver_pending_nudge_with_writer(&writer, &mut s, false, true);
+        assert!(typed
+            .text()
+            .starts_with("\x1b[200~Read the file at /ctx.md"));
         assert!(!typed.text().contains("HERMES_CONTEXT"));
         assert!(!s.pending_projects_nudge);
 
@@ -856,9 +954,139 @@ mod tests {
             version: 2,
             file_path: "/ctx.md".into(),
         });
-        PtyManager::deliver_pending_nudge_with_writer(&writer, &mut s, false);
-        assert!(typed.text().ends_with(PROJECTS_NUDGE));
+        PtyManager::deliver_pending_nudge_with_writer(&writer, &mut s, false, true);
+        assert!(typed
+            .text()
+            .ends_with(&format!("{PROJECTS_NUDGE}\x1b[201~\r")));
         assert!(!s.pending_projects_nudge);
+    }
+
+    fn manager_with(
+        session: &Arc<StdMutex<crate::pty::models::Session>>,
+        analyzer: &Arc<StdMutex<OutputAnalyzer>>,
+        typed: &Typed,
+    ) -> PtyManager {
+        let mut mgr = PtyManager::new();
+        mgr.sessions.insert(
+            "s1".to_string(),
+            super::PtySession {
+                transport: Box::new(CountingPty(Arc::default())),
+                writer: Arc::new(StdMutex::new(
+                    Box::new(typed.clone()) as Box<dyn std::io::Write + Send>
+                )),
+                input: None,
+                session: Arc::clone(session),
+                analyzer: Arc::clone(analyzer),
+                shell_integration: super::shell_integration::ShellIntegration::None,
+                hermes_suggestions: false,
+                size: (24, 80),
+                sized: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+            },
+        );
+        mgr
+    }
+
+    /// Claude Code 2.1.296 took the nudge typed in one burst as a paste: its
+    /// Enter became a new line and the nudge sat in the input, never sent.
+    #[test]
+    fn a_line_is_submitted_as_a_bracketed_paste_or_with_enter_after_it() {
+        let typed = Typed::default();
+        let writer: Arc<StdMutex<Box<dyn std::io::Write + Send>>> =
+            Arc::new(StdMutex::new(Box::new(typed.clone())));
+        PtyManager::submit_line(&writer, "hello there", true).unwrap();
+        assert_eq!(typed.text(), "\x1b[200~hello there\x1b[201~\r");
+
+        // No bracketed paste: the line, then Enter as a write of its own.
+        let typed = Typed::default();
+        let writer: Arc<StdMutex<Box<dyn std::io::Write + Send>>> =
+            Arc::new(StdMutex::new(Box::new(typed.clone())));
+        PtyManager::submit_line(&writer, "/read a.md", false).unwrap();
+        assert_eq!(typed.text(), "/read a.md");
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while typed.text() == "/read a.md" && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert_eq!(typed.text(), "/read a.md\r");
+    }
+
+    /// After a restart, a long session reattaches with only the host's last
+    /// output: Claude's banner is gone from it, so it was not recognised and
+    /// the nudge was dropped without a word.
+    #[test]
+    fn a_projects_nudge_reaches_the_agent_hermes_started_when_its_banner_is_gone() {
+        let typed = Typed::default();
+        let mut s = waiting_claude();
+        s.detected_agent = None;
+        s.ai_provider = Some("claude".into());
+        let session = Arc::new(StdMutex::new(s));
+        let analyzer = Arc::new(StdMutex::new(OutputAnalyzer::new()));
+        let mgr = manager_with(&session, &analyzer, &typed);
+        assert_eq!(mgr.send_projects_nudge("s1"), Ok(ProjectsNudge::Sent));
+        assert!(typed.text().starts_with(PROJECTS_NUDGE));
+
+        // A plain terminal: no agent, nothing typed.
+        let typed = Typed::default();
+        session.lock().unwrap().ai_provider = None;
+        let mgr = manager_with(&session, &analyzer, &typed);
+        assert_eq!(mgr.send_projects_nudge("s1"), Ok(ProjectsNudge::NoAgent));
+        assert_eq!(typed.text(), "");
+        assert_eq!(
+            PtyManager::new().send_projects_nudge("gone"),
+            Ok(ProjectsNudge::NoAgent)
+        );
+    }
+
+    /// A nudge kept while the person had text on the line went out only on
+    /// the reader thread's own change to NeedsInput. Claude's idle comes from
+    /// the silence thread, and an agent already waiting has no change left.
+    #[test]
+    fn a_kept_nudge_goes_out_once_the_agent_waits_with_an_empty_line() {
+        let typed = Typed::default();
+        let writer: Arc<StdMutex<Box<dyn std::io::Write + Send>>> =
+            Arc::new(StdMutex::new(Box::new(typed.clone())));
+        let mut s = waiting_claude();
+        s.phase = SessionPhase::Idle;
+        s.pending_projects_nudge = true;
+        let session = StdMutex::new(s);
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b[?2004h");
+        a.is_busy = false;
+        a.typed_line.feed(b"hello\x7f\x7f\x7f\x7f\x7f");
+        let analyzer = StdMutex::new(a);
+        let tick = |shell_at_prompt: bool| {
+            PtyManager::deliver_pending_nudge_when_waiting(&writer, &session, &analyzer, || {
+                shell_at_prompt
+            })
+        };
+
+        // Text may still be on the line: kept.
+        tick(false);
+        assert_eq!(typed.text(), "");
+
+        // The line ended (Ctrl+U) but the agent is still working: kept.
+        analyzer.lock().unwrap().typed_line.feed(b"\x15");
+        analyzer.lock().unwrap().is_busy = true;
+        tick(false);
+        assert_eq!(typed.text(), "");
+
+        // Quiet again, but the agent has exited to the shell: kept.
+        analyzer.lock().unwrap().is_busy = false;
+        tick(true);
+        assert_eq!(typed.text(), "");
+
+        // The agent waits with an empty line, no phase change needed: sent.
+        tick(false);
+        assert_eq!(
+            typed.text(),
+            format!("\x1b[200~{PROJECTS_NUDGE}\x1b[201~\r")
+        );
+        assert!(!session.lock().unwrap().pending_projects_nudge);
+        tick(false);
+        assert_eq!(
+            typed.text(),
+            format!("\x1b[200~{PROJECTS_NUDGE}\x1b[201~\r"),
+            "once"
+        );
     }
 
     #[test]

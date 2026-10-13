@@ -345,6 +345,11 @@ pub struct OutputAnalyzer {
     /// is true the input path skips the line-buffer machinery so random
     /// keystrokes typed at the TUI don't get recorded as shell commands.
     pub in_alternate_screen: bool,
+    /// The program in the terminal turned on bracketed paste (DEC private
+    /// mode 2004) and has not turned it off. Such a program (Claude Code,
+    /// Codex) reads a fast burst of text as a paste, in which Enter is only
+    /// a new line; see `PtyManager::submit_line`.
+    pub bracketed_paste: bool,
     /// Streaming escape-sequence parser for OSC reports. Holds a partial
     /// sequence from one read until the rest arrives in the next.
     osc_parser: vte::Parser,
@@ -560,6 +565,7 @@ impl OutputAnalyzer {
             launch_cd_check_remaining: 0,
             launch_cd_failed: false,
             in_alternate_screen: false,
+            bracketed_paste: false,
             osc_parser: vte::Parser::new(),
             osc_open_len: 0,
             pending_notifications: Vec::new(),
@@ -587,6 +593,11 @@ impl OutputAnalyzer {
         // ANSI escapes are stripped. Used by the input path to suppress
         // line-buffer recording while a TUI owns the screen.
         Self::update_alt_screen_state(&mut self.in_alternate_screen, raw);
+        Self::update_dec_mode(
+            &mut self.bracketed_paste,
+            raw,
+            &[(b"\x1b[?2004h", true), (b"\x1b[?2004l", false)],
+        );
         self.snapshot.feed(raw);
 
         // Strip ANSI escapes once — reused for busy detection, cost/token scanning,
@@ -1133,8 +1144,14 @@ impl OutputAnalyzer {
             (b"\x1b[?47h", true),
             (b"\x1b[?47l", false),
         ];
+        Self::update_dec_mode(state, raw, PATTERNS);
+    }
+
+    /// Set `state` from the last of `patterns` (a mode's set/reset sequences)
+    /// found in `raw`; unchanged when there is none.
+    fn update_dec_mode(state: &mut bool, raw: &[u8], patterns: &[(&[u8], bool)]) {
         let mut latest: Option<(usize, bool)> = None;
-        for (needle, enter) in PATTERNS {
+        for (needle, enter) in patterns {
             if needle.is_empty() || raw.len() < needle.len() {
                 continue;
             }
@@ -1561,6 +1578,18 @@ mod tests {
 
         a.process(b"\x1b[?1049l");
         assert!(!a.in_alternate_screen, "should have left alt screen");
+    }
+
+    #[test]
+    fn bracketed_paste_follows_the_programs_last_word() {
+        let mut a = OutputAnalyzer::new();
+        assert!(!a.bracketed_paste);
+        a.process(b"\x1b[?25l\x1b[?2004h\x1b[?1004hready");
+        assert!(a.bracketed_paste);
+        a.process(b"plain output");
+        assert!(a.bracketed_paste, "kept until the program turns it off");
+        a.process(b"\x1b[?2004l\x1b[?2004h\x1b[?2004l$ ");
+        assert!(!a.bracketed_paste, "the last toggle in a chunk wins");
     }
 
     #[test]
