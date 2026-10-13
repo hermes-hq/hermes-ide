@@ -66,7 +66,7 @@ vi.mock("@tauri-apps/api/core", () => ({
     throw new Error(`command ${cmd} not found`);
   }),
 }));
-vi.mock("@tauri-apps/api/path", () => ({ homeDir: vi.fn(async () => "/Users/test") }));
+vi.mock("@tauri-apps/api/path", () => ({ homeDir: vi.fn(async () => "/fixture-home") }));
 vi.mock("@tauri-apps/plugin-dialog", () => ({ open: vi.fn(async () => null) }));
 vi.mock("../api/settings", () => ({
   getSetting: vi.fn(async (k: string) => h.settings.get(k) ?? ""),
@@ -98,10 +98,10 @@ const project = (id: string, name: string, path: string, sessions: number, ago: 
   last_opened_at: ago === null ? null : sqlAgo(ago),
 });
 
-const ATLAS = "/Users/test/code/atlas";
-const BEACON = "/Users/test/code/beacon";
-const COBALT = "/Users/test/work/cobalt";
-const GONE = "/Users/test/old/gone-app";
+const ATLAS = "/fixture-home/code/atlas";
+const BEACON = "/fixture-home/code/beacon";
+const COBALT = "/fixture-home/work/cobalt";
+const GONE = "/fixture-home/old/gone-app";
 
 function doctorRow(id: string, name: string): DoctorRow {
   return { id, name, installed: true, version: "1.2.3", min_version: null, version_ok: null, signed_in: "yes", signals: "exact", resume: true, retired: false, retired_note: null, beta: false };
@@ -118,10 +118,10 @@ beforeEach(() => {
     project("p-atlas", "atlas", ATLAS, 20, HOUR),
     project("p-beacon", "beacon", BEACON, 10, 2 * DAY),
     project("p-cobalt", "cobalt", COBALT, 3, 10 * DAY),
-    project("p-delta", "delta", "/Users/test/code/delta", 2, 20 * DAY),
-    project("p-ember", "ember", "/Users/test/code/ember", 1, 40 * DAY),
-    project("p-fjord", "fjord", "/Users/test/notes/fjord", 1, 90 * DAY),
-    project("p-zephyr", "zephyr-docs", "/Users/test/code/zephyr/docs", 0, null),
+    project("p-delta", "delta", "/fixture-home/code/delta", 2, 20 * DAY),
+    project("p-ember", "ember", "/fixture-home/code/ember", 1, 40 * DAY),
+    project("p-fjord", "fjord", "/fixture-home/notes/fjord", 1, 90 * DAY),
+    project("p-zephyr", "zephyr-docs", "/fixture-home/code/zephyr/docs", 0, null),
     project("p-gone", "gone-app", GONE, 5, DAY, false),
   ];
   h.projectsFail = false;
@@ -200,7 +200,7 @@ describe("the project menu with no search", () => {
     expect(atlas.querySelector(".launcher-pm-ago")).toHaveTextContent("1h");
     expect(row(BEACON).querySelector(".launcher-pm-ago")).toHaveTextContent("2d");
     expect(row(COBALT).querySelector(".launcher-pm-ago")).toHaveTextContent("1w");
-    expect(row("/Users/test/notes/fjord").querySelector(".launcher-pm-ago")).toHaveTextContent("3mo");
+    expect(row("/fixture-home/notes/fjord").querySelector(".launcher-pm-ago")).toHaveTextContent("3mo");
     // The current project carries the rail and starts highlighted.
     expect(atlas).toHaveAttribute("data-current");
     expect(highlighted()).toBe(atlas);
@@ -271,10 +271,10 @@ describe("searching", () => {
   it("a typed path offers Use this folder first; Enter sets it as the project", async () => {
     await openLauncher();
     await openMenu();
-    await typeSearch("/Users/test/code/");
+    await typeSearch("/fixture-home/code/");
     const first = screen.getAllByRole("option")[0];
     expect(first).toHaveClass("launcher-pm-use");
-    expect(first).toHaveTextContent("Use this folder/Users/test/code/");
+    expect(first).toHaveTextContent("Use this folder/fixture-home/code/");
     expect(rowPaths()).toEqual(expect.arrayContaining([ATLAS, BEACON]));
     expect(rowPaths()).not.toContain(COBALT);
 
@@ -515,10 +515,10 @@ describe("remove from list", () => {
   });
 });
 
-const DELTA = "/Users/test/code/delta";
-const EMBER = "/Users/test/code/ember";
-const FJORD = "/Users/test/notes/fjord";
-const ZEPHYR = "/Users/test/code/zephyr/docs";
+const DELTA = "/fixture-home/code/delta";
+const EMBER = "/fixture-home/code/ember";
+const FJORD = "/fixture-home/notes/fjord";
+const ZEPHYR = "/fixture-home/code/zephyr/docs";
 const sectionNames = (label: string) => {
   const group = [...document.querySelectorAll(".launcher-pm-group")].find((g) => g.querySelector(".launcher-pm-section")?.textContent === label);
   return group ? [...group.querySelectorAll("[data-project-path] .launcher-pm-name")].map((n) => n.textContent) : null;
@@ -622,12 +622,12 @@ describe("extra folders in the project menu", () => {
   });
 
   it("says why a folder cannot be one: same repository (a worktree of it), inside or around the main project, missing", async () => {
-    const WORKTREE = "/Users/test/wt/atlas-fix";
+    const WORKTREE = "/fixture-home/wt/atlas-fix";
     h.probe.set(WORKTREE, repoProbe(ATLAS, "fix"));
     h.projects.push(
       project("p-wt", "atlas-fix", WORKTREE, 0, null),
-      project("p-inside", "atlas-site", "/Users/test/code/atlas/site", 0, null),
-      project("p-around", "code", "/Users/test/code", 0, null),
+      project("p-inside", "atlas-site", "/fixture-home/code/atlas/site", 0, null),
+      project("p-around", "code", "/fixture-home/code", 0, null),
     );
     await openLauncher();
     await openMenu();
@@ -636,8 +636,8 @@ describe("extra folders in the project menu", () => {
       expect(row(path)).toHaveAttribute("title", why);
       expect(detail(path)).toBe(why);
     };
-    blocked("/Users/test/code/atlas/site", "inside atlas");
-    blocked("/Users/test/code", "contains atlas");
+    blocked("/fixture-home/code/atlas/site", "inside atlas");
+    blocked("/fixture-home/code", "contains atlas");
     blocked(GONE, "Folder not found");
     // The worktree is read when it is checked: the same repository as atlas, so it is not added.
     expect(check(WORKTREE)).not.toBeDisabled();
@@ -654,7 +654,7 @@ describe("extra folders in the project menu", () => {
   });
 
   it("a second folder of the same repository as an extra one is refused too", async () => {
-    const OTHER = "/Users/test/wt/beacon-fix";
+    const OTHER = "/fixture-home/wt/beacon-fix";
     h.probe.set(OTHER, repoProbe(BEACON, "fix"));
     h.projects.push(project("p-bwt", "beacon-fix", OTHER, 0, null));
     await openLauncher();

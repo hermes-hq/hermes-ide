@@ -21,7 +21,7 @@ import type { CreateSessionOpts, SessionData } from "../types/session";
 import type { PlannedAgent, TaskLaunchRequest } from "../components/TaskLauncher";
 import type { LaunchChoice } from "../agent/capabilities/types";
 
-const PROJECTS: Record<string, string> = { "proj-main": "/Users/test/code/atlas", "proj-a": "/Users/test/code/plugins", "proj-b": "/Users/test/notes/docs" };
+const PROJECTS: Record<string, string> = { "proj-main": "/fixture-home/code/atlas", "proj-a": "/fixture-home/code/plugins", "proj-b": "/fixture-home/notes/docs" };
 const calls: { cmd: string; args: Record<string, unknown> }[] = [];
 
 function session(args: Record<string, unknown>) {

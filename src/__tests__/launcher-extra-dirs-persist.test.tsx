@@ -16,13 +16,13 @@ const calls: { cmd: string; args: Record<string, unknown> }[] = [];
 let settings: Record<string, string> = {};
 
 const ID = "88888888-8888-4888-8888-888888888888";
-const EXTRA = "/Users/test/code/plugins";
-const ATTACHED = "/Users/test/code/atlas";
+const EXTRA = "/fixture-home/code/plugins";
+const ATTACHED = "/fixture-home/code/atlas";
 
 function session(args: Record<string, unknown>) {
   const extra = (args.extraDirs as string[] | null) ?? [];
   return {
-    id: args.sessionId, label: args.label, color: "#888888", group: null, phase: "idle", working_directory: "/Users/test/code/atlas-wt",
+    id: args.sessionId, label: args.label, color: "#888888", group: null, phase: "idle", working_directory: "/fixture-home/code/atlas-wt",
     shell: "zsh", created_at: "2026-01-01T00:00:00Z", last_activity_at: "2026-01-01T00:00:00Z",
     workspace_paths: (args.workspacePaths as string[] | null) ?? [], detected_agent: null, ai_provider: "claude", context_injected: false,
     mode: args.mode ?? "terminal",
@@ -77,7 +77,7 @@ const saved = (extra: Record<string, unknown>) =>
   JSON.stringify({
     version: 2,
     sessions: [{
-      id: ID, label: "Claude", color: "#888888", group: null, working_directory: "/Users/test/code/atlas-wt",
+      id: ID, label: "Claude", color: "#888888", group: null, working_directory: "/fixture-home/code/atlas-wt",
       ai_provider: "claude", project_ids: [], mode: "terminal", agent_add_dirs: [ATTACHED], ...extra,
     }],
     layout: null,
