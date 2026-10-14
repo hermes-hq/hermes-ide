@@ -103,7 +103,8 @@ await runLauncherQa(
     let s = await picker(bridge);
     log(`  groups ${JSON.stringify(s.groups)}, first rows ${JSON.stringify(s.rows.slice(0, 5))}`);
     check(s.focused, "the search has the keyboard");
-    check(s.groups.some((g) => /For you/i.test(g)), "it opens on what fits (For you)");
+    // With nothing typed: Recent, then the Essentials (front doors), then For you.
+    check(s.groups.some((g) => /Essentials|For you/i.test(g)), "it opens on the Essentials and what fits (For you)");
     check(s.kinds.every((k) => k === "prompt" || k === "workflow"), "and with nothing typed it opens on tasks (personas and styles have their own filters)");
     check(s.inputInside && !s.listSideways, "the search stays inside the palette and the list never scrolls sideways");
     check(s.narrowestTitle > 150, `row titles have room (${Math.round(s.narrowestTitle)} px at the narrowest)`);

@@ -1945,6 +1945,17 @@ features:
       HOD-8:
         text: "Prompts (⌘J) works by keyboard from a session and from the launcher: filters, arrows, a readable preview with no template tags, Return to an empty required blank, ⌘Return inserts into Claude Code as a typed lead line plus one paste with no Enter; in the launcher it takes the sheet's place, the typed task fills the first blank and Return uses it as the task"
         scenarios: [HOD-prompts-keyboard.mjs]
+      HOD-9:
+        # Everyday prompts (catalog 2026.1014+): front doors, essentials,
+        # depth, intents and everyday-word routing from hodios.
+        text: "A new user's Library opens on \"What do you want to do?\" over the Essentials (the catalog's front doors, health ones labelled), narrowed by intent, with every domain browsable by category"
+        scenarios: [HOD-everyday-home.mjs]
+      HOD-10:
+        text: "\"trip\" shows Plan a trip first, then its specialists, then the rest in depth sections; \"plan a 5-day trip to lisbon\" is not empty and opens Plan a trip with Lisbon and 5 days filled in; \"diet\" shows Eat healthier first with the health label and note"
+        scenarios: [HOD-everyday-search.mjs]
+      HOD-11:
+        text: "Prompts (⌘J) from the launcher searches with the task already typed and leads with its front door, answers filled in; with nothing typed it shows the Essentials, never an alphabetical first page"
+        scenarios: [HOD-everyday-picker.mjs]
   README:
     name: "Every feature the README lists is proven in the real app"
     # docs/readme-claims.yml maps each README feature bullet to the scenario
