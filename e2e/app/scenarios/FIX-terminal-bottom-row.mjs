@@ -18,7 +18,9 @@
 // EXPECT at every step: the terminal's last row is drawn above the bar's top
 // edge and the status bar's, inside every box that clips it; the row the
 // program drew last ("BOTTOM-ROW <r>x<c>") is the terminal's last row; and
-// <r>, the PTY's row count, equals the rows the terminal shows.
+// <r>, the PTY's row count, equals the rows the terminal shows. A pane too
+// short for the bar's own row folds it into the pane header (ACT-8): the bar
+// is then there as the header's turns chip, above the terminal.
 //
 // A guard, not a fix: a report of an agent's bottom lines missing in a small
 // window turned out to be the agent leaving out its own footer when it has
@@ -57,6 +59,8 @@ const measure = (sid) => `
     if (getComputedStyle(el).overflowY !== "visible") clip = Math.min(clip, el.getBoundingClientRect().bottom);
   }
   const bar = pane.querySelector(".turn-bar")?.getBoundingClientRect() ?? null;
+  // A short pane folds the bar into its header (ACT-8): one chip above the terminal.
+  const folded = pane.querySelector(".turn-bar-compact")?.getBoundingClientRect() ?? null;
   const status = e2e.first(".status-bar")?.getBoundingClientRect() ?? null;
   const last = (window.__HERMES_E2E__.terminalTail(id, 1) || [""])[0];
   const m = /BOTTOM-ROW (\\d+)x(\\d+)/.exec(last);
@@ -67,6 +71,8 @@ const measure = (sid) => `
     screenBottom: Math.round(screen.bottom * 10) / 10,
     clipBottom: Math.round(clip * 10) / 10,
     barTop: bar ? Math.round(bar.top * 10) / 10 : null,
+    foldedBottom: folded ? Math.round(folded.bottom * 10) / 10 : null,
+    screenTop: Math.round(screen.top * 10) / 10,
     statusTop: status ? Math.round(status.top * 10) / 10 : null,
     window: innerWidth + "x" + innerHeight,
   };
@@ -78,7 +84,8 @@ function problems(s, { bar }) {
   if (s.ptyRows === null) out.push(`the terminal's last row is not the program's bottom row ("${s.lastRow}")`);
   else if (s.ptyRows !== s.rows || s.ptyCols !== s.cols) out.push(`the PTY is ${s.ptyRows}×${s.ptyCols} but the terminal shows ${s.rows}×${s.cols}`);
   if (s.screenBottom > s.clipBottom + 0.5) out.push(`the last row ends at ${s.screenBottom}, below the visible edge ${s.clipBottom}`);
-  if (bar && s.barTop === null) out.push("the Agent replies bar is not there");
+  if (bar && s.barTop === null && s.foldedBottom === null) out.push("the Agent replies bar is not there (neither under the terminal nor folded into the header)");
+  if (s.foldedBottom !== null && s.foldedBottom > s.screenTop + 0.5) out.push(`the folded bar ends at ${s.foldedBottom}, over the terminal's top ${s.screenTop}`);
   if (s.barTop !== null && s.screenBottom > s.barTop + 0.5) out.push(`the last row ends at ${s.screenBottom}, under the bar's top ${s.barTop}`);
   if (s.statusTop !== null && s.screenBottom > s.statusTop + 0.5) out.push(`the last row ends at ${s.screenBottom}, under the status bar's top ${s.statusTop}`);
   return out;
