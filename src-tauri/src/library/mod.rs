@@ -66,11 +66,12 @@ type UserInputs = (
     Vec<(String, String, f64)>,
 );
 
-/// An open library: one connection for reads, one for writes (sync and
-/// imports). WAL lets searches keep reading the old snapshot while an
-/// update commits.
+/// An open library: one connection for reads, one for searches (so a slow
+/// read never holds up typing), one for writes (sync and imports). WAL lets
+/// searches keep reading the old snapshot while an update commits.
 pub struct Library {
     pub reader: Mutex<Connection>,
+    searcher: Mutex<Connection>,
     pub writer: Mutex<Connection>,
     detect_cache: Mutex<HashMap<String, DetectedAt>>,
 }
@@ -183,18 +184,21 @@ pub fn open(app: &AppHandle) -> Result<Arc<Library>, String> {
             ),
         }
     }
-    let reader = Connection::open_with_flags(
-        &path,
-        rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
-    )
-    .map_err(|e| e.to_string())?;
-    reader
-        .execute_batch(
+    let read_conn = || -> Result<Connection, String> {
+        let c = Connection::open_with_flags(
+            &path,
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )
+        .map_err(|e| e.to_string())?;
+        c.execute_batch(
             "PRAGMA cache_size=-16000; PRAGMA mmap_size=268435456; PRAGMA busy_timeout=5000;",
         )
         .map_err(|e| e.to_string())?;
+        Ok(c)
+    };
     let lib = Arc::new(Library {
-        reader: Mutex::new(reader),
+        reader: Mutex::new(read_conn()?),
+        searcher: Mutex::new(read_conn()?),
         writer: Mutex::new(writer),
         detect_cache: Mutex::new(HashMap::new()),
     });
@@ -343,11 +347,22 @@ pub async fn library_search(
     context: Option<shelves::Context>,
 ) -> Result<search::SearchPage, String> {
     blocking(move || {
+        let started = Instant::now();
         let lib = open(&app)?;
         let ctx = context.unwrap_or_default();
         let signals = signals_for(&app, &lib, &ctx)?;
-        let r = lock(&lib.reader);
-        search::search(&r, &request, Some(&signals))
+        let signals_ms = started.elapsed().as_millis();
+        let r = lock(&lib.searcher);
+        let waited_ms = started.elapsed().as_millis() - signals_ms;
+        let page = search::search(&r, &request, Some(&signals));
+        let total_ms = started.elapsed().as_millis();
+        if total_ms > 250 {
+            log::warn!(
+                "[library] slow search: {total_ms} ms (signals {signals_ms} ms, waiting for the connection {waited_ms} ms, search {} ms)",
+                total_ms - signals_ms - waited_ms
+            );
+        }
+        page
     })
     .await
 }
