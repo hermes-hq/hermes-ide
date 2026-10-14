@@ -241,3 +241,18 @@ export function recentIds(states: readonly ItemState[], limit = 50): string[] {
     .slice(0, limit)
     .map((s) => s.itemId);
 }
+
+// ── The search box's facet hint ──────────────────────────────────────
+
+/** A role that writes software: the "cat:testing works:codex" hint is for them. */
+export function isDeveloperRole(role: string): boolean {
+  return /(^|-)(engineer|developer)$/.test(role) || role === "tech-lead";
+}
+
+// The keys the backend's query language takes (search.rs key_spec).
+const FACET_TOKEN = /(^|\s)(kind|cat|category|domain|sub|stage|role|stack|subject|works|in|out|risk|tag|tier|status|level|lang|depth|intent|topic|ess|adv):\S/;
+
+/** A search that filters with the query language ("cat:testing"). */
+export function usesFacets(query: string): boolean {
+  return FACET_TOKEN.test(query);
+}

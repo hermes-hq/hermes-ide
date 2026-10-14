@@ -116,6 +116,7 @@ const DIET = {
 };
 
 const states: Array<Record<string, unknown>> = [];
+let roles: string[] = [];
 
 function backend(cmd: string, args: Record<string, unknown>) {
   switch (cmd) {
@@ -129,7 +130,7 @@ function backend(cmd: string, args: Record<string, unknown>) {
         personalised: true,
         stack: [],
         projectAgents: [],
-        profile: { roles: [], domains: [], categories: [], subjects: [], stack: [] },
+        profile: { roles, domains: [], categories: [], subjects: [], stack: [] },
         domains: [
           { id: "software-engineering", label: "Software engineering", count: 2096, mine: false, categories: [{ id: "code-review", label: "Code review", count: 80 }] },
           { id: "travel", label: "Travel", count: 177, mine: false, categories: [{ id: "trip-planning", label: "Trip planning", count: 60 }] },
@@ -187,6 +188,7 @@ function backend(cmd: string, args: Record<string, unknown>) {
 beforeEach(() => {
   h.writes.length = 0;
   states.length = 0;
+  roles = [];
   h.invoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => backend(cmd, args));
 });
 afterEach(() => cleanup());
@@ -257,6 +259,9 @@ describe("The everyday Library", () => {
       fireEvent.click(view.container.querySelector('.lib-group--section[data-section="advanced"]')!);
     });
     expect(view.container.querySelector('.lib-row[data-entry="plan-school-field-trip"]')).toBeNull();
+    // The detail badges only an exception: this entry is experimental.
+    expect([...view.container.querySelectorAll(".lib-detail-meta > *")].map((b) => b.textContent)).toEqual(["v1.0.0", "Experimental", "Available offline"]);
+    expect(view.container.querySelector(".lib-body--open")).toBeTruthy();
     // An automatic selection is not an "open": nothing went to Recent.
     expect(h.invoke.mock.calls.some((c) => c[0] === "library_record_open")).toBe(false);
   });
@@ -271,6 +276,32 @@ describe("The everyday Library", () => {
     await type(view, "zzzqqq");
     await waitFor(() => expect(view.container.querySelector(".lib-empty")?.textContent).toContain("Nothing matches “zzzqqq”."));
     expect(view.container.querySelector(".lib-empty")?.textContent).not.toContain("filters");
+  });
+
+  it("shows no status badge for an incubating entry", async () => {
+    const incubating = { ...TRIP, row: { ...TRIP.row, status: "incubating" } };
+    h.invoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => (cmd === "library_get" ? incubating : backend(cmd, args)));
+    const view = mount();
+    await waitFor(() => expect(view.container.querySelector('.lib-card[data-entry="plan-a-trip"]')).toBeTruthy());
+    await act(async () => {
+      fireEvent.click(view.container.querySelector('.lib-card[data-entry="plan-a-trip"]')!);
+    });
+    await waitFor(() => expect(view.container.querySelector(".lib-detail-meta")).toBeTruthy());
+    expect([...view.container.querySelectorAll(".lib-detail-meta > *")].map((b) => b.textContent)).toEqual(["v1.0.0", "Available offline"]);
+  });
+
+  it("keeps the query-language hint for developers, or once it has been used", async () => {
+    const view = mount();
+    await waitFor(() => expect(view.container.querySelector("[data-testid=library-essentials]")).toBeTruthy());
+    expect(view.container.querySelector(".lib-search-hint")).toBeNull();
+    await type(view, "trip cat:trip-planning");
+    await waitFor(() => expect(view.container.querySelector(".lib-search-hint")?.textContent).toBe("try cat:testing works:codex"));
+    const { setSetting } = await import("../api/settings");
+    expect(setSetting).toHaveBeenCalledWith("library_facets_used", "true");
+    cleanup();
+    roles = ["frontend-engineer"];
+    const dev = mount();
+    await waitFor(() => expect(dev.container.querySelector(".lib-search-hint")).toBeTruthy());
   });
 
   it("puts an opened entry in Recent", async () => {

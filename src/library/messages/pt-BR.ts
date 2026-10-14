@@ -25,7 +25,7 @@ export const libraryPtBR: TranslationMessages = {
   "library.badge.new": "Novo",
   "library.badge.updated": "Atualizado",
   "library.badge.installed": "Instalado",
-  "library.badge.incubating": "Em incubação",
+  "library.badge.experimental": "Experimental",
   "library.badge.offline": "Disponível offline",
   "library.reason.pinned": "Fixado por você",
   "library.reason.used": "Usado {count} vezes recentemente",

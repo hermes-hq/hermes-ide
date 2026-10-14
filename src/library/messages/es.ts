@@ -25,7 +25,7 @@ export const libraryEs: TranslationMessages = {
   "library.badge.new": "Nuevo",
   "library.badge.updated": "Actualizado",
   "library.badge.installed": "Instalado",
-  "library.badge.incubating": "En incubación",
+  "library.badge.experimental": "Experimental",
   "library.badge.offline": "Disponible sin conexión",
   "library.reason.pinned": "Lo fijaste tú",
   "library.reason.used": "Usado {count} veces hace poco",

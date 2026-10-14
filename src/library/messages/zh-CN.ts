@@ -25,7 +25,7 @@ export const libraryZhCN: TranslationMessages = {
   "library.badge.new": "新",
   "library.badge.updated": "已更新",
   "library.badge.installed": "已安装",
-  "library.badge.incubating": "孵化中",
+  "library.badge.experimental": "实验性",
   "library.badge.offline": "可离线使用",
   "library.reason.pinned": "你固定的",
   "library.reason.used": "最近使用了 {count} 次",

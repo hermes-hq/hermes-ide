@@ -12,7 +12,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Chip, CloseButton, Segmented } from "../ui";
-import { HEALTH_ADVICE, depthSections, fillFromLeftover, pairsWith, recentIds } from "../../library/everyday";
+import { HEALTH_ADVICE, depthSections, fillFromLeftover, isDeveloperRole, pairsWith, recentIds, usesFacets } from "../../library/everyday";
 import { argsOf } from "../../library/render";
 import { useI18n } from "../../i18n/I18nProvider";
 import { useLibraryMessages } from "../../library/messages";
@@ -108,6 +108,8 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
   const [fresh, setFresh] = useState(false);
   const [interestsOpen, setInterestsOpen] = useState(false);
   const [interestsOffered, setInterestsOffered] = useState(true);
+  // The facet hint is for developers: a developer role, or the query language used once.
+  const [facetsUsed, setFacetsUsed] = useState(false);
   const searchSeq = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
   // The routed front door was selected for the person (not opened by them).
@@ -159,7 +161,15 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     getSetting("library_onboarded")
       .then((v) => setInterestsOffered(v === "true"))
       .catch(() => {});
+    getSetting("library_facets_used")
+      .then((v) => setFacetsUsed(v === "true"))
+      .catch(() => {});
   }, [refreshStatus, refreshStates]);
+  useEffect(() => {
+    if (facetsUsed || !usesFacets(query)) return;
+    setFacetsUsed(true);
+    void setSetting("library_facets_used", "true").catch(() => {});
+  }, [query, facetsUsed]);
 
   const loadShelves = useCallback(() => {
     libraryShelves(context)
@@ -663,7 +673,7 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
         </div>
       )}
 
-      <div className="lib-body">
+      <div className={selection ? "lib-body lib-body--open" : "lib-body"}>
         <nav className="lib-nav" aria-label={t("library.nav.label")}>
           {navItems.map((n) => (
             <div
@@ -720,6 +730,7 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
         <div className="lib-main">
           <LibraryAsk
             compact={showSearch && !interestsOpen}
+            hint={facetsUsed || (shelves?.profile.roles ?? []).some(isDeveloperRole)}
             inputRef={inputRef}
             query={query}
             rows={rows}

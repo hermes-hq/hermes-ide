@@ -17,6 +17,9 @@ import type { LegacyItem } from "../../library/legacy";
 import type { EntryArg, EntryDetail, LibraryHit, Reason } from "../../library/types";
 import { KindTag, reasonText } from "./LibraryParts";
 
+/** Statuses that say nothing worth a badge (the catalog's usual ones). */
+const QUIET_STATUSES = new Set(["", "incubating", "stable"]);
+
 type Core = Awaited<ReturnType<typeof loadCore>>;
 
 export interface SessionChoice {
@@ -150,6 +153,8 @@ export function LibraryDetail({
   const canInstall = !legacy && !!entry && !!installAgentId && installTarget(installAgentId, entry.row.kind) !== null;
   const blocked = missing.length > 0 ? t("library.detail.fillFirst", { name: missing.join(", ") }) : null;
   const versionLabel = legacy ? null : entry ? `v${entry.row.v}` : null;
+  // Nearly every entry is incubating: only an exception gets a badge.
+  const status = !legacy && entry && !QUIET_STATUSES.has(entry.row.status) ? entry.row.status : null;
   const changelog = (body?.fm.changelog ?? []) as { version: string; note: string }[];
   const row = entry?.row as (EntryDetail["row"] & { ess?: number; adv?: string[] }) | undefined;
   // hodios essentials: 2 marks a front door.
@@ -192,7 +197,7 @@ export function LibraryDetail({
         )}
         <div className="lib-detail-meta">
           {versionLabel && <Badge>{versionLabel}</Badge>}
-          {entry?.row.status === "incubating" && <Badge>{t("library.badge.incubating")}</Badge>}
+          {status && <Badge>{status === "experimental" ? t("library.badge.experimental") : status}</Badge>}
           {entry?.body && <Badge tone="success">{t("library.badge.offline")}</Badge>}
           {pinned && <Badge tone="warning">{t("library.badge.pinned")}</Badge>}
           {entry?.isNew && <Badge tone="info">{t("library.badge.updated")}</Badge>}

@@ -31,6 +31,7 @@ export function suggestDoors(essentials: readonly LibraryHit[], route: RoutePage
 
 export function LibraryAsk({
   compact = false,
+  hint = false,
   inputRef,
   query,
   rows,
@@ -42,6 +43,8 @@ export function LibraryAsk({
 }: {
   /** Over results: the question is not repeated, the list gets the room. */
   compact?: boolean;
+  /** The query-language hint under the box (developers only). */
+  hint?: boolean;
   inputRef: RefObject<HTMLInputElement | null>;
   query: string;
   rows: number;
@@ -111,7 +114,7 @@ export function LibraryAsk({
           }}
           autoFocus
         />
-        <span className="lib-search-hint">{t("library.search.hint")}</span>
+        {hint && <span className="lib-search-hint">{t("library.search.hint")}</span>}
       </div>
       {list.length > 0 && (
         <div className="lib-suggest" id="lib-suggest" role="listbox" aria-label={t("library.suggest.label")} data-testid="library-suggest">

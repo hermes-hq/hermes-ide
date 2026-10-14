@@ -12,10 +12,12 @@ import {
   domainGroups,
   fillFromLeftover,
   filterEssentials,
+  isDeveloperRole,
   pairsWith,
   recentIds,
   taskQuery,
   usedWhen,
+  usesFacets,
 } from "../library/everyday";
 import { buildItems } from "../library/promptPicker";
 import { suggestDoors } from "../components/library/LibraryAsk";
@@ -209,5 +211,20 @@ describe("Prompts (⌘J) groups", () => {
   it("with a query leads with the front door, then the specialists", () => {
     const items = buildItems({ ...base, query: "plan a 5-day trip to lisbon", essentials: [], best: [hit("plan-a-trip", { door: true })], refine: [hit("plan-itinerary")], hits: [hit("plan-road-trip"), hit("plan-a-trip")] });
     expect(items.map((i) => i.key)).toEqual(["group:best", "lib:plan-a-trip", "group:refine", "lib:plan-itinerary", "group:library", "lib:plan-road-trip"]);
+  });
+});
+
+describe("The search box's facet hint", () => {
+  it("is for developer roles only", () => {
+    for (const r of ["software-engineer", "frontend-engineer", "ml-engineer", "tech-lead", "developer"]) expect(isDeveloperRole(r)).toBe(true);
+    for (const r of ["traveler", "home-cook", "parent", "product-manager", "designer", "individual"]) expect(isDeveloperRole(r)).toBe(false);
+  });
+
+  it("knows a search that used the query language", () => {
+    expect(usesFacets("cat:testing")).toBe(true);
+    expect(usesFacets("flaky works:codex")).toBe(true);
+    expect(usesFacets("plan a trip: lisbon")).toBe(false);
+    expect(usesFacets("http://example.test")).toBe(false);
+    expect(usesFacets("cat:")).toBe(false);
   });
 });

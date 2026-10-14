@@ -25,7 +25,7 @@ export const libraryHi: TranslationMessages = {
   "library.badge.new": "नया",
   "library.badge.updated": "अपडेट हुआ",
   "library.badge.installed": "इंस्टॉल है",
-  "library.badge.incubating": "परीक्षण में",
+  "library.badge.experimental": "प्रायोगिक",
   "library.badge.offline": "ऑफ़लाइन उपलब्ध",
   "library.reason.pinned": "आपने पिन किया",
   "library.reason.used": "हाल में {count} बार उपयोग किया",

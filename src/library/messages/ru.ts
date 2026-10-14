@@ -25,7 +25,7 @@ export const libraryRu: TranslationMessages = {
   "library.badge.new": "Новое",
   "library.badge.updated": "Обновлено",
   "library.badge.installed": "Установлено",
-  "library.badge.incubating": "На проверке",
+  "library.badge.experimental": "Экспериментальный",
   "library.badge.offline": "Доступно офлайн",
   "library.reason.pinned": "Вы закрепили",
   "library.reason.used": "Недавно использовано {count} раз",

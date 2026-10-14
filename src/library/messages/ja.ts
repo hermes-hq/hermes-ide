@@ -25,7 +25,7 @@ export const libraryJa: TranslationMessages = {
   "library.badge.new": "新着",
   "library.badge.updated": "更新",
   "library.badge.installed": "インストール済み",
-  "library.badge.incubating": "試験中",
+  "library.badge.experimental": "実験的",
   "library.badge.offline": "オフラインで利用可",
   "library.reason.pinned": "あなたがピン留め",
   "library.reason.used": "最近 {count} 回使用",

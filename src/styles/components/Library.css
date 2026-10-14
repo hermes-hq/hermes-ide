@@ -12,6 +12,7 @@
 }
 
 .library-view {
+  container: library / inline-size;
   position: absolute;
   inset: 0;
   z-index: 20;
@@ -609,6 +610,16 @@
 }
 
 .lib-detail--empty { padding: var(--space-4); }
+
+/* An entry open beside the results: the results keep a readable column
+   (about 340 px) and the detail gives up width first; a narrow Library
+   also hides its left list until the entry closes. */
+.lib-body--open .lib-main { min-width: calc(var(--space-1) * 85); }
+.lib-body--open .lib-detail { flex: 0 1 auto; min-width: calc(var(--space-1) * 80); }
+
+@container library (max-width: 976px) {
+  .lib-body--open .lib-nav { display: none; }
+}
 
 .lib-detail-scroll {
   flex: 1;
