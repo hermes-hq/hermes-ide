@@ -344,8 +344,18 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     if (!lead) return;
     const mineSelected = selection && !(selection.type === "hit" && selection.id === autoSelected.current);
     if (mineSelected || (selection?.type === "hit" && selection.id === lead.id)) return;
-    autoSelected.current = lead.id;
-    setSelection({ type: "hit", id: lead.id, reasons: lead.reasons });
+    // After the results are painted: opening the entry never holds them back.
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const frame = requestAnimationFrame(() => {
+      timer = setTimeout(() => {
+        autoSelected.current = lead.id;
+        setSelection({ type: "hit", id: lead.id, reasons: lead.reasons });
+      }, 0);
+    });
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
   }, [lead, selection]);
   // The best match's questions take the words the search left over.
   const answers = useMemo(() => {

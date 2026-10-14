@@ -66,7 +66,9 @@ export function useBarLayout(rowRef: RefObject<HTMLElement | null>, signature: s
     const el = rowRef.current;
     if (!el || layout === "collapsed" || width === 0) return;
     if (el.scrollWidth > el.clientWidth + 1) {
-      needs.current = { ...needs.current, [layout]: el.scrollWidth };
+      // More than the width last read, which can be stale (the row shrank
+      // before the observer said so): the next pick always moves on.
+      needs.current = { ...needs.current, [layout]: Math.max(el.scrollWidth, width + 1) };
       remeasure();
     }
   });
