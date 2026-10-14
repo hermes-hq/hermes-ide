@@ -147,7 +147,10 @@ await runLauncherQa(
         `),
       );
       const done = typed[typed.length - 1];
-      if (done.ms > 300) log(`  "${q}" took ${done.ms} ms: ${done.steps.join("; ")}`);
+      if (done.ms > 300) {
+        log(`  "${q}" took ${done.ms} ms: ${done.steps.join("; ")}`);
+        log(`  searches the page sent: ${JSON.stringify(await bridge.eval("return (window.__libSearchLog || []).slice(-6)"))}`);
+      }
       typed[typed.length - 1] = done.ms;
       await search(bridge, q);
     }

@@ -245,11 +245,17 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     async (cursor: string | null) => {
       const seq = ++searchSeq.current;
       setSearching(true);
+      // Test builds only: a log of every search the page sends (the latency scenario prints it when slow).
+      const trace = import.meta.env.VITE_HERMES_E2E === "1"
+        ? (((window as unknown as { __libSearchLog?: unknown[] }).__libSearchLog ??= []) as unknown[])
+        : null;
+      const t0 = performance.now();
       try {
         const res = await librarySearch(
           { query, filters, cursor, limit: 50, sort, personalise: !showEverything, includeHidden: nav === "hidden", counts: !cursor },
           context,
         );
+        trace?.push({ seq, query, t0: Math.round(t0), ms: Math.round(performance.now() - t0), stale: seq !== searchSeq.current, works: context?.works?.length ?? null });
         if (seq !== searchSeq.current) return; // a newer search answered
         setAnswered(query);
         setPage((p) => (cursor && p ? { ...res, total: p.total, totalCapped: p.totalCapped, kindCounts: p.kindCounts } : res));
