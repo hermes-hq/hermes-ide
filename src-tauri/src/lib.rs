@@ -1308,6 +1308,8 @@ pub fn run() {
             library::library_vocab,
             library::library_detect,
             library::library_record_use,
+            library::library_record_open,
+            library::library_essentials,
             library::library_set_item,
             library::library_item_states,
             library::library_get_profile,

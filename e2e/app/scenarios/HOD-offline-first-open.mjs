@@ -106,14 +106,15 @@ await runLauncherQa(
 
     await bridge.waitFor(
       "the For you shelves",
-      `return e2e.all(".lib-shelf .lib-card").length > 0;`,
+      `return e2e.all(".lib-shelf .lib-card, .lib-essentials .lib-card").length > 0;`,
       { timeoutMs: 20_000 },
     );
     const home = await libraryState(bridge);
     await bridge.screenshot(join(evidenceDir, "01-library-home.png"));
-    const cards = home.shelves.reduce((n, s) => n + s.cards.length, 0);
+    // The Essentials (front doors) and the shelves; never the whole catalog.
+    const cards = home.shelves.reduce((n, s) => n + s.cards.length, 0) + home.essentials.length;
     log(
-      `  home: ${home.shelves.map((s) => `${s.id}(${s.cards.length})`).join(", ")}`,
+      `  home: essentials(${home.essentials.length}), ${home.shelves.map((s) => `${s.id}(${s.cards.length})`).join(", ")}`,
     );
     check(
       home.shelves.length > 0 &&

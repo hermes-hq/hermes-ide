@@ -1,19 +1,23 @@
-// Search results: one list (a listbox, 56 px rows, about 30 in the DOM at
-// a time) grouped Library, then Hermes classics, then My templates. The
-// next page is asked for before the end is reached.
+// Search results: a plain need's front door first ("Start here", with the
+// words it took from the search), the specialists to narrow to, then one
+// list (a listbox, 56 px rows, about 30 in the DOM at a time): the
+// Library's matches in depth sections in the catalog's order (Start here,
+// Specific, Advanced: each with its count, each can be folded), then
+// Hermes classics, then My templates. The next page is asked for before
+// the end is reached.
 
 import { useEffect } from "react";
-import { Button } from "../ui";
+import { Button, Chip } from "../ui";
 import { useI18n } from "../../i18n/I18nProvider";
 import type { LegacyItem } from "../../library/legacy";
-import type { LibraryHit } from "../../library/types";
-import { HitBadges, HitRow, WorksMarks, reasonText } from "./LibraryParts";
+import type { LibraryHit, RoutePage } from "../../library/types";
+import { CareTag, DoorTag, HitBadges, HitRow, reasonText } from "./LibraryParts";
 import { useVirtualRows } from "./useVirtualRows";
 
 export const ROW_HEIGHT = 56;
 
 export type ResultItem =
-  | { type: "header"; key: string; label: string; count: string }
+  | { type: "header"; key: string; label: string; count: string; section?: string; open?: boolean }
   | { type: "hit"; key: string; hit: LibraryHit }
   | { type: "legacy"; key: string; item: LegacyItem };
 
@@ -25,10 +29,14 @@ export function LibraryResults({
   filtered,
   loading,
   selectedKey,
-  installedTargets,
   pinned,
   personal,
+  route,
+  filledFromSearch,
+  partial,
   onOpen,
+  onOpenId,
+  onToggleSection,
   onMore,
   onClear,
 }: {
@@ -39,10 +47,17 @@ export function LibraryResults({
   filtered: boolean;
   loading: boolean;
   selectedKey: string | null;
-  installedTargets: ReadonlySet<string>;
   pinned: ReadonlySet<string>;
   personal: boolean;
+  /** The front door a plain need routes to, and its specialists. */
+  route?: RoutePage | null;
+  /** The front door's answers taken from the search ("Lisbon · 5 days"). */
+  filledFromSearch?: string | null;
+  /** No entry has every word: the list has those with most of them. */
+  partial?: boolean;
   onOpen: (item: ResultItem) => void;
+  onOpenId: (hit: LibraryHit) => void;
+  onToggleSection: (section: string) => void;
   onMore: () => void;
   onClear: () => void;
 }) {
@@ -65,18 +80,57 @@ export function LibraryResults({
   };
 
   const libraryCount = items.filter((i) => i.type === "hit").length;
+  const door = route?.to ?? null;
   return (
     <div className="lib-center lib-center--results" data-testid="library-results">
+      {[route?.exact ?? null, door].map(
+        (front) =>
+          front && (
+            <div
+              key={front.id}
+              className={selectedKey === `hit:${front.id}` ? "lib-front lib-front--selected" : "lib-front"}
+              data-testid={front === door ? "library-front" : "library-exact"}
+              data-entry={front.id}
+            >
+              <div className="lib-front-text">
+                <span className="lib-front-title">
+                  {front.door && <DoorTag />} <b>{front.title}</b>
+                </span>
+                <span className="lib-front-desc">{front.description}</span>
+                {filledFromSearch && front.id === (route?.exact ?? door)?.id && (
+                  <span className="lib-front-filled" data-testid="library-filled">
+                    {t("library.results.filled", { words: filledFromSearch })}
+                  </span>
+                )}
+                <CareTag adv={front.adv} />
+              </div>
+              <Button variant={front === door && !route?.exact ? "primary" : "secondary"} size="sm" className="lib-front-open" onClick={() => onOpenId(front)}>
+                {t("library.results.open")}
+              </Button>
+            </div>
+          ),
+      )}
+      {route && route.refine.length > 0 && (
+        <div className="lib-refine" role="group" aria-label={t("library.results.narrow")} data-testid="library-refine">
+          <span className="lib-muted">{t("library.results.narrow")}</span>
+          {route.refine.map((h) => (
+            <Chip key={h.id} size="sm" onClick={() => onOpenId(h)} data-entry={h.id}>
+              {h.title}
+            </Chip>
+          ))}
+        </div>
+      )}
       <div className="lib-results-head">
         <span>
           <b data-testid="library-total">{totalCapped ? t("library.results.totalCapped", { count: total }) : t("library.results.total", { count: total })}</b>
           {filtered && <span className="lib-muted"> · {t("library.results.narrowed")}</span>}
+          {partial && <span className="lib-muted"> · {t("library.results.partial")}</span>}
         </span>
         <span className="lib-muted">{loading ? t("library.results.searching") : t("library.results.paged")}</span>
       </div>
       {items.length === 0 && !loading ? (
         <div className="lib-empty">
-          {t("library.results.none", { query })}{" "}
+          {filtered ? t("library.results.noneFiltered", { query }) : t("library.results.none", { query })}{" "}
           <Button variant="link" size="sm" onClick={onClear}>
             {t("library.results.clear")}
           </Button>
@@ -105,6 +159,35 @@ export function LibraryResults({
           <div style={{ height: v.padTop }} aria-hidden="true" />
           {items.slice(v.start, v.end).map((item) => {
             if (item.type === "header") {
+              if (item.section) {
+                const section = item.section;
+                return (
+                  <div
+                    key={item.key}
+                    className="lib-group lib-group--section"
+                    role="button"
+                    tabIndex={0}
+                    aria-expanded={item.open !== false}
+                    aria-label={t("library.results.toggleSection", { label: item.label })}
+                    data-section={section}
+                    onClick={() => onToggleSection(section)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        onToggleSection(section);
+                      }
+                    }}
+                  >
+                    <span>
+                      <span className="lib-group-caret" aria-hidden="true">
+                        {item.open === false ? "▸" : "▾"}
+                      </span>{" "}
+                      {item.label}
+                    </span>
+                    <span>{item.count}</span>
+                  </div>
+                );
+              }
               return (
                 <div key={item.key} className="lib-group" role="presentation">
                   <span>{item.label}</span>
@@ -126,8 +209,8 @@ export function LibraryResults({
                   selected={item.key === selectedKey}
                   right={
                     <>
+                      <CareTag adv={h.adv} />
                       <HitBadges hit={h} pinned={pinned.has(h.id)} />
-                      <WorksMarks works={h.works} installed={installedTargets} />
                     </>
                   }
                   onOpen={() => onOpen(item)}

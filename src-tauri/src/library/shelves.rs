@@ -1,12 +1,14 @@
-//! "For you": the Library's first screen. Never the whole catalog — a few
-//! shelves of at most 12 cards, each with the reason it is there — built
-//! on the device from the project's detected stack, the installed agents,
-//! the focused session's agent, the person's chosen role and interests,
-//! their recent use and the active Track phase (hodios TAXONOMY.md §8).
-//! "Show everything" turns all of it off: plain quality order.
+//! The Library's first screen. Never the whole catalog: the Essentials (the
+//! front doors everyone starts from), what this person used last, a few
+//! shelves of at most 12 cards each with the reason it is there — built on
+//! the device from the project's detected stack, the installed agents, the
+//! focused session's agent, the person's chosen role and interests, their
+//! recent use and the active Track phase (hodios TAXONOMY.md §8) — and every
+//! domain with its categories to browse. "Show everything" turns the
+//! personal part off: plain quality order.
 
-use super::catalog::Vocab;
-use super::search::{self, Hit, Reason, Signals};
+use super::catalog::{Level, Vocab};
+use super::search::{self, Hit, RankOpts, Reason, Signals};
 use super::store::{self, facet_token, CatalogInfo};
 use super::user_state::{Profile, UseSignals};
 use rusqlite::Connection;
@@ -14,9 +16,14 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
 pub const SHELF_SIZE: usize = 12;
+/// The Essentials grid: the front doors (hodios `essentials.yml` level1).
+pub const ESSENTIALS_SIZE: usize = 24;
+/// Candidates a facet shelf reranks (its tokens' matches in static order).
+const SHELF_CANDIDATES: i64 = 600;
 
-/// Until hermes-hq/hodios publishes the `hermes-default` pack (plan P3):
-/// the entries a person with no profile and no project starts from.
+/// The Essentials of a catalog that has none (older than hodios
+/// `essentials.yml`) and no `hermes-default` pack: what a person with no
+/// profile and no project starts from.
 pub const DEFAULT_PACK: &[&str] = &[
     "review-pull-request",
     "find-root-cause",
@@ -99,11 +106,21 @@ pub struct Shelf {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct CategoryCount {
+    pub id: String,
+    pub label: String,
+    pub count: i64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct DomainCount {
     pub id: String,
     pub label: String,
     pub count: i64,
     pub mine: bool,
+    /// Its categories, most entries first (browsing).
+    pub categories: Vec<CategoryCount>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -116,6 +133,13 @@ pub struct Shelves {
     pub profile: Profile,
     pub domains: Vec<DomainCount>,
     pub catalog: Option<CatalogInfo>,
+    /// The front doors (basic entries only), shown whatever the profile.
+    pub essentials: Vec<Hit>,
+    /// The vocab's intents (verbs) and topics (nouns), in display order.
+    pub intents: Vec<Level>,
+    pub topics: Vec<Level>,
+    /// The vocab's depth levels, in order (empty for older catalogs).
+    pub depths: Vec<Level>,
 }
 
 /// The ranking signals of this moment.
@@ -169,12 +193,12 @@ fn shelf_from_tokens(
     );
     let Ok(mut stmt) = conn.prepare_cached(
         "SELECT e.rowid, e.row FROM entry_fts JOIN entry e ON e.rowid = entry_fts.rowid
-         WHERE entry_fts MATCH ?1 ORDER BY entry_fts.rowid LIMIT ?2",
+         WHERE entry_fts MATCH ?1 AND e.revoked = 0 ORDER BY entry_fts.rowid LIMIT ?2",
     ) else {
         return Vec::new();
     };
     let rows: Vec<(i64, super::catalog::Row)> = stmt
-        .query_map(rusqlite::params![expr, search::CANDIDATES as i64], |r| {
+        .query_map(rusqlite::params![expr, SHELF_CANDIDATES], |r| {
             Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))
         })
         .map(|it| {
@@ -185,8 +209,21 @@ fn shelf_from_tokens(
         .unwrap_or_default();
     let vocab = store::vocab(conn);
     let new_ids: HashSet<String> = store::new_ids(conn).into_iter().collect();
-    let mut hits = search::rank(rows, &[], &[], Some(s), &vocab, "you", &new_ids, false);
-    hits.retain(|h| !exclude.contains(&h.id));
+    let mut hits = search::rank(
+        rows,
+        &RankOpts {
+            terms: &[],
+            any_term: false,
+            filters: &[],
+            signals: Some(s),
+            vocab: &vocab,
+            sort: "you",
+            new_ids: &new_ids,
+            include_hidden: false,
+            depth_major: false,
+            exclude,
+        },
+    );
     for h in hits.iter_mut() {
         if h.status != "incubating" {
             h.score += 0.5;
@@ -254,6 +291,18 @@ pub fn build(
         }
     };
 
+    // Continue: pinned, recently used and opened (shown even with personalisation off).
+    let mut cont = search::hits_for_ids(conn, &uses.continue_ids, &s);
+    cont.truncate(SHELF_SIZE);
+    push(
+        &mut shelves,
+        &mut Default::default(),
+        Shelf {
+            id: "continue".into(),
+            hits: cont,
+            because: Vec::new(),
+        },
+    );
     if personalised {
         // 1. For this project: its stack (and what it implies), then the
         //    software work any code project has, for the agents here.
@@ -337,71 +386,41 @@ pub fn build(
             );
         }
     }
-    // 4. Continue: pinned and recently used (shown even with personalisation off).
-    let mut cont = search::hits_for_ids(conn, &uses.continue_ids, &s);
-    cont.truncate(SHELF_SIZE);
-    push(
-        &mut shelves,
-        &mut Default::default(),
-        Shelf {
-            id: "continue".into(),
-            hits: cont,
-            because: Vec::new(),
-        },
-    );
-    // 5. New and updated since the last catalog update.
-    let mut fresh = search::hits_for_ids(conn, &store::new_ids(conn), &s);
-    fresh.truncate(SHELF_SIZE);
-    push(
-        &mut shelves,
-        &mut shown,
-        Shelf {
-            id: "new".into(),
-            hits: fresh,
-            because: Vec::new(),
-        },
-    );
-    // 6. A place to start: nothing personal yet (or show everything).
-    let has_personal = shelves
-        .iter()
-        .any(|sh| sh.id == "project" || sh.id == "role");
-    if !has_personal {
-        let ids: Vec<String> =
-            match store::manifest(conn).and_then(|m| m.packs.get("hermes-default").cloned()) {
-                // A published pack would be read here; until then the fallback list.
-                Some(_) | None => DEFAULT_PACK.iter().map(|s| s.to_string()).collect(),
-            };
-        let mut start = search::hits_for_ids(conn, &ids, &s);
-        if !personalised {
-            for h in start.iter_mut() {
-                h.reasons.clear();
-            }
-        }
-        add_agent_reason(
-            &mut start,
-            if personalised {
-                ctx.active_work.as_deref()
-            } else {
-                None
-            },
-        );
+    // New and updated since the last catalog update, unless that is most of
+    // the catalog (an update that grew it several times over is not news).
+    let fresh_ids = store::new_ids(conn);
+    let rows = store::info(conn).map(|i| i.rows).unwrap_or(0);
+    if !fresh_ids.is_empty() && (fresh_ids.len() as i64) * 5 <= rows {
+        let mut fresh = search::hits_for_ids(conn, &fresh_ids, &s);
+        fresh.truncate(SHELF_SIZE);
         push(
             &mut shelves,
             &mut shown,
             Shelf {
-                id: "start".into(),
-                hits: start,
+                id: "new".into(),
+                hits: fresh,
                 because: Vec::new(),
             },
         );
     }
 
+    let essentials = essentials(conn, &vocab, &uses.hidden);
     let mine: HashSet<&String> = profile.domains.iter().collect();
+    let cats = store::category_counts(conn);
     let domains = store::domain_counts(conn)
         .into_iter()
         .map(|(id, count)| DomainCount {
             label: vocab.label("domain", &id).to_string(),
             mine: mine.contains(&id),
+            categories: cats
+                .iter()
+                .filter(|(d, _, _)| *d == id)
+                .map(|(_, c, n)| CategoryCount {
+                    id: c.clone(),
+                    label: vocab.label("category", c).to_string(),
+                    count: *n,
+                })
+                .collect(),
             id,
             count,
         })
@@ -414,7 +433,39 @@ pub fn build(
         profile,
         domains,
         catalog: store::info(conn),
+        essentials,
+        intents: vocab.intent_list().to_vec(),
+        topics: vocab.topic_list().to_vec(),
+        depths: vocab.depth_levels().to_vec(),
     }
+}
+
+/// The front doors; a catalog without them falls back to its
+/// `hermes-default` pack, then to DEFAULT_PACK. Only basic entries (the
+/// vocab's first depth level) when the catalog has levels. Rows do not
+/// carry `essentials.yml`'s order, so they are shown in the order of the
+/// catalog's everyday routes (`queries.json`, everyday needs first), then
+/// in static order.
+pub fn essentials(conn: &Connection, vocab: &Vocab, hidden: &HashSet<String>) -> Vec<Hit> {
+    let mut ids = store::door_ids(conn);
+    if ids.is_empty() {
+        ids = store::pack_ids(conn, "hermes-default")
+            .unwrap_or_else(|| DEFAULT_PACK.iter().map(|s| s.to_string()).collect());
+    }
+    let plain = Signals {
+        hidden: hidden.clone(),
+        ..Default::default()
+    };
+    let basic = vocab.first_depth();
+    let mut hits: Vec<Hit> = search::hits_for_ids(conn, &ids, &plain)
+        .into_iter()
+        .filter(|h| basic.is_none() || h.depth.as_deref() == basic)
+        .collect();
+    let routes = store::routes(conn);
+    let at = |id: &str| routes.iter().position(|r| r.to == id).unwrap_or(usize::MAX);
+    hits.sort_by(|a, b| at(&a.id).cmp(&at(&b.id)).then(a.rank.cmp(&b.rank)));
+    hits.truncate(ESSENTIALS_SIZE);
+    hits
 }
 
 #[cfg(test)]
@@ -544,7 +595,8 @@ mod tests {
         u.continue_ids = vec!["find-root-cause".into()];
         let sh = build(&c, profile, &u, vec![], vec![], vec![], &Context::default());
         let ids: Vec<&str> = sh.shelves.iter().map(|s| s.id.as_str()).collect();
-        assert_eq!(ids, vec!["role", "continue"]);
+        // What this person used last comes first.
+        assert_eq!(ids, vec!["continue", "role"]);
         assert!(sh.domains.iter().any(|d| d.id == "writing" && d.mine));
         // Nothing personal: a place to start.
         let cold = build(
@@ -556,11 +608,108 @@ mod tests {
             vec![],
             &Context::default(),
         );
-        assert_eq!(cold.shelves[0].id, "start");
-        assert!(cold.shelves[0]
-            .hits
+        // A catalog without front doors: the Essentials fall back to the
+        // default list, and there is no shelf of twelve developer prompts.
+        assert!(cold.shelves.is_empty());
+        assert!(cold
+            .essentials
             .iter()
             .any(|h| h.id == "review-pull-request"));
+        assert!(cold.depths.is_empty() && cold.intents.is_empty());
+    }
+
+    #[test]
+    fn essentials_are_the_front_doors_and_domains_list_their_categories() {
+        let c = crate::library::search::tests::everyday();
+        let sh = build(
+            &c,
+            Profile::default(),
+            &uses(),
+            vec![],
+            vec![],
+            vec![],
+            &Context::default(),
+        );
+        let ids: Vec<&str> = sh.essentials.iter().map(|h| h.id.as_str()).collect();
+        // In the order of the catalog's everyday routes.
+        assert_eq!(
+            ids,
+            vec!["plan-a-trip", "eat-healthier", "review-a-pull-request"]
+        );
+        assert!(sh
+            .essentials
+            .iter()
+            .all(|h| h.door && h.depth.as_deref() == Some("basic")));
+        assert_eq!(sh.essentials[1].adv, vec!["medical"]);
+        assert_eq!(sh.essentials[0].intents, vec!["plan"]);
+        assert_eq!(sh.essentials[0].topic.as_deref(), Some("travel"));
+        assert_eq!(
+            sh.depths
+                .iter()
+                .map(|l| l.label.as_str())
+                .collect::<Vec<_>>(),
+            vec!["Start here", "Specific", "Advanced"]
+        );
+        assert_eq!(sh.intents[1].id, "plan");
+        assert_eq!(sh.topics[0].id, "travel");
+        let travel = sh.domains.iter().find(|d| d.id == "travel").unwrap();
+        assert_eq!(travel.categories[0].id, "trip-planning");
+        assert_eq!(travel.categories[0].label, "Trip planning");
+        assert_eq!(travel.categories[0].count, travel.count);
+        // Hidden entries stay out of the Essentials too.
+        let mut u = uses();
+        u.hidden.insert("plan-a-trip".into());
+        let sh = build(
+            &c,
+            Profile::default(),
+            &u,
+            vec![],
+            vec![],
+            vec![],
+            &Context::default(),
+        );
+        assert!(sh.essentials.iter().all(|h| h.id != "plan-a-trip"));
+    }
+
+    #[test]
+    fn opened_entries_continue_first_and_news_of_most_of_the_catalog_is_dropped() {
+        let mut c = conn();
+        let mut u = uses();
+        u.continue_ids = vec!["summarize-notes".into()];
+        let sh = build(
+            &c,
+            Profile::default(),
+            &u,
+            vec![],
+            vec![],
+            vec![],
+            &Context::default(),
+        );
+        assert_eq!(sh.shelves[0].id, "continue");
+        // An update that adds most of the catalog is not a "new" shelf.
+        let f = crate::library::catalog::tests::fixture(
+            "2026.0102.0",
+            2,
+            &[
+                ("find-root-cause", serde_json::json!({}), "x"),
+                ("brand-new-a", serde_json::json!({}), "x"),
+                ("brand-new-b", serde_json::json!({}), "x"),
+            ],
+        );
+        let mut src = f.objects.clone();
+        let cat =
+            crate::library::catalog::collect(&f.manifest, &mut src, true, &HashSet::new()).unwrap();
+        crate::library::store::apply(&mut c, &cat, "update").unwrap();
+        let sh = build(
+            &c,
+            Profile::default(),
+            &uses(),
+            vec![],
+            vec![],
+            vec![],
+            &Context::default(),
+        );
+        assert!(sh.shelves.iter().all(|s| s.id != "new"));
     }
 
     #[test]

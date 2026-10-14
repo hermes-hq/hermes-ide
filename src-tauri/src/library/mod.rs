@@ -22,6 +22,7 @@
 mod bench;
 pub mod catalog;
 pub mod detect;
+pub mod everyday;
 pub mod install;
 pub mod search;
 pub mod shelves;
@@ -372,6 +373,18 @@ pub async fn library_shelves(
     .await
 }
 
+/// The Essentials (front doors) on their own, for Prompts (⌘J) with an empty search.
+#[tauri::command]
+pub async fn library_essentials(app: AppHandle) -> Result<Vec<search::Hit>, String> {
+    blocking(move || {
+        let lib = open(&app)?;
+        let (_, uses, _) = user_inputs(&app)?;
+        let r = lock(&lib.reader);
+        Ok(shelves::essentials(&r, &store::vocab(&r), &uses.hidden))
+    })
+    .await
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct EntryDetail {
@@ -559,6 +572,21 @@ pub async fn library_record_use(app: AppHandle, id: String) -> Result<(), String
         with_db(&app, |c| {
             let learn = user_state::read_profile(c).learning_on();
             user_state::record_use(c, &row, learn, user_state::now_secs())
+        })?
+    })
+    .await
+}
+
+/// An entry was opened in the Library: it goes to Recent (not a use).
+#[tauri::command]
+pub async fn library_record_open(app: AppHandle, id: String) -> Result<(), String> {
+    blocking(move || {
+        let lib = open(&app)?;
+        let Some(id) = store::resolve_id(&lock(&lib.reader), &id) else {
+            return Ok(());
+        };
+        with_db(&app, |c| {
+            user_state::record_open(c, &id, user_state::now_secs())
         })?
     })
     .await
@@ -941,12 +969,88 @@ mod tests {
             None,
         )
         .unwrap();
+        // Found, or routed to as the front door ("pull request").
         assert!(
-            page.hits.iter().any(|h| h.id == "review-pull-request"),
+            page.route
+                .as_ref()
+                .is_some_and(|r| r.to.id == "review-pull-request")
+                || page.hits.iter().any(|h| h.id == "review-pull-request"),
             "{:?}",
             page.hits.iter().map(|h| &h.id).collect::<Vec<_>>()
         );
         eprintln!("import {import_ms} ms, search {:.2} ms", page.took_ms);
         assert!(import_ms < 5000, "import took {import_ms} ms");
+    }
+
+    /// The first five answers to everyday queries against a real catalog
+    /// archive (a hodios-dist release packed like the bundled one):
+    ///
+    ///   HERMES_MEASURE_ARCHIVE=/path/catalog-v1.tar.zst \
+    ///     cargo test --lib measure_everyday_queries -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn measure_everyday_queries() {
+        let Ok(path) = std::env::var("HERMES_MEASURE_ARCHIVE") else {
+            return;
+        };
+        let mut files = catalog::read_archive(&std::fs::read(path).unwrap()).unwrap();
+        let manifest = files.remove("manifest.json").unwrap();
+        let cat = catalog::collect(&manifest, &mut files, true, &Default::default()).unwrap();
+        let mut conn = store::open_in_memory().unwrap();
+        let started = Instant::now();
+        store::apply(&mut conn, &cat, "bundled").unwrap();
+        eprintln!(
+            "catalog {} ({} rows) imported in {} ms",
+            cat.manifest.catalog,
+            cat.rows.len(),
+            started.elapsed().as_millis()
+        );
+        let queries = std::env::var("HERMES_MEASURE_QUERIES").unwrap_or_else(|_| {
+            "trip|plan a 5-day trip to lisbon|diet|lose weight|code review".into()
+        });
+        for q in queries.split('|') {
+            let page = search::search(
+                &conn,
+                &search::SearchRequest {
+                    query: q.into(),
+                    counts: true,
+                    ..Default::default()
+                },
+                None,
+            )
+            .unwrap();
+            let mut top: Vec<String> = Vec::new();
+            if let Some(r) = &page.route {
+                top.extend(
+                    r.exact
+                        .iter()
+                        .map(|h| format!("{} [title holds every word]", h.id)),
+                );
+                top.push(format!("{} [front door]", r.to.id));
+                top.extend(r.refine.iter().map(|h| format!("{} [refine]", h.id)));
+            }
+            top.extend(page.hits.iter().map(|h| {
+                let mut tag = h.depth.clone().unwrap_or_default();
+                if !h.adv.is_empty() {
+                    tag.push_str(&format!(" adv:{}", h.adv.join(",")));
+                }
+                format!("{} [{}]", h.id, tag.trim())
+            }));
+            top.truncate(5);
+            eprintln!(
+                "\n\"{q}\": {} matches{}{} in {:.1} ms",
+                page.total,
+                if page.partial { ", partial" } else { "" },
+                if page.leftover.is_empty() {
+                    String::new()
+                } else {
+                    format!(", leftover {:?}", page.leftover)
+                },
+                page.took_ms
+            );
+            for (i, id) in top.iter().enumerate() {
+                eprintln!("  {}. {id}", i + 1);
+            }
+        }
     }
 }

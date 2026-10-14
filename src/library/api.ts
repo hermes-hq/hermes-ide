@@ -33,6 +33,9 @@ export const librarySearch = (request: SearchRequest, context?: LibraryContext) 
 
 export const libraryShelves = (context: LibraryContext) => invoke<Shelves>("library_shelves", { context });
 
+/** The Essentials (front doors) on their own, in display order. */
+export const libraryEssentials = () => invoke<LibraryHit[]>("library_essentials");
+
 export const libraryGet = (id: string) => invoke<EntryDetail>("library_get", { id });
 
 export const libraryHits = (ids: string[], context?: LibraryContext) =>
@@ -44,6 +47,9 @@ export const libraryVocab = (facets: string[]) =>
   invoke<{ facets: Record<string, Labeled[]> }>("library_vocab", { facets });
 
 export const libraryRecordUse = (id: string) => invoke<void>("library_record_use", { id });
+
+/** Opening an entry puts it in Recent (not a use). */
+export const libraryRecordOpen = (id: string) => invoke<void>("library_record_open", { id });
 
 export const librarySetItem = (id: string, flags: { pinned?: boolean; favorite?: boolean; hidden?: boolean }) =>
   invoke<void>("library_set_item", { id, pinned: flags.pinned ?? null, favorite: flags.favorite ?? null, hidden: flags.hidden ?? null });

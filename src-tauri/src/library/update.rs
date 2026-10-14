@@ -283,7 +283,7 @@ pub async fn download(
     }
 
     let m = &candidate.manifest;
-    if let Some(v) = &m.vocab {
+    for v in m.vocab.iter().chain(m.queries.iter()) {
         one(fetcher.as_ref(), local, &mut objects, &mut downloaded, v)
             .await
             .map_err(hash_fail)?;
@@ -410,6 +410,7 @@ pub fn rollback(conn: &mut Connection) -> Result<ApplySummary, String> {
     let mut local: HashMap<String, Vec<u8>> = HashMap::new();
     let manifest: Manifest = serde_json::from_slice(&bytes).map_err(|e| e.to_string())?;
     let mut refs: Vec<String> = manifest.vocab.iter().cloned().collect();
+    refs.extend(manifest.queries.iter().cloned());
     refs.extend(manifest.tiers.values().map(|t| t.list.clone()));
     let mut queue = refs;
     while let Some(r) = queue.pop() {
@@ -663,6 +664,7 @@ mod tests {
             packs: Default::default(),
             vocab: None,
             revoked: vec![],
+            queries: None,
         };
         assert!(matches!(
             judge(&m("2026.1003.0", 3), Some(("2026.1003.0", 3)), &[]),
