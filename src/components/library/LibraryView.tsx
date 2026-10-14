@@ -9,7 +9,7 @@
 // open entry can be used in any session, started as a task with any
 // agent, or installed into the project for an agent.
 
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Chip, CloseButton, Segmented } from "../ui";
 import { HEALTH_ADVICE, depthSections, fillFromLeftover, isDeveloperRole, pairsWith, recentIds, usesFacets } from "../../library/everyday";
@@ -269,20 +269,34 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     [query, filters, sort, showEverything, nav, context],
   );
 
-  // Test builds only: when an answer reaches the screen, and every main-thread stall over 50 ms.
+  // Test builds only: when an answer reaches the screen, and every frame over 50 ms (where its time went).
   useLayoutEffect(() => {
     if (import.meta.env.VITE_HERMES_E2E !== "1" || answered === null) return;
     const log = ((window as unknown as { __libSearchLog?: unknown[] }).__libSearchLog ??= []) as unknown[];
     log.push({ committed: answered, t: Math.round(performance.now()), rows: hits.length, route: Boolean(page?.route) });
   }, [answered, hits, page]);
+  useLayoutEffect(() => {
+    if (import.meta.env.VITE_HERMES_E2E !== "1" || selection?.type !== "hit") return;
+    const log = ((window as unknown as { __libSearchLog?: unknown[] }).__libSearchLog ??= []) as unknown[];
+    log.push({ selected: selection.id, detail: detail?.id ?? null, t: Math.round(performance.now()) });
+  }, [selection, detail]);
   useEffect(() => {
     if (import.meta.env.VITE_HERMES_E2E !== "1" || typeof PerformanceObserver === "undefined") return;
     const log = ((window as unknown as { __libSearchLog?: unknown[] }).__libSearchLog ??= []) as unknown[];
     try {
       const po = new PerformanceObserver((list) => {
-        for (const e of list.getEntries()) log.push({ longtask: Math.round(e.duration), t: Math.round(e.startTime) });
+        for (const e of list.getEntries()) {
+          const f = e as PerformanceEntry & { renderStart?: number; styleAndLayoutStart?: number; scripts?: { invoker: string; sourceFunctionName: string; sourceURL: string; duration: number; forcedStyleAndLayoutDuration: number }[] };
+          log.push({
+            frame: Math.round(e.duration),
+            t: Math.round(e.startTime),
+            render: f.renderStart ? Math.round(f.renderStart - e.startTime) : null,
+            layout: f.styleAndLayoutStart ? Math.round(e.startTime + e.duration - f.styleAndLayoutStart) : null,
+            scripts: (f.scripts ?? []).filter((x) => x.duration > 20).map((x) => `${x.invoker} ${x.sourceFunctionName} ${Math.round(x.duration)}ms forced-layout ${Math.round(x.forcedStyleAndLayoutDuration)}ms`),
+          });
+        }
       });
-      po.observe({ type: "longtask", buffered: false });
+      po.observe({ type: "long-animation-frame", buffered: false });
       return () => po.disconnect();
     } catch {
       return;
@@ -374,7 +388,8 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     const mineSelected = selection && !(selection.type === "hit" && selection.id === autoSelected.current);
     if (mineSelected || (selection?.type === "hit" && selection.id === lead.id)) return;
     autoSelected.current = lead.id;
-    setSelection({ type: "hit", id: lead.id, reasons: lead.reasons });
+    // In the background: the answer shows first, the front door's details follow.
+    startTransition(() => setSelection({ type: "hit", id: lead.id, reasons: lead.reasons }));
   }, [lead, selection]);
   // The best match's questions take the words the search left over.
   const answers = useMemo(() => {
