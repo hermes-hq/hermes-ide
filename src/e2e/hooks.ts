@@ -201,6 +201,11 @@ const hooks = {
       webgl: entry.webgl !== null,
       /** Canvases the terminal's renderer put on its screen (WebGL only). */
       canvases: entry.container.querySelectorAll(".xterm-screen canvas").length,
+      /** First buffer row shown, and first row of the last page (equal at the bottom). */
+      viewportY: entry.terminal.buffer.active.viewportY,
+      baseY: entry.terminal.buffer.active.baseY,
+      /** Hermes's own idea of whether the person scrolled up. */
+      scrolledUp: entry.userScrolledUp,
     };
   },
   /** Write straight to a terminal's screen, as if a program printed it

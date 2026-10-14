@@ -380,7 +380,8 @@ export async function createTerminal(
     const entry = pool.get(sessionId);
     if (!entry) return;
     const buf = terminal.buffer.active;
-    const atBottom = buf.baseY + terminal.rows >= buf.length;
+    // viewportY is the first row shown; baseY the first row of the last page.
+    const atBottom = buf.viewportY >= buf.baseY;
     entry.userScrolledUp = !atBottom;
   });
 

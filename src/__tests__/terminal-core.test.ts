@@ -382,7 +382,11 @@ describe("Invariant 7: Scroll tracking prevents jump during streaming", () => {
 
   it("onScroll detects at-bottom vs scrolled-up", () => {
     expect(SRC).toContain("terminal.onScroll(");
-    expect(SRC).toContain("buf.baseY + terminal.rows >= buf.length");
+    // Where the view starts against where the last page starts. The old
+    // `baseY + rows >= length` held on every scroll, so scrolling up never
+    // registered.
+    expect(SRC).toContain("buf.viewportY >= buf.baseY");
+    expect(SRC).not.toContain("buf.baseY + terminal.rows >= buf.length");
   });
 
   it("PTY output handler preserves viewport when scrolled up", () => {
