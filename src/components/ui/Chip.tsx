@@ -8,8 +8,11 @@ interface ChipBase extends Omit<HTMLAttributes<HTMLElement>, "children" | "onCli
   children: ReactNode;
   /** md (28 px) by default, sm (24). */
   size?: "sm" | "md";
-  /** danger: the value is a risky one (e.g. an approval mode that never asks). */
-  tone?: "neutral" | "danger";
+  /**
+   * danger: the value is a risky one (e.g. an approval mode that never asks).
+   * warning: the value needs attention soon (a context window nearly full).
+   */
+  tone?: "neutral" | "danger" | "warning";
 }
 
 interface StaticChip extends ChipBase {
@@ -73,6 +76,7 @@ export function Chip(props: ChipProps) {
     "h-chip",
     `h-chip--${size}`,
     tone === "danger" && "h-chip--danger",
+    tone === "warning" && "h-chip--warning",
     onToggle !== undefined && selected && "h-chip--selected",
     className,
   );

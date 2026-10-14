@@ -1,0 +1,88 @@
+/* ─── Session action bar ──────────────────────────────────────────────
+ * Under a terminal pane's header, and above the Agent view's composer:
+ * Prompts, the pinned actions as chips, the context gauge, the one state
+ * chip and the Commands list. One row that never wraps: the bar measures
+ * itself and shows the chips as glyphs, then collapses (data-layout), see
+ * src/sessionActions/layout.ts. Controls come from the control set; this
+ * file only lays them out.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.session-actions-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1-5);
+  min-width: 0;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+/* In the pane header, under its label line (the header draws the rule below). */
+.session-actions-bar {
+  flex-shrink: 0;
+  padding: var(--space-1) var(--space-3);
+  background: var(--bg-1);
+}
+
+/* A short pane: the bar sits in the header row, after the label. */
+.session-actions-bar-compact {
+  flex: 0 1 auto;
+  padding: 0;
+  background: transparent;
+}
+.session-actions-bar-compact .sab-spacer { display: none; }
+
+.sab-prompts { flex-shrink: 0; }
+
+.sab-chips {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  flex-shrink: 0;
+}
+
+/* The tooltip of a disabled chip lives on this wrapper (a disabled button
+ * shows none). */
+.sab-chip-wrap { display: inline-flex; flex-shrink: 0; }
+.sab-chip { flex-shrink: 0; }
+.sab-chip svg { flex-shrink: 0; }
+.sab-chip-label { white-space: nowrap; }
+.sab-context { font-variant-numeric: tabular-nums; }
+
+.sab-spacer { flex: 1 1 0; min-width: 0; }
+
+.sab-notice {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  animation: sab-notice-in var(--dur-base) var(--ease-out-soft);
+}
+.sab-notice-warn { color: var(--warning-ink); }
+
+@keyframes sab-notice-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sab-notice { animation: none; }
+}
+
+.sab-state { flex-shrink: 0; }
+.sab-commands { flex-shrink: 0; }
+.sab-slash {
+  font-family: var(--font-code);
+  color: var(--text-2);
+}
+
+/* Above the Agent view's composer, on its surface (outside its resizable
+ * height, so it never takes the textarea's room). */
+.agent-actions-row {
+  flex-shrink: 0;
+  padding: var(--space-1-5) var(--space-3) 0;
+  border-top: var(--control-border-width) solid var(--rule-hair);
+  background: var(--bg-0);
+}

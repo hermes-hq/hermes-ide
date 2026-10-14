@@ -307,8 +307,6 @@ pub struct OutputAnalyzer {
     files_touched: HashSet<String>,
     files_ordered: VecDeque<String>,
     // Actions
-    recent_actions: VecDeque<ActionEvent>,
-    available_actions: Vec<ActionTemplate>,
     // Memory
     memory_facts: VecDeque<MemoryFact>,
     memory_keys_seen: HashSet<String>,
@@ -544,8 +542,6 @@ impl OutputAnalyzer {
             tool_call_summary: HashMap::new(),
             files_touched: HashSet::new(),
             files_ordered: VecDeque::new(),
-            recent_actions: VecDeque::new(),
-            available_actions: Vec::new(),
             memory_facts: VecDeque::new(),
             memory_keys_seen: HashSet::new(),
             last_input_at: None,
@@ -733,7 +729,6 @@ impl OutputAnalyzer {
                 if let Some((idx, agent)) = self.registry.detect_agent(trimmed) {
                     self.active_provider_idx = Some(idx);
                     self.detected_agent = Some(agent);
-                    self.available_actions = self.registry.adapters[idx].known_actions();
                 }
             }
             // Keep trying to extract model name if we have agent but model is unknown
@@ -832,12 +827,6 @@ impl OutputAnalyzer {
             self.tool_calls.push_back(tc);
             if self.tool_calls.len() > 100 {
                 self.tool_calls.pop_front();
-            }
-        }
-        if let Some(action) = analysis.action {
-            self.recent_actions.push_back(action);
-            if self.recent_actions.len() > 20 {
-                self.recent_actions.pop_front();
             }
         }
         if let Some(fact) = analysis.memory_fact {
@@ -1037,8 +1026,6 @@ impl OutputAnalyzer {
             tool_call_summary: self.tool_call_summary.clone(),
             files_touched: self.files_ordered.iter().cloned().collect(),
             recent_errors: vec![],
-            recent_actions: self.recent_actions.iter().cloned().collect(),
-            available_actions: self.available_actions.clone(),
             memory_facts: self.memory_facts.iter().cloned().collect(),
             latency_p50_ms: percentile(&self.latency_samples, 50.0),
             latency_p95_ms: percentile(&self.latency_samples, 95.0),

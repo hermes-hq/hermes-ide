@@ -1,0 +1,185 @@
+/* ─── A session's Commands list ───────────────────────────────────────
+ * A popover under (or over) the bar's "/ Commands" trigger, kept inside the
+ * window (its position and height are set inline, see
+ * SessionCommandsPopover.tsx). Rows are the control set's ListRow (two
+ * lines: label and description); the Session section is in the danger ink
+ * and asks first.
+ * ──────────────────────────────────────────────────────────────────── */
+
+.session-commands {
+  z-index: var(--z-popover);
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--popover-bg);
+  border: var(--control-border-width) solid var(--rule-zone);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-3);
+  color: var(--text-1);
+  font-size: var(--text-sm);
+  animation: session-commands-in var(--dur-slow) var(--ease-out-expo);
+}
+
+@keyframes session-commands-in {
+  from { opacity: 0; transform: scale(0.98); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .session-commands { animation: none; }
+}
+
+.session-commands-search {
+  flex-shrink: 0;
+  padding: var(--space-2);
+  border-bottom: var(--control-border-width) solid var(--rule-hair);
+}
+.session-commands-search .h-input { width: 100%; }
+
+.session-commands-hint {
+  flex-shrink: 0;
+  padding: var(--space-1-5) var(--space-3);
+  color: var(--text-2);
+}
+.session-commands-hint-wait { color: var(--warning-ink); }
+
+.session-commands-list {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-1);
+}
+
+.session-commands-section + .session-commands-section {
+  margin-top: var(--space-1);
+  padding-top: var(--space-1);
+  border-top: var(--control-border-width) solid var(--rule-hair);
+}
+
+.session-commands-section-title {
+  padding: var(--space-1) var(--space-3);
+  color: var(--text-2);
+  font-size: var(--text-2xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-wide);
+  text-transform: uppercase;
+}
+
+.session-commands-item { align-items: flex-start; }
+.session-commands-item-disabled { cursor: not-allowed; opacity: var(--disabled-opacity); }
+
+.session-commands-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: var(--space-0-5);
+  min-width: 0;
+}
+.session-commands-line {
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.session-commands-label {
+  color: var(--text-0);
+  white-space: nowrap;
+}
+.session-commands-cmd,
+.session-commands-hint-arg {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-family: var(--font-code);
+  font-size: var(--text-xs);
+}
+.session-commands-desc {
+  color: var(--text-2);
+  line-height: var(--leading-snug);
+}
+
+/* The Session section: what ends or replaces something, in the danger ink. */
+.session-commands-item-danger .session-commands-label,
+.session-commands-item-danger .session-commands-desc { color: var(--danger-fg); }
+
+.session-commands-badge { flex-shrink: 0; align-self: center; }
+
+/* A pinned command listed again further down. */
+.session-commands-pin {
+  flex-shrink: 0;
+  align-self: center;
+  width: var(--space-1-5);
+  height: var(--space-1-5);
+  border-radius: var(--radius-full);
+  background: var(--primary-bg);
+}
+
+/* Edit chips: a check per action. */
+.session-commands-check {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  align-self: center;
+  box-sizing: border-box;
+  width: var(--choice-size);
+  height: var(--choice-size);
+  border: var(--choice-border-width) solid var(--control-border);
+  border-radius: var(--radius-xs);
+}
+.session-commands-check-on {
+  border-color: var(--primary-bg);
+  background: var(--primary-bg);
+  color: var(--primary-fg);
+}
+.session-commands-check svg { width: var(--check-mark); height: var(--check-mark); }
+
+.session-commands-empty {
+  padding: var(--space-5);
+  color: var(--text-2);
+  text-align: center;
+}
+
+.session-commands-footer {
+  display: flex;
+  flex-shrink: 0;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-1) var(--space-2) var(--space-1) var(--space-3);
+  border-top: var(--control-border-width) solid var(--rule-hair);
+}
+.session-commands-keys {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-2);
+  font-size: var(--text-xs);
+}
+
+/* The inline confirm of a destructive command. */
+.session-commands-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+.session-commands-confirm-question {
+  color: var(--text-0);
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+}
+.session-commands-confirm-consequence {
+  color: var(--text-1);
+  line-height: var(--leading-snug);
+}
+.session-commands-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-2);
+}

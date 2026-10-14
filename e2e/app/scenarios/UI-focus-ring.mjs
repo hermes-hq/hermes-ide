@@ -158,7 +158,8 @@ const BUILT = [
   { cls: "workbench-notes-textarea", html: '<textarea class="workbench-notes-textarea" aria-label="Notes"></textarea>' },
   { cls: "pp-input", html: '<div class="pp-search"><input class="pp-input" aria-label="Search prompts"></div>' },
   { cls: "session-list-new-project-input", html: '<div class="session-list-new-project-input"><input aria-label="Project name"></div>' },
-  { cls: "commands-popover-search", html: '<div class="commands-popover-search"><input aria-label="Search commands"></div>' },
+  // A session's Commands list filters with the control set's field.
+  { cls: "h-input", html: '<div class="session-commands-search"><input class="h-input h-input--sm" aria-label="Filter commands"></div>' },
 ];
 
 let app;

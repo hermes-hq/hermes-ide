@@ -42,6 +42,8 @@ interface TurnBarProps {
   /** The session's other folders (extra folders, attached projects); the
    *  ones outside the working directory are not tracked, and the bar says so. */
   folders?: readonly string[];
+  /** A short pane: one "Replies · N" chip in the pane header that opens the list of every reply. */
+  compact?: boolean;
 }
 
 const TurnList = lazy(() => import("./TurnList"));
@@ -120,7 +122,7 @@ function Patch({ patch }: { patch: string }) {
   );
 }
 
-export function TurnBar({ sessionId, workingDirectory, folders }: TurnBarProps) {
+export function TurnBar({ sessionId, workingDirectory, folders, compact = false }: TurnBarProps) {
   const [ledgerTurns, setTurns] = useState<Turn[]>([]);
   const doneWhen = useDoneWhen(sessionId);
   // Turn.checks (F20 x F27): the Done-When result of each recorded turn.
@@ -298,12 +300,42 @@ export function TurnBar({ sessionId, workingDirectory, folders }: TurnBarProps) 
 
   if (!visible) return null;
 
-  const shown = turns.slice(Math.max(0, turns.length - fit));
+  const shown = compact ? [] : turns.slice(Math.max(0, turns.length - fit));
   const hidden = turns.length - shown.length;
   const allLabel = translate("turnBar.allReplies", { count: turns.length });
 
+  const noticeNode = notice && (
+    <span className={`turn-bar-notice${notice.undo !== undefined ? " turn-bar-notice-undo" : ""}`} role="status" title={notice.text}>
+      <span className="turn-bar-notice-text">{notice.text}</span>
+      {notice.undo !== undefined && (
+        <Button size="sm" variant="quiet" className="turn-bar-undo" onClick={() => undoRestore(notice.undo as number)}>
+          {translate("turnBar.undo")}
+        </Button>
+      )}
+    </span>
+  );
+
   return (
     <>
+      {compact ? (
+        <span className="turn-bar-compact" data-session-turns={sessionId} data-scope={scopeNote ? "main-only" : undefined}>
+          {turns.length > 0 && (
+            <Chip
+              size="sm"
+              className="turn-bar-more"
+              buttonRef={moreRef}
+              title={`${allLabel}\n\n${help}`}
+              aria-label={allLabel}
+              haspopup="listbox"
+              expanded={listOpen}
+              onClick={() => setListOpen((o) => !o)}
+            >
+              {translate("turnBar.compact", { count: turns.length })}
+            </Chip>
+          )}
+          {noticeNode}
+        </span>
+      ) : (
       <div
         className="turn-bar"
         role="toolbar"
@@ -363,17 +395,9 @@ export function TurnBar({ sessionId, workingDirectory, folders }: TurnBarProps) 
             );
           })}
         </div>
-        {notice && (
-          <span className={`turn-bar-notice${notice.undo !== undefined ? " turn-bar-notice-undo" : ""}`} role="status" title={notice.text}>
-            <span className="turn-bar-notice-text">{notice.text}</span>
-            {notice.undo !== undefined && (
-              <Button size="sm" variant="quiet" className="turn-bar-undo" onClick={() => undoRestore(notice.undo as number)}>
-                {translate("turnBar.undo")}
-              </Button>
-            )}
-          </span>
-        )}
+        {noticeNode}
       </div>
+      )}
 
       {listOpen && hidden > 0 && (
         <Suspense fallback={null}>

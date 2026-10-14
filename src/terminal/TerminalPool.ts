@@ -240,7 +240,7 @@ function handleTerminalInput(sessionId: string, data: string): void {
   // Always track input regardless of phase — the buffer must reflect what
   // the user has typed. Only suggestion computation is gated on phase,
   // because every keystroke echo briefly flips phase to "busy".
-  updateInputBuffer(entry, data);
+  updateInputBuffer(entry, data, sessionId);
 
   // ── Clear ghost text on any non-navigation keystroke ──
   if (entry.ghostText) {
@@ -337,6 +337,23 @@ function recordInputInHistory(entry: PoolEntry): void {
   }, ECHO_SETTLE_MS);
 }
 
+/** Told about a line the person entered at an agent's prompt that starts
+ *  with "/" or "$" (the session action bar keeps the command it names in its
+ *  Recent list; the line itself is not kept). */
+type SubmittedCommandListener = (sessionId: string, line: string) => void;
+let submittedCommandListener: SubmittedCommandListener | null = null;
+
+export function setSubmittedCommandListener(listener: SubmittedCommandListener | null): void {
+  submittedCommandListener = listener;
+}
+
+/** The person entered a command at a program's prompt (not the shell's). */
+function reportSubmittedCommand(sessionId: string, entry: PoolEntry): void {
+  if (!submittedCommandListener || entry.shellIsForeground) return;
+  const line = entry.inputBuffer.trim();
+  if (/^[/$][\w:.-]/.test(line)) submittedCommandListener(sessionId, line);
+}
+
 /** How long after Enter the typed line is read back from the screen. */
 const ECHO_SETTLE_MS = 500;
 
@@ -359,7 +376,7 @@ function lineShows(buf: IBuffer, row: number, command: string): boolean {
   return text.includes(command);
 }
 
-function updateInputBuffer(entry: PoolEntry, data: string): void {
+function updateInputBuffer(entry: PoolEntry, data: string, sessionId: string): void {
   // Single-char fast paths (keyboard input — one char per onData call)
   if (data.length === 1) {
     const code = data.charCodeAt(0);
@@ -373,6 +390,7 @@ function updateInputBuffer(entry: PoolEntry, data: string): void {
     } else if (code === 0x0d) {
       // Enter — log to history and clear
       recordInputInHistory(entry);
+      reportSubmittedCommand(sessionId, entry);
       entry.inputBuffer = "";
       dismissSuggestionsForEntry(entry);
     } else if (code === 0x1b) {
@@ -404,6 +422,7 @@ function updateInputBuffer(entry: PoolEntry, data: string): void {
     } else if (code === 0x0d) {
       // Enter within paste — log to history and clear
       recordInputInHistory(entry);
+      reportSubmittedCommand(sessionId, entry);
       entry.inputBuffer = "";
       dismissSuggestionsForEntry(entry);
     } else if (code === 0x1b) {
@@ -683,59 +702,10 @@ export function selectSuggestion(sessionId: string, index: number): void {
 
 // ─── Public Utility Exports ──────────────────────────────────────────
 
-/** Get the current inputBuffer length for a session (for erasing existing input). */
-export function getInputBufferLength(sessionId: string): number {
-  return pool.get(sessionId)?.inputBuffer.length ?? 0;
-}
-
 /** Clear the inputBuffer for a session (e.g. after composed prompt replaces all input). */
 export function clearInputBuffer(sessionId: string): void {
   const entry = pool.get(sessionId);
   if (entry) entry.inputBuffer = "";
-}
-
-/** Insert a shortcut command text on the current prompt line.
- *
- *  Replaces any existing input with the command text. Does NOT press Enter —
- *  the user can review/edit the command and press Enter manually.
- *
- *  Uses xterm's internal triggerDataEvent with isPaste=false so the data is
- *  treated as normal keyboard input (no bracketed paste markers).
- *
- *  Invariants enforced:
- *  - command NEVER contains \n or \r (caller must ensure)
- */
-export function sendShortcutCommand(sessionId: string, command: string): void {
-  const entry = pool.get(sessionId);
-  if (!entry) return;
-
-  // Invariant: command must not contain line breaks
-  if (command.includes("\n") || command.includes("\r")) {
-    return;
-  }
-
-  // Save input buffer length BEFORE clearing — we need it for backspaces
-  const eraseLen = entry.inputBuffer.length;
-  entry.inputBuffer = "";
-  dismissSuggestions(sessionId);
-  clearGhostText(sessionId);
-
-  // Send backspaces (to clear existing text) + command text.
-  // NO \r — the command is inserted on the prompt, not executed.
-  // The user reviews and presses Enter manually.
-  const backspaces = eraseLen > 0 ? "\x7f".repeat(eraseLen) : "";
-  const fullData = backspaces + command;
-  const core = (entry.terminal as any)._core;
-  if (core?.coreService?.triggerDataEvent) {
-    core.coreService.triggerDataEvent(fullData, false);
-  } else {
-    writeToSession(sessionId, utf8ToBase64(fullData)).catch((err) => {
-      console.warn(`[TerminalPool] write_to_session (shortcut) failed for ${sessionId}:`, err);
-    });
-  }
-
-  // Refocus terminal — clicking the shortcut button steals focus from xterm.
-  focusTerminal(sessionId);
 }
 
 export function getTerminal(sessionId: string): import("@xterm/xterm").Terminal | null {

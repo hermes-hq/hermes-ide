@@ -108,23 +108,6 @@ pub struct ProviderTokens {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActionEvent {
-    pub command: String,
-    pub label: String,
-    pub provider: String,
-    pub is_suggestion: bool,
-    pub timestamp: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ActionTemplate {
-    pub command: String,
-    pub label: String,
-    pub description: String,
-    pub category: String,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryFact {
     pub key: String,
     pub value: String,
@@ -142,8 +125,6 @@ pub struct SessionMetrics {
     pub tool_call_summary: HashMap<String, u32>,
     pub files_touched: Vec<String>,
     pub recent_errors: Vec<String>,
-    pub recent_actions: Vec<ActionEvent>,
-    pub available_actions: Vec<ActionTemplate>,
     pub memory_facts: Vec<MemoryFact>,
     pub latency_p50_ms: Option<f64>,
     pub latency_p95_ms: Option<f64>,

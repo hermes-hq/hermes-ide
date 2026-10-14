@@ -175,23 +175,9 @@ describe("Bug 2 fix: headless xterm single-char input", () => {
 // Bug 3: Display corruption — \x1b[J clears wrapped lines
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-describe("Bug 3 fix: sendShortcutCommand uses backspaces to clear input (source verification)", () => {
-  it("sendShortcutCommand uses backspaces (\\x7f) to clear existing input", () => {
-    const fnBody = SRC.match(/export function sendShortcutCommand[\s\S]*?\n\}/);
-    expect(fnBody).not.toBeNull();
-    const body = fnBody![0];
-    // Uses DEL/backspace chars repeated by eraseLen
-    expect(body).toContain("\\x7f");
-    expect(body).toContain("eraseLen");
-  });
-
-  it("does NOT use escape sequences for display clearing (backspaces handle it)", () => {
-    const fnBody = SRC.match(/export function sendShortcutCommand[\s\S]*?\n\}/);
-    expect(fnBody).not.toBeNull();
-    const body = fnBody![0];
-    // No \x1b[K or \x1b[J — backspaces are used instead
-    expect(body).not.toContain("\\x1b[K");
-    expect(body).not.toContain("\\x1b[J");
+describe("Bug 3: no UI clears the person's line to type a command (source verification)", () => {
+  it("the Backspace-then-command writer is gone (the action bar never edits a draft)", () => {
+    expect(SRC).not.toMatch(/export function sendShortcutCommand\(/);
   });
 });
 

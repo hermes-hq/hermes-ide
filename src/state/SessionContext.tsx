@@ -79,7 +79,7 @@ const DirtyWorktreeDialog = lazyView("DirtyWorktreeDialog", () => import("../com
 
 // ─── Re-export shared types for backward compatibility ──────────────
 export type {
-  ActionEvent, ActionTemplate, SessionData, SessionHistoryEntry,
+  SessionData, SessionHistoryEntry,
   CreateSessionOpts, SessionAction, SessionMode,
 } from "../types/session";
 
@@ -3118,6 +3118,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         const layout = stateRef.current.layout;
         if (!layout.root) dispatch({ type: "INIT_PANE", sessionId: id });
         else if (layout.focusedPaneId) dispatch({ type: "SET_PANE_SESSION", paneId: layout.focusedPaneId, sessionId: id });
+      },
+      split: (id, direction) => {
+        const paneId = stateRef.current.layout.focusedPaneId;
+        if (paneId) dispatch({ type: "SPLIT_PANE", paneId, direction, newSessionId: id });
       },
     });
     return () => setE2ESessionBridge(null);

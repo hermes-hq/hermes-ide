@@ -103,6 +103,7 @@ import { TASK_QUEUE_KEY, getOccupancy, listQueuedTasks, restoreTaskQueue, serial
 import { useOverlay } from "./state/overlays";
 import { useWorktreeStorageNotices } from "./hooks/useWorktreeStorageNotices";
 import type { CreateSessionOpts } from "./types/session";
+import { paletteSessionCommands } from "./sessionActions/palette";
 
 // Loaded on demand, off the startup path: the editor (CodeMirror) with the
 // file preview, Settings (with the plugin manager), and the Agent view —
@@ -1891,6 +1892,7 @@ function AppContent() {
               createProject(activeSession.working_directory, null).catch(console.error);
             }
           }}
+          sessionCommands={paletteSessionCommands(activeSession, t)}
           pluginCommands={pluginCommands}
           pluginsWithSettings={pluginsWithSettings}
           onPluginCommand={(commandId) => pluginRuntime.executeCommand(commandId)}

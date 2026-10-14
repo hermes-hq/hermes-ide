@@ -840,7 +840,8 @@ pub fn on_rejected(app: &AppHandle, session_id: &str, found: super::watch::Found
 }
 
 /// Start a session's agent again with another model, effort or account
-/// (the refusal banner's buttons). `modelId` and `effort` are the new values
+/// (the refusal banner's buttons), or to resume its conversation after it
+/// exited (the action bar's Resume). `modelId` and `effort` are the new values
 /// (null: the default model, no effort); the account changes only when
 /// given. Only after the previous launch ended.
 #[tauri::command]
@@ -897,6 +898,7 @@ fn relaunch(app: &AppHandle, session_id: &str, options: &AgentLaunchOptions) -> 
         effort: options.effort.clone(),
         account_id: options.account_id.clone().or(launch.account_id.clone()),
         purpose: Some("agent".to_string()),
+        resume: options.resume,
     };
     let resolved = session_launch(app, &provider, &wanted)?;
     launch.model_id = resolved.model_id;
@@ -924,7 +926,9 @@ fn relaunch(app: &AppHandle, session_id: &str, options: &AgentLaunchOptions) -> 
         // A refused fresh launch never started a conversation: start fresh.
         // A refused resume resumes the same conversation again (if the
         // vendor no longer knows it, `hi`'s resume fallback starts fresh).
-        if !launch.resumed || e2e_relaunch_fresh() {
+        // Resume (the action bar, after the agent exited) continues the
+        // conversation the agent last reported.
+        if !(launch.resumed || options.resume == Some(true)) || e2e_relaunch_fresh() {
             s.vendor_session_id = None;
         }
         s.agent_launch = launch;
@@ -949,7 +953,14 @@ fn relaunch(app: &AppHandle, session_id: &str, options: &AgentLaunchOptions) -> 
             .map_err(|e| e.to_string())?;
         w.flush().map_err(|e| e.to_string())?;
     }
-    log::info!("[CAPS] {session_id}: relaunched {provider} after a refused launch");
+    log::info!(
+        "[CAPS] {session_id}: relaunched {provider}{}",
+        if options.resume == Some(true) {
+            " to resume its conversation"
+        } else {
+            " after a refused launch"
+        }
+    );
     crate::pty::launch::watch_signals(app.clone(), session, prepared.watch);
     Ok(())
 }

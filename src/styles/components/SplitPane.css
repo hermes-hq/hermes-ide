@@ -118,9 +118,6 @@
 .split-pane-header .scope-bar {
   border-bottom: none;
 }
-.split-pane-header .provider-actions-bar {
-  border-bottom: none;
-}
 
 /* Mode-conversion confirm overlay (right-click "Convert to terminal/agent") */
 .split-pane-mode-confirm {

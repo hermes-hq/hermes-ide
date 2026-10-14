@@ -19,6 +19,8 @@ import { PermissionPicker, CLAUDE_PERMISSION_MODES } from "./PermissionPicker";
 import { EffortPicker } from "./EffortPicker";
 import { CLAUDE_MODEL_OPTIONS } from "../agent/modelOptions";
 import { useI18n } from "../i18n/I18nProvider";
+import { AgentActionsRow } from "./AgentActionsRow";
+import { getAgent } from "../catalog/agentCatalog";
 
 /** Claude's published `--effort` levels (verified via `claude --help`). */
 const CLAUDE_EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
@@ -749,6 +751,21 @@ export function SessionComposer() {
     return () => window.removeEventListener("hermes:expand-composer", handler);
   }, [composerSessionId, dispatch]);
 
+  /** The action row's commands go the way a typed one does: native over
+   *  stream-json, or (an interactive CLI verb) to the embedded terminal. */
+  const sendCommandText = useCallback(
+    async (text: string) => {
+      if (!composerSessionId) return;
+      if (resolveSlashCommandKind(text, slashCommandsFromInit) === "cli") {
+        setPendingCliCommand(text);
+        return;
+      }
+      await submitAgentMessage(composerSessionId, text, []);
+    },
+    [composerSessionId, slashCommandsFromInit, submitAgentMessage],
+  );
+
+
   if (!composerSessionId) {
     return null;
   }
@@ -815,6 +832,19 @@ export function SessionComposer() {
   };
 
   return (
+    <>
+    {/* The session's action row sits above the composer, outside its
+        resizable height, so it never takes the textarea's room. */}
+    <AgentActionsRow
+      sessionId={composerSessionId}
+      agentName={getAgent("claude")?.name ?? "Claude"}
+      cwd={init?.cwd ?? session?.working_directory ?? null}
+      liveCommands={slashCommandsFromInit}
+      hasDraft={draft.trim().length > 0 || pendingImages.length > 0}
+      sendCommand={sendCommandText}
+      permissionMode={pendingPerm ?? init?.permissionMode ?? "default"}
+      setPermissionMode={(mode) => void handlePermSelect(mode)}
+    />
     <div
       ref={wrapperRef}
       className={`session-composer session-composer-claude ${isDragOver ? "session-composer-drag-over" : ""}`}
@@ -1173,5 +1203,6 @@ export function SessionComposer() {
         </div>
       </div>
     </div>
+    </>
   );
 }

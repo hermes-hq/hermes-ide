@@ -16,6 +16,7 @@ import type { PersistedMemory } from "../types";
 import { useI18n } from "../i18n/I18nProvider";
 import { isFeatureFlagEnabled } from "../featureFlags";
 import { useSessionEvents } from "../agent/contract/sessionEventStore";
+import { useSessionSends } from "../sessionActions/recent";
 import { spendOf, spendText } from "../fleet/spend";
 import { CloseButton } from "./ui/Button";
 import { NativeSelect } from "./ui/Select";
@@ -286,6 +287,7 @@ const COPY_FEEDBACK_MS = 2000;
 export function ContextPanel({ session }: ContextPanelProps) {
   const { t } = useI18n();
   const { metrics, detected_agent } = session;
+  const sends = useSessionSends(session.id);
   const { state: sessionState, dispatch } = useSession();
   const contextManager = useContextState(session);
   const [workspaceInput, setWorkspaceInput] = useState("");
@@ -786,14 +788,16 @@ export function ContextPanel({ session }: ContextPanelProps) {
           </div>
         )}
 
-        {/* Recent Actions (simplified since F4 actions bar handles execution) */}
-        {metrics.recent_actions.length > 0 && (
+        {/* The commands the person sent to this session's agent (the action
+            bar, the Commands list, the palette, or typed at its prompt);
+            nothing here is read from the agent's output. */}
+        {sends.length > 0 && (
           <div className="ctx-section">
-            <div className="ctx-section-title">Recent Actions</div>
+            <div className="ctx-section-title">{t("sessionActions.sent")}</div>
             <div className="ctx-action-history">
-              {metrics.recent_actions.slice(-5).map((a, i) => (
-                <div key={`${a.command}-${i}`} className="ctx-action-entry mono">
-                  {a.command} <span className="text-muted">{a.is_suggestion ? "suggested" : "executed"}</span>
+              {sends.slice(0, 5).map((send) => (
+                <div key={`${send.text}-${send.at}`} className="ctx-action-entry mono">
+                  {send.text} <span className="text-muted">{t(`sessionActions.via.${send.via}`)}</span>
                 </div>
               ))}
             </div>

@@ -4,7 +4,8 @@ import { isOverFileDropTarget, quoteDroppedPath } from "../utils/fileDropTarget"
 import { lazyView } from "../utils/lazyView";
 import { useSession } from "../state/SessionContext";
 import { ScopeBar } from "./ScopeBar";
-import { ProviderActionsBar } from "./ProviderActionsBar";
+import { SessionActionsBar } from "./SessionActionsBar";
+import { useShortPane } from "../hooks/useShortPane";
 import { AgentSetupChips } from "./AgentSetupChips";
 import { TerminalPane } from "./TerminalPane";
 import { SessionStatusStrip } from "./SessionStatusStrip";
@@ -331,6 +332,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
 
   const { showMenu: showPaneMenu } = useContextMenu(handlePaneHeaderAction);
   const statusStripOn = useStatusStripEnabled();
+  // A short terminal pane folds the action bar and the turn bar into the header line.
+  const shortPane = useShortPane(paneRef, sessionId, !!session && session.mode !== "agent");
+  const turnBarOn = !!session && session.mode !== "agent" && isFeatureFlagEnabled("turnLedger");
 
   if (!session) return null;
 
@@ -351,6 +355,10 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           {session.mode !== "agent" && <AgentSetupChips session={session} />}
           {/* Done-When checks (F27), with the launch helper that runs them. */}
           {session.mode !== "agent" && isFeatureFlagEnabled("launchHelper") && <DoneWhenChip sessionId={sessionId} />}
+          {shortPane && <SessionActionsBar sessionId={sessionId} paneId={paneId} focused={isFocused} compact />}
+          {shortPane && turnBarOn && (
+            <TurnBar compact sessionId={sessionId} workingDirectory={session.working_directory} folders={[...(session.extra_dirs ?? []), ...session.workspace_paths]} />
+          )}
           <CloseButton
             className="split-pane-close"
             label="Close pane"
@@ -358,18 +366,9 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
           />
         </div>
         <ScopeBar sessionId={sessionId} />
-        {/* ProviderActionsBar is the legacy TUI quick-actions row. Hide it
-            in agent mode — the new chat composer is the input surface. */}
-        {session.mode !== "agent" && (session.detected_agent || session.ai_provider) && (
-          <ProviderActionsBar
-            sessionId={sessionId}
-            agentName={session.detected_agent?.name || session.ai_provider || ""}
-            actions={session.metrics.available_actions}
-            recentActions={session.metrics.recent_actions}
-            phase={session.phase}
-            aiProvider={session.ai_provider}
-          />
-        )}
+        {/* The session's action bar (terminal sessions; the Agent view has
+            the same row above its composer). */}
+        {!shortPane && <SessionActionsBar sessionId={sessionId} paneId={paneId} focused={isFocused} />}
       </div>
       <div className="split-pane-content">
         <div
@@ -425,7 +424,7 @@ export function SplitPane({ paneId, sessionId }: SplitPaneProps) {
       </div>
       {/* F20: the turn bar (Diff / Restore per agent turn) under a terminal
           session, behind the turnLedger flag. */}
-      {session.mode !== "agent" && isFeatureFlagEnabled("turnLedger") && (
+      {turnBarOn && !shortPane && (
         <TurnBar sessionId={sessionId} workingDirectory={session.working_directory} folders={[...(session.extra_dirs ?? []), ...session.workspace_paths]} />
       )}
 

@@ -99,6 +99,12 @@ const hooks = {
    * account exactly as the launcher does (create_session with agentLaunch,
    * through the helper), and show it. Returns the new session's id.
    */
+  /** Split the focused pane and show a session in the new pane ("horizontal": side by side). */
+  splitWith: (sessionId: string, direction: "horizontal" | "vertical"): void => {
+    const bridge = getE2ESessionBridge();
+    if (!bridge) throw new Error("the session provider has not registered its e2e bridge");
+    bridge.split(sessionId, direction);
+  },
   launchWithChoice: async (opts: {
     agentId: string;
     task?: string;

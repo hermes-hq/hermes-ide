@@ -24,7 +24,6 @@ vi.mock("../terminal/TerminalPool", () => ({
   destroy: vi.fn(),
   updateSettings: vi.fn(),
   writeScrollback: vi.fn(),
-  sendShortcutCommand: vi.fn(),
   focusTerminal: vi.fn(),
 }));
 vi.mock("../utils/notifications", () => ({

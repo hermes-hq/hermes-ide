@@ -8,6 +8,7 @@ pub mod opencode_stream;
 pub mod os_activity;
 pub mod osc_signals;
 pub mod patterns;
+pub mod session_command;
 pub mod session_markers;
 pub mod shell_integration;
 pub mod spawn;
@@ -358,7 +359,7 @@ impl PtyManager {
 
     /// The shell itself holds the terminal's foreground (it is at its
     /// prompt), so no agent is there to read what is typed.
-    fn shell_has_terminal(pty: &PtySession) -> bool {
+    pub(crate) fn shell_has_terminal(pty: &PtySession) -> bool {
         let Some(pid) = pty.transport.pid() else {
             return false;
         };
@@ -497,9 +498,10 @@ impl PtyManager {
 }
 
 /// Typed when the attached projects change (`nudge_project_context`); the
-/// variable is set in the agent's environment.
-const PROJECTS_NUDGE: &str =
-    "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.";
+/// variable is set in the agent's environment. Short, so it stays one line
+/// in an agent's input box (a long line grew Claude Code's box to several
+/// rows and pushed its footer out of a short pane).
+const PROJECTS_NUDGE: &str = "Read $HERMES_CONTEXT (project context updated).";
 
 /// How long after a line `submit_line` presses Enter for a program without
 /// bracketed paste, so the two arrive as separate reads (measured with
@@ -986,6 +988,97 @@ mod tests {
         mgr
     }
 
+    /// The session action bar: a command reaches a waiting agent as one
+    /// line with Enter, and never touches a line the person is writing (the
+    /// old quick actions sent Backspaces over it), a working agent, or the
+    /// shell after the agent exited.
+    #[test]
+    fn a_session_command_is_typed_only_into_a_waiting_agent_with_an_empty_line() {
+        use super::session_command::CommandOutcome;
+        let typed = Typed::default();
+        let session = Arc::new(StdMutex::new(waiting_claude()));
+        let mut a = OutputAnalyzer::new();
+        a.process(b"\x1b[?2004h");
+        a.is_busy = false;
+        let analyzer = Arc::new(StdMutex::new(a));
+        let pty = |transport: Box<dyn super::transport::PtyTransport>| super::PtySession {
+            transport,
+            writer: Arc::new(StdMutex::new(
+                Box::new(typed.clone()) as Box<dyn std::io::Write + Send>
+            )),
+            input: None,
+            session: Arc::clone(&session),
+            analyzer: Arc::clone(&analyzer),
+            shell_integration: super::shell_integration::ShellIntegration::None,
+            hermes_suggestions: false,
+            size: (24, 80),
+            sized: Arc::new(std::sync::atomic::AtomicBool::new(true)),
+        };
+        let mut mgr = PtyManager::new();
+        mgr.sessions
+            .insert("s1".into(), pty(Box::new(CountingPty(Arc::default()))));
+
+        // A draft on the line: nothing at all is written (no Backspace).
+        analyzer.lock().unwrap().typed_line.feed(b"fix the bug");
+        assert_eq!(
+            mgr.run_session_command("s1", "/compact", false),
+            Ok(CommandOutcome::Draft)
+        );
+        assert_eq!(typed.text(), "");
+
+        // The agent is working: nothing is written.
+        analyzer.lock().unwrap().typed_line.feed(b"\x15");
+        session.lock().unwrap().phase = SessionPhase::Busy;
+        assert_eq!(
+            mgr.run_session_command("s1", "/compact", false),
+            Ok(CommandOutcome::Busy)
+        );
+        assert_eq!(typed.text(), "");
+        // The agent's own turn-end report outranks the terminal's guess (its
+        // phase changes only after 2 s of quiet), but never a draft.
+        analyzer.lock().unwrap().typed_line.feed(b"x");
+        assert_eq!(
+            mgr.run_session_command("s1", "/compact", true),
+            Ok(CommandOutcome::Draft)
+        );
+        analyzer.lock().unwrap().typed_line.feed(b"\x15");
+        assert_eq!(typed.text(), "");
+
+        // Waiting with an empty line: the command and Enter, as a paste.
+        session.lock().unwrap().phase = SessionPhase::NeedsInput;
+        assert_eq!(
+            mgr.run_session_command("s1", "/compact", false),
+            Ok(CommandOutcome::Sent)
+        );
+        assert_eq!(typed.text(), "\x1b[200~/compact\x1b[201~\r");
+
+        // A line with keys in it is refused outright.
+        assert!(mgr
+            .run_session_command("s1", "\x7f\x7f/clear", false)
+            .is_err());
+        assert!(mgr
+            .run_session_command("s1", "/clear\r/exit", false)
+            .is_err());
+
+        // The agent exited (the shell holds the terminal): nothing is typed.
+        mgr.sessions
+            .insert("s1".into(), pty(Box::new(ShellAtPrompt)));
+        assert_eq!(
+            mgr.run_session_command("s1", "/compact", false),
+            Ok(CommandOutcome::NoAgent)
+        );
+        // Not even when a stale report says it waits.
+        assert_eq!(
+            mgr.run_session_command("s1", "/compact", true),
+            Ok(CommandOutcome::NoAgent)
+        );
+        assert_eq!(
+            mgr.run_session_command("gone", "/compact", false),
+            Ok(CommandOutcome::NoAgent)
+        );
+        assert_eq!(typed.text(), "\x1b[200~/compact\x1b[201~\r");
+    }
+
     /// Claude Code 2.1.296 took the nudge typed in one burst as a paste: its
     /// Enter became a new line and the nudge sat in the input, never sent.
     #[test]
@@ -1360,7 +1453,6 @@ mod tests {
         let analysis = LineAnalysis {
             token_update: None,
             tool_call: None,
-            action: None,
             phase_hint: Some(PhaseHint::InputNeeded),
             memory_fact: None,
         };
@@ -1380,7 +1472,6 @@ mod tests {
         let analysis = LineAnalysis {
             token_update: None,
             tool_call: None,
-            action: None,
             phase_hint: Some(PhaseHint::PromptDetected),
             memory_fact: None,
         };
@@ -1397,7 +1488,6 @@ mod tests {
         let analysis = LineAnalysis {
             token_update: None,
             tool_call: None,
-            action: None,
             phase_hint: Some(PhaseHint::WorkStarted),
             memory_fact: None,
         };
@@ -1443,7 +1533,6 @@ mod tests {
         let analysis = LineAnalysis {
             token_update: None,
             tool_call: None,
-            action: None,
             phase_hint: Some(PhaseHint::PromptDetected),
             memory_fact: None,
         };
@@ -1463,7 +1552,6 @@ mod tests {
         let analysis = LineAnalysis {
             token_update: None,
             tool_call: None,
-            action: None,
             phase_hint: Some(PhaseHint::WorkStarted),
             memory_fact: None,
         };
@@ -1481,7 +1569,6 @@ mod tests {
         let analysis = LineAnalysis {
             token_update: None,
             tool_call: None,
-            action: None,
             phase_hint: Some(PhaseHint::PromptDetected),
             memory_fact: None,
         };
@@ -1495,7 +1582,6 @@ mod tests {
         let analysis2 = LineAnalysis {
             token_update: None,
             tool_call: None,
-            action: None,
             phase_hint: Some(PhaseHint::PromptDetected),
             memory_fact: None,
         };
@@ -1564,7 +1650,6 @@ mod tests {
             let analysis = LineAnalysis {
                 token_update: None,
                 tool_call: None,
-                action: None,
                 phase_hint: Some(PhaseHint::WorkStarted),
                 memory_fact: None,
             };

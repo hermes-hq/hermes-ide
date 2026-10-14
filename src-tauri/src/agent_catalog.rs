@@ -50,6 +50,22 @@ pub struct Agent {
     /// Custom agent.
     #[serde(default)]
     pub capabilities: Option<Capabilities>,
+    /// The agent's built-in commands (the session action bar and its
+    /// Commands list). The frontend reads labels and actions; the backend
+    /// only checks a line it is asked to send against nothing here: any
+    /// one-line command the person picked is sent as they picked it.
+    #[serde(default)]
+    pub commands: Vec<CatalogCommand>,
+}
+
+/// One built-in command of an agent (`agents[].commands`).
+#[derive(Debug, Deserialize)]
+pub struct CatalogCommand {
+    /// What is typed at the agent's prompt ("/compact").
+    pub id: String,
+    /// The cross-agent action it performs, if any.
+    #[serde(default)]
+    pub action: Option<String>,
 }
 
 /// The catalog's `capabilities` block (2.0 launch contract). Facts from the
@@ -162,7 +178,32 @@ pub struct Setup {
     pub instructions: Instructions,
     pub settings: SetupPaths,
     pub skills: SetupPaths,
+    /// How a person invokes a skill at the prompt (`/` or `$`); None when
+    /// only the model picks skills.
+    #[serde(default)]
+    pub skill_invoke: Option<String>,
+    /// Folders of the person's own commands (`crate::agent_commands`).
+    #[serde(default)]
+    pub custom_commands: Vec<CustomCommandDir>,
     pub mcp: Option<Vec<McpSource>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CustomCommandDir {
+    /// Relative to a project folder, or `~/`-relative.
+    pub path: String,
+    /// `project` or `global`.
+    pub scope: String,
+    /// `markdown` (`*.md`, frontmatter `description`) or `toml`
+    /// (`*.toml`, a `description` key).
+    pub format: String,
+    /// Whether sub-folders add a `:` namespace (default true).
+    #[serde(default = "default_true")]
+    pub namespaces: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Debug, Deserialize)]
@@ -506,6 +547,45 @@ mod tests {
             Some(&"{signals_file}".to_string())
         );
         assert_eq!(agent("custom").unwrap().terminal.signals.method, "none");
+    }
+
+    /// The Copilot entry offers the `copilot` CLI's slash commands, never
+    /// the retired `gh copilot` extension's (kept from the old quick-action
+    /// list's test, now against the catalog every surface reads).
+    #[test]
+    fn copilot_commands_are_copilot_cli_slash_commands() {
+        let copilot = agent("copilot").unwrap();
+        let ids: Vec<&str> = copilot.commands.iter().map(|c| c.id.as_str()).collect();
+        assert!(
+            ids.contains(&"/compact") && ids.contains(&"/review"),
+            "{ids:?}"
+        );
+        assert!(ids.iter().all(|c| c.starts_with('/')), "{ids:?}");
+        assert!(!ids.iter().any(|c| c.contains("gh copilot")), "{ids:?}");
+    }
+
+    /// Kiro's chat takes slash commands only: the old quick actions typed
+    /// `kiro-cli chat` into it.
+    #[test]
+    fn every_catalog_command_is_one_line_typed_at_the_prompt() {
+        for a in &catalog().agents {
+            let mut actions = std::collections::HashSet::new();
+            let mut ids = std::collections::HashSet::new();
+            for c in &a.commands {
+                assert!(
+                    (c.id.starts_with('/') || c.id.starts_with('$'))
+                        && !c.id.chars().any(char::is_control)
+                        && !c.id.contains("kiro-cli"),
+                    "{}: {:?}",
+                    a.id,
+                    c.id
+                );
+                assert!(ids.insert(c.id.as_str()), "{}: {} twice", a.id, c.id);
+                if let Some(action) = &c.action {
+                    assert!(actions.insert(action.as_str()), "{}: {action} twice", a.id);
+                }
+            }
+        }
     }
 
     #[test]

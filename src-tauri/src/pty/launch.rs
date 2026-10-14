@@ -6097,8 +6097,6 @@ pub(crate) mod tests {
                 tool_call_summary: HashMap::new(),
                 files_touched: vec![],
                 recent_errors: vec![],
-                recent_actions: vec![],
-                available_actions: vec![],
                 memory_facts: vec![],
                 latency_p50_ms: None,
                 latency_p95_ms: None,

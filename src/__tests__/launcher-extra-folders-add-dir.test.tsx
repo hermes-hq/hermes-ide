@@ -35,7 +35,7 @@ function session(args: Record<string, unknown>) {
     workspace_paths: paths, detected_agent: null, ai_provider: args.aiProvider, context_injected: false, mode,
     metrics: {
       output_lines: 0, error_count: 0, stuck_score: 0, token_usage: {}, tool_calls: [], tool_call_summary: {},
-      files_touched: [], recent_errors: [], recent_actions: [], available_actions: [], memory_facts: [],
+      files_touched: [], recent_errors: [], memory_facts: [],
       latency_p50_ms: null, latency_p95_ms: null, latency_samples: [], token_history: [],
     },
   };

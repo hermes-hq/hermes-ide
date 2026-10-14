@@ -62,7 +62,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, apps, onCleanup }) => {
 
   log("a Claude task in a terminal");
   await launchWithChoice(bridge, { agentId: "claude", cwd: f.repo, task: "Add a contributing guide" });
-  await bridge.waitFor("the session's actions bar", `return !!e2e.first(".pab-compose-btn");`, { timeoutMs: 30_000 }).catch(() => log("  (no Compose button on this session)"));
+  await bridge.waitFor("the session's action bar", `return !!e2e.first("[data-session-prompts]");`, { timeoutMs: 30_000 }).catch(() => log("  (no Prompts button on this session)"));
   await sleep(1500);
   await audit(bridge, "02-main-with-task", null);
 

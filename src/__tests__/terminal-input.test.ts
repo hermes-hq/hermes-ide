@@ -148,36 +148,16 @@ describe("Terminal input: duplicate keystroke prevention", () => {
   });
 });
 
-// ─── Shortcut command: triggerDataEvent-based input with backspace clearing ──
+// ─── Session commands never edit the person's input ──
 
-describe("Terminal input: sendShortcutCommand architecture", () => {
-  it("sendShortcutCommand uses triggerDataEvent (with writeToSession fallback)", () => {
-    const fnMatch = source.match(/export function sendShortcutCommand[\s\S]*?^}/m);
-    expect(fnMatch).not.toBeNull();
-    const fnBody = fnMatch![0];
-
-    // Must use triggerDataEvent for command injection
-    expect(fnBody).toContain("triggerDataEvent");
-    // writeToSession is the fallback path when triggerDataEvent is unavailable
-    expect(fnBody).toContain("writeToSession");
+describe("Terminal input: no command is typed over the person's input", () => {
+  it("there is no shortcut writer that erases the line with Backspaces", () => {
+    expect(source).not.toMatch(/export function sendShortcutCommand/);
   });
 
-  it("sendShortcutCommand uses backspaces to clear existing input", () => {
-    const fnMatch = source.match(/export function sendShortcutCommand[\s\S]*?^}/m);
-    expect(fnMatch).not.toBeNull();
-    const fnBody = fnMatch![0];
-
-    // Uses \x7f (DEL/backspace) repeated by eraseLen to clear existing text
-    expect(fnBody).toContain("\\x7f");
-    expect(fnBody).toContain("eraseLen");
-  });
-
-  it("sendShortcutCommand does NOT append Enter — user reviews and presses Enter manually", () => {
-    const fnMatch = source.match(/export function sendShortcutCommand[\s\S]*?^}/m);
-    expect(fnMatch).not.toBeNull();
-    const fnBody = fnMatch![0];
-
-    // The function inserts the command on the prompt without executing it
-    expect(fnBody).toContain("NO \\r");
+  it("a line the person enters at an agent's prompt is reported (for Recent), never one at the shell", () => {
+    const fn = source.match(/function reportSubmittedCommand[\s\S]*?^}/m);
+    expect(fn).not.toBeNull();
+    expect(fn![0]).toContain("entry.shellIsForeground");
   });
 });

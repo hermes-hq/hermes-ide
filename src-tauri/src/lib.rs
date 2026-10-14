@@ -1,6 +1,7 @@
 mod agent;
 pub mod agent_caps;
 mod agent_catalog;
+mod agent_commands;
 mod agent_doctor;
 mod agent_setup;
 mod analytics;
@@ -1001,6 +1002,7 @@ pub fn run() {
             pty::ssh_download_file,
             pty::write_to_session,
             pty::nudge_project_context,
+            pty::session_command::run_session_command,
             pty::resize_session,
             pty::close_session,
             pty::stop_session_terminal,
@@ -1286,6 +1288,7 @@ pub fn run() {
             // Prewarm: static reads from disk before SDK init lands.
             claude_config::read_static_mcp_servers,
             claude_config::read_static_slash_commands,
+            agent_commands::discover_agent_commands,
             claude_config::read_static_memory_paths,
             // What each agent loads, and how it was started (F30, F35).
             agent_setup::agent_setup_overview,
@@ -1551,8 +1554,6 @@ mod tests {
                 tool_call_summary: std::collections::HashMap::new(),
                 files_touched: vec![],
                 recent_errors: vec![],
-                recent_actions: vec![],
-                available_actions: vec![],
                 memory_facts: vec![],
                 latency_p50_ms: None,
                 latency_p95_ms: None,

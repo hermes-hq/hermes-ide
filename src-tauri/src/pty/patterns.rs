@@ -40,9 +40,6 @@ lazy_static! {
     pub static ref EDIT_FILE_RE: Regex = Regex::new(
         r"^Edit file$"
     ).unwrap();
-    pub static ref SLASH_CMD_RE: Regex = Regex::new(
-        r"(?:^|\s)(\/(?:init|build|test|run|review|commit|help|clear|compact|memory|config|cost|doctor|login|logout|bug|terminal-setup|allowed-tools|permissions|vim|add|drop|undo|diff|ls|tokens|model|models|settings|map|map-refresh|voice|paste|architect|ask|code|chat-mode|lint|web|read-only|reset|quit|exit|git|apply|stats|usage|save|restore|sandbox|tools|shell|edit|yolo|about|agents|auth|chat|commands|compress|copy|copy-context|docs|editor|editor-model|extensions|hooks|ide|mcp|ok|plan|policies|privacy|profile|resume|shortcuts|skills|theme|approvals|collab|agent|mention|status|debug-config|statusline|apps|feedback|ps|clean|personality|realtime|new|fork|rename|multiline-mode|reasoning-effort|report|think-tokens|weak-model|load|context)\b)"
-    ).unwrap();
     pub static ref FILE_PATH_RE: Regex = Regex::new(
         r"(?:^|\s)((?:/[\w.@-]+)+\.[\w]+)"
     ).unwrap();
@@ -59,10 +56,6 @@ lazy_static! {
     // Tool call patterns: "✓ ReadFile /path" or "? Shell git status" or "x Edit file.ts"
     pub static ref GEMINI_TOOL_RE: Regex = Regex::new(
         r"^[✓?xo⊷\-]\s+(ReadFile|WriteFile|Edit|Shell|FindFiles|SearchText|ReadFolder|ReadManyFiles|GoogleSearch|WebFetch|SaveMemory|WriteTodos|GetInternalDocs)\b"
-    ).unwrap();
-    // Gemini slash commands — comprehensive set
-    pub static ref GEMINI_SLASH_RE: Regex = Regex::new(
-        r"(?:^|\s)(\/(?:about|agents|auth|bug|chat|clear|commands|compress|copy|docs|editor|extensions|help|hooks|ide|init|mcp|memory|model|permissions|plan|policies|privacy|profile|quit|exit|restore|resume|settings|shells|shortcuts|skills|stats|usage|terminal-setup|theme|tools|vim)\b)"
     ).unwrap();
 
     // ─── Aider patterns ─────────────────────────────────────────────
@@ -94,10 +87,6 @@ lazy_static! {
     pub static ref AIDER_PROMPT_RE: Regex = Regex::new(
         r"^(?:\w+\s?)*>\s*$"
     ).unwrap();
-    // Aider slash commands
-    pub static ref AIDER_SLASH_RE: Regex = Regex::new(
-        r"(?:^)(\/(?:add|architect|ask|chat-mode|clear|code|commit|context|copy|copy-context|diff|drop|edit|editor|editor-model|exit|quit|git|help|lint|load|ls|map|map-refresh|model|models|multiline-mode|ok|paste|read-only|reasoning-effort|report|reset|run|save|settings|test|think-tokens|tokens|undo|voice|weak-model|web)\b)"
-    ).unwrap();
 
     // ─── Codex CLI patterns ─────────────────────────────────────────
     // Token usage line from /status: "Token usage:      1.9K total  (1K input + 900 output)"
@@ -128,23 +117,11 @@ lazy_static! {
     pub static ref CODEX_MODEL_RE: Regex = Regex::new(
         r"(?i)^(?:\s*model:\s*)(\S+)"
     ).unwrap();
-    // Approval: "✔ You approved codex to" or "✗ You did not approve"
-    pub static ref CODEX_APPROVAL_RE: Regex = Regex::new(
-        r"^[✔✗]\s*You\s+(?:approved|did not approve|canceled)"
-    ).unwrap();
-    // Codex slash commands
-    pub static ref CODEX_SLASH_RE: Regex = Regex::new(
-        r"(?:^|\s)(\/(?:model|approvals|permissions|setup-default-sandbox|experimental|skills|review|rename|new|resume|fork|init|compact|plan|collab|agent|diff|copy|mention|status|debug-config|statusline|theme|mcp|apps|logout|quit|exit|feedback|ps|clean|clear|personality|realtime|settings)\b)"
-    ).unwrap();
 
     // ─── Kiro CLI patterns ────────────────────────────────────────────
     // Tool call patterns: "✓ read /path" or "? shell git status" or "✓ write file.ts"
     pub static ref KIRO_TOOL_RE: Regex = Regex::new(
         r"^[✓?xo⊷✗\-]\s+(read|glob|grep|write|shell|aws|web_search|web_fetch|introspect|code|delegate|report|knowledge|thinking|todo|session|subagent)\b"
-    ).unwrap();
-    // Kiro slash commands
-    pub static ref KIRO_SLASH_RE: Regex = Regex::new(
-        r"(?:^|\s)(\/(?:help|quit|exit|q|clear|context|model|agent|chat|save|load|editor|reply|checkpoint|plan|knowledge|compact|paste|tools|prompts|hooks|usage|mcp|code|experiment|tangent|todos|issue|logdump|changelog)\b)"
     ).unwrap();
 
     // ─── Port detection ─────────────────────────────────────────────

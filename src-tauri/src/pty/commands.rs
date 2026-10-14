@@ -1291,8 +1291,6 @@ pub fn create_session(
             tool_call_summary: HashMap::new(),
             files_touched: Vec::new(),
             recent_errors: Vec::new(),
-            recent_actions: Vec::new(),
-            available_actions: Vec::new(),
             memory_facts: Vec::new(),
             latency_p50_ms: None,
             latency_p95_ms: None,

@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Scenario REAL-attach-nudge-claude (local only): a project attached to a
 // running terminal-mode Claude Code session through the pane's "+" picker
-// reaches the REAL `claude` CLI as a prompt: "Read the file at
-// $HERMES_CONTEXT for project context about the attached workspaces."
+// reaches the REAL `claude` CLI as a prompt: "Read $HERMES_CONTEXT
+// (project context updated)."
 // Proof is Claude's own transcript (a user message, or a queued one it took
 // in during a turn), not the screen.
 //
@@ -57,7 +57,7 @@ rmSync(logFile, { force: true });
 mkdirSync(evidenceDir, { recursive: true });
 const log = createLogger(logFile);
 
-const NUDGE = /Read the file at \$HERMES_CONTEXT for project context about the attached workspaces/;
+const NUDGE = /Read \$HERMES_CONTEXT \(project context updated\)\./;
 let failures = 0;
 function check(condition, message) {
   if (condition) log(`  ok — ${message}`);

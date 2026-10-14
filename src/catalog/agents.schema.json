@@ -7,6 +7,7 @@
   "additionalProperties": false,
   "required": [
     "version",
+    "actions",
     "agents"
   ],
   "properties": {
@@ -15,6 +16,14 @@
     },
     "version": {
       "const": 1
+    },
+    "actions": {
+      "description": "The cross-agent actions vocabulary: the session actions a person can pin to a session's action bar. Each agent maps the ones it has to its own command (agents[].commands[].action); an action an agent lacks is hidden for it. Labels and descriptions are interface strings (sessionActions.action.<id>.*), translated in every language pack.",
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/definitions/action"
+      }
     },
     "agents": {
       "type": "array",
@@ -25,6 +34,136 @@
     }
   },
   "definitions": {
+    "actionId": {
+      "enum": [
+        "compact",
+        "context",
+        "usage",
+        "model",
+        "plan",
+        "review",
+        "diff",
+        "rewind",
+        "resume",
+        "init",
+        "permissions",
+        "mcp",
+        "help",
+        "new_chat",
+        "exit",
+        "logout"
+      ]
+    },
+    "commandCategory": {
+      "description": "Where a command sits in the Commands list: the conversation's context, the session, the project, setup, or information.",
+      "enum": [
+        "context",
+        "session",
+        "project",
+        "setup",
+        "info"
+      ]
+    },
+    "action": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "category"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/actionId"
+        },
+        "category": {
+          "$ref": "#/definitions/commandCategory"
+        },
+        "destructive": {
+          "description": "Ends or replaces something the person has (the conversation, the running agent, the sign-in): never a chip, last in the Commands list, and asks first.",
+          "const": true
+        }
+      }
+    },
+    "commandText": {
+      "description": "What is typed at the agent's prompt: a slash command (or a $skill), optionally with fixed sub-command words. One line, no control characters.",
+      "type": "string",
+      "pattern": "^[/$][A-Za-z0-9][A-Za-z0-9:_.-]*( [A-Za-z0-9][A-Za-z0-9:_.-]*)*$",
+      "maxLength": 64
+    },
+    "agentCommand": {
+      "description": "One built-in command of the agent, curated from its current documentation. With `action`, the label and description come from the actions vocabulary; without it, `label` and `description` are required (English; translations live in src/sessionActions/messages).",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id"
+      ],
+      "properties": {
+        "id": {
+          "$ref": "#/definitions/commandText"
+        },
+        "action": {
+          "$ref": "#/definitions/actionId"
+        },
+        "label": {
+          "description": "Plain words, Title case, at most three words.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "description": {
+          "description": "One plain sentence, no trailing period.",
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 90,
+          "pattern": "[^.]$"
+        },
+        "category": {
+          "$ref": "#/definitions/commandCategory"
+        },
+        "destructive": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "consequence"
+          ],
+          "properties": {
+            "consequence": {
+              "description": "What the person loses, in one plain sentence.",
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 120
+            }
+          }
+        },
+        "aliases": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/commandText"
+          }
+        },
+        "since": {
+          "description": "The CLI version the command (or its current name) appeared in, when the docs say.",
+          "type": "string",
+          "pattern": "^[0-9]+\\.[0-9]+(\\.[0-9]+)?$"
+        },
+        "note": {
+          "description": "Maintainers' note: renames, removals, why it maps to this action.",
+          "type": "string"
+        }
+      },
+      "if": {
+        "required": [
+          "action"
+        ]
+      },
+      "else": {
+        "required": [
+          "label",
+          "description",
+          "category"
+        ]
+      }
+    },
     "placeholder": {
       "description": "Values Hermes fills in at launch.",
       "enum": [
@@ -593,6 +732,13 @@
             }
           }
         },
+        "commands": {
+          "description": "The agent's built-in commands Hermes offers in the session action bar and its Commands list, curated from the agent's current documentation (see each entry's note for renames). Ids are unique per agent; an action is mapped at most once.",
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/agentCommand"
+          }
+        },
         "setup": {
           "description": "Where the agent reads its instruction files, settings, skills and MCP servers. Hermes only reads these (the instruction-file link writes one project file on request).",
           "type": "object",
@@ -636,6 +782,48 @@
             },
             "skills": {
               "$ref": "#/definitions/setupPaths"
+            },
+            "skill_invoke": {
+              "description": "How a person invokes one of the skills above at the agent's prompt: '/' (/name) or '$' ($name); null when skills are only picked by the model.",
+              "enum": [
+                "/",
+                "$",
+                null
+              ]
+            },
+            "custom_commands": {
+              "description": "Folders of the person's own commands (the Commands list's Your commands). markdown: *.md files, sub-folders namespace with ':' (a/b.md is /a:b), frontmatter description; toml: *.toml with a description key, the same namespacing.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "path",
+                  "scope",
+                  "format"
+                ],
+                "properties": {
+                  "path": {
+                    "$ref": "#/definitions/setupPath"
+                  },
+                  "scope": {
+                    "enum": [
+                      "project",
+                      "global"
+                    ]
+                  },
+                  "format": {
+                    "enum": [
+                      "markdown",
+                      "toml"
+                    ]
+                  },
+                  "namespaces": {
+                    "description": "Whether sub-folders add a ':' namespace (default true).",
+                    "type": "boolean"
+                  }
+                }
+              }
             },
             "mcp": {
               "anyOf": [
