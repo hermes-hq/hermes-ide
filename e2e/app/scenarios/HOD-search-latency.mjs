@@ -128,6 +128,7 @@ await runLauncherQa(
           };
           el.focus();
           const t0 = performance.now();
+          (window.__libSearchLog ??= []).push({ typed: q, t: Math.round(t0) });
           Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(el, q);
           el.dispatchEvent(new Event("input", { bubbles: true }));
           // What the page shows on the way (logged when it is slow).
@@ -149,7 +150,7 @@ await runLauncherQa(
       const done = typed[typed.length - 1];
       if (done.ms > 300) {
         log(`  "${q}" took ${done.ms} ms: ${done.steps.join("; ")}`);
-        log(`  searches the page sent: ${JSON.stringify(await bridge.eval("return (window.__libSearchLog || []).slice(-6)"))}`);
+        log(`  searches the page sent: ${JSON.stringify(await bridge.eval("return (window.__libSearchLog || []).slice(-30)"))}`);
       }
       typed[typed.length - 1] = done.ms;
       await search(bridge, q);

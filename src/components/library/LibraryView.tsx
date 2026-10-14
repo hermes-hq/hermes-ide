@@ -9,7 +9,7 @@
 // open entry can be used in any session, started as a task with any
 // agent, or installed into the project for an agent.
 
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Chip, CloseButton, Segmented } from "../ui";
 import { HEALTH_ADVICE, depthSections, fillFromLeftover, isDeveloperRole, pairsWith, recentIds, usesFacets } from "../../library/everyday";
@@ -268,6 +268,26 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     },
     [query, filters, sort, showEverything, nav, context],
   );
+
+  // Test builds only: when an answer reaches the screen, and every main-thread stall over 50 ms.
+  useLayoutEffect(() => {
+    if (import.meta.env.VITE_HERMES_E2E !== "1" || answered === null) return;
+    const log = ((window as unknown as { __libSearchLog?: unknown[] }).__libSearchLog ??= []) as unknown[];
+    log.push({ committed: answered, t: Math.round(performance.now()), rows: hits.length, route: Boolean(page?.route) });
+  }, [answered, hits, page]);
+  useEffect(() => {
+    if (import.meta.env.VITE_HERMES_E2E !== "1" || typeof PerformanceObserver === "undefined") return;
+    const log = ((window as unknown as { __libSearchLog?: unknown[] }).__libSearchLog ??= []) as unknown[];
+    try {
+      const po = new PerformanceObserver((list) => {
+        for (const e of list.getEntries()) log.push({ longtask: Math.round(e.duration), t: Math.round(e.startTime) });
+      });
+      po.observe({ type: "longtask", buffered: false });
+      return () => po.disconnect();
+    } catch {
+      return;
+    }
+  }, []);
 
   useEffect(() => {
     if (!status?.ready || !searching_ || nav === "recent" || nav === "pinned" || nav === "installed" || nav === "mine" || nav === "classics") return;
