@@ -77,6 +77,10 @@ export interface AgentSetup {
 	instructions: { project: readonly string[]; global: readonly string[]; imports: boolean };
 	settings: { project: readonly string[]; global: readonly string[] };
 	skills: { project: readonly string[]; global: readonly string[] };
+	/** How a person invokes one of the skills at the agent's prompt ("/" or "$"); null: only the model picks them. */
+	skill_invoke?: "/" | "$" | null;
+	/** Folders of the person's own commands (the Commands list's "Your commands"). Read by the backend. */
+	custom_commands?: readonly { path: string; scope: "project" | "global"; format: "markdown" | "toml"; namespaces?: boolean }[];
 	mcp: readonly { path: string; scope: "project" | "global"; format: "json" | "toml" | "claude_local"; key: string }[] | null;
 }
 
@@ -99,6 +103,38 @@ export interface AgentEntry {
 	setup?: AgentSetup;
 	/** What a person can choose at launch (2.0 launch contract). Read by the backend (src-tauri/src/agent_caps). */
 	capabilities?: AgentCapabilitiesSpec;
+	/** The agent's built-in commands, curated from its docs (the session action bar and its Commands list). */
+	commands?: readonly AgentCommandSpec[];
+}
+
+/** The cross-agent actions a person can pin to a session's action bar (catalog `actions`). */
+export type SessionActionId =
+	| "compact" | "context" | "usage" | "model" | "plan" | "review" | "diff" | "rewind"
+	| "resume" | "init" | "permissions" | "mcp" | "help" | "new_chat" | "exit" | "logout";
+
+export type CommandCategory = "context" | "session" | "project" | "setup" | "info";
+
+export interface SessionActionSpec {
+	id: SessionActionId;
+	category: CommandCategory;
+	/** Ends or replaces something the person has: never a chip, asks first. */
+	destructive?: true;
+}
+
+/** One built-in command of an agent (catalog `agents[].commands`). */
+export interface AgentCommandSpec {
+	/** What is typed at the agent's prompt ("/compact", "/context show", "$skill"). */
+	id: string;
+	/** The cross-agent action this command performs for the agent. */
+	action?: SessionActionId;
+	/** English label and description (required without `action`). */
+	label?: string;
+	description?: string;
+	category?: CommandCategory;
+	destructive?: { consequence: string };
+	aliases?: readonly string[];
+	since?: string;
+	note?: string;
 }
 
 /** The catalog's `capabilities` block: facts from the verified capability matrix. */
@@ -133,6 +169,7 @@ export interface AgentCapabilitiesSpec {
 
 export interface AgentCatalog {
 	version: 1;
+	actions: readonly SessionActionSpec[];
 	agents: readonly AgentEntry[];
 }
 

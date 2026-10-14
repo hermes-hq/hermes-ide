@@ -47,6 +47,11 @@
 .h-chip--danger { border-color: var(--danger-border); color: var(--danger-fg); }
 .h-chip--danger.h-chip--selected { background: var(--danger-dim); border-color: var(--danger-fg); color: var(--danger-fg); }
 
+/* Needs attention soon (a context window nearly full): the warning ink on
+ * its tint, as the warning badge. */
+.h-chip--warning { background: var(--warning-dim); border-color: var(--warning-ink); color: var(--warning-ink); }
+.h-chip--warning.h-chip--action:hover:not(:disabled) { background: var(--warning-dim); border-color: var(--warning-ink); }
+
 /* A long value is cut with an ellipsis rather than widening the row. */
 .h-chip { max-width: 100%; }
 .h-chip-button { min-width: 0; max-width: 100%; gap: var(--space-1); }

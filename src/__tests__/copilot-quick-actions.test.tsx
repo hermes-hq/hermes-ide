@@ -1,32 +1,45 @@
 // @vitest-environment jsdom
 /**
- * F06 follow-up: the Copilot provider now launches the `copilot` CLI, so the
- * quick-action pills must offer its slash commands, not the retired
+ * F06 follow-up, kept for the session action bar: the Copilot provider
+ * launches the `copilot` CLI, so its actions and Commands list offer that
+ * CLI's slash commands (from the agent catalog), never the retired
  * `gh copilot suggest` / `gh copilot explain` extension commands.
  *
- * Renders the real ProviderActionsBar and clicks a pill; only the terminal
- * write path is mocked so the sent command can be observed.
+ * Renders the real SessionActionsBar; only the backend is a stand-in, so
+ * the command sent to the session can be observed.
  */
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { render, screen, fireEvent, cleanup } from "@testing-library/react";
+import { render, screen, fireEvent, cleanup, act, within } from "@testing-library/react";
 import "@testing-library/jest-dom/vitest";
 
-const sent: { sessionId: string; command: string }[] = [];
-vi.mock("../terminal/TerminalPool", () => ({
-  sendShortcutCommand: (sessionId: string, command: string) => sent.push({ sessionId, command }),
+const h = vi.hoisted(() => ({ sent: [] as { sessionId: unknown; line: unknown }[] }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: vi.fn(async (cmd: string, args: Record<string, unknown> = {}) => {
+    if (cmd === "run_session_command") {
+      h.sent.push({ sessionId: args.sessionId, line: args.line });
+      return "sent";
+    }
+    if (cmd === "discover_agent_commands") return [];
+    return undefined;
+  }),
 }));
+vi.mock("../terminal/TerminalPool", () => ({ focusTerminal: vi.fn(), setSubmittedCommandListener: vi.fn(), getTerminal: () => null }));
 vi.mock("../state/SessionContext", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../state/SessionContext")>()),
-  useSession: () => ({ dispatch: vi.fn() }),
+  useSession: () => ({
+    state: { sessions: { s1: { id: "s1", label: "copilot", mode: "terminal", ai_provider: "copilot", detected_agent: null, working_directory: "/fixture-home/p" } } },
+    dispatch: vi.fn(),
+    createSession: vi.fn(),
+  }),
 }));
 
-import { ProviderActionsBar } from "../components/ProviderActionsBar";
+import { SessionActionsBar } from "../components/SessionActionsBar";
 import { I18nProvider } from "../i18n/I18nProvider";
 
-function renderBar(aiProvider: string) {
+function renderBar() {
   return render(
     <I18nProvider>
-      <ProviderActionsBar sessionId="s1" agentName="" actions={[]} recentActions={[]} phase="idle" aiProvider={aiProvider} />
+      <SessionActionsBar sessionId="s1" paneId="p1" focused />
     </I18nProvider>,
   );
 }
@@ -34,19 +47,26 @@ function renderBar(aiProvider: string) {
 describe("Copilot quick actions", () => {
   afterEach(() => {
     cleanup();
-    sent.length = 0;
+    h.sent.length = 0;
   });
 
-  it("offers Copilot CLI slash commands and none of the retired gh copilot commands", () => {
-    const { container } = renderBar("copilot");
-    const pills = Array.from(container.querySelectorAll(".pab-action")).map((b) => b.textContent);
-    expect(pills).toEqual(["/compact", "/clear", "/diff", "/review", "/usage"]);
-    expect(container.textContent).not.toContain("gh copilot");
+  it("offers Copilot CLI slash commands and none of the retired gh copilot commands", async () => {
+    const { container } = renderBar();
+    const chips = Array.from(container.querySelectorAll("[data-session-action]")).map((b) => b.getAttribute("aria-label"));
+    expect(chips).toEqual(["Model", "Plan", "Review"]);
+    fireEvent.click(container.querySelector("[data-session-commands]")!);
+    const listbox = await screen.findByRole("listbox");
+    const commands = within(listbox)
+      .getAllByRole("option")
+      .map((o) => o.getAttribute("data-command"));
+    for (const c of ["/compact", "/context", "/usage", "/diff", "/review", "/clear"]) expect(commands).toContain(c);
+    expect(commands.every((c) => c?.startsWith("/"))).toBe(true);
+    expect(listbox.textContent).not.toContain("gh copilot");
   });
 
-  it("sends the clicked slash command to the session's terminal", () => {
-    renderBar("copilot");
-    fireEvent.click(screen.getByRole("button", { name: "/review" }));
-    expect(sent).toEqual([{ sessionId: "s1", command: "/review" }]);
+  it("sends the clicked action's slash command to the session", async () => {
+    const { container } = renderBar();
+    await act(async () => fireEvent.click(container.querySelector('[data-session-action="review"]')!));
+    expect(h.sent).toEqual([{ sessionId: "s1", line: "/review" }]);
   });
 });

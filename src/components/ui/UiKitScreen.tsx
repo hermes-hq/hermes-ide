@@ -316,6 +316,7 @@ export function UiKitScreen({ onClose, uiScale }: { onClose: () => void; uiScale
               {MODELS.opus}
             </Chip>
             <Chip size="sm">{MODELS.sonnet}</Chip>
+            <Chip size="sm" tone="warning">{t("sessionActions.compactPercent", { percent: 82 })}</Chip>
           </Row>
           <Row label={t("uiKit.segmented")}>
             <Segmented

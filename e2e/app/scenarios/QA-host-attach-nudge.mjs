@@ -1,8 +1,7 @@
 #!/usr/bin/env node
 // QA-host-attach-nudge — a project attached to a running terminal-mode
 // agent through the pane's "+" (the project picker) reaches the agent as one
-// sent prompt: "Read the file at $HERMES_CONTEXT for project context about
-// the attached workspaces." The fake Claude Code here turns on bracketed
+// sent prompt: "Read $HERMES_CONTEXT (project context updated)." The fake Claude Code here turns on bracketed
 // paste like the real one and records every prompt it is sent.
 //
 //   1. fresh: the agent waits; attach: EXPECT the nudge sent
@@ -32,7 +31,7 @@ import { runScenario } from "../n11-steps.mjs";
 import { claude, onWindows, startApp, write } from "../qa-host-steps.mjs";
 
 const SCENARIO = "QA-host-attach-nudge";
-const NUDGE = "Read the file at $HERMES_CONTEXT for project context about the attached workspaces.";
+const NUDGE = "Read $HERMES_CONTEXT (project context updated).";
 
 await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }) => {
   if (onWindows) skipScenario({ scenario: SCENARIO, evidenceDir, reason: "Windows has no session host", log });

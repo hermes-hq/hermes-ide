@@ -65,6 +65,7 @@ vi.mock("../state/SessionContext", () => ({
 
 vi.mock("../agent/useAgentInit", () => ({
   useAgentInit: () => null,
+  peekAgentInitCache: () => null,
 }));
 vi.mock("../agent/useAgentPrewarm", () => ({
   useAgentPrewarm: () => ({ slashCommands: [], catalog: [] }),

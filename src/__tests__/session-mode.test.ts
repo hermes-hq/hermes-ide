@@ -62,8 +62,6 @@ function makeSession(overrides?: Partial<SessionData>): SessionData {
       tool_call_summary: {},
       files_touched: [],
       recent_errors: [],
-      recent_actions: [],
-      available_actions: [],
       memory_facts: [],
       latency_p50_ms: null,
       latency_p95_ms: null,

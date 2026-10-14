@@ -25,21 +25,6 @@ export interface ProviderTokens {
   update_count: number;
 }
 
-export interface ActionEvent {
-  command: string;
-  label: string;
-  provider: string;
-  is_suggestion: boolean;
-  timestamp: string;
-}
-
-export interface ActionTemplate {
-  command: string;
-  label: string;
-  description: string;
-  category: string;
-}
-
 export interface MemoryFact {
   key: string;
   value: string;
@@ -56,8 +41,6 @@ export interface SessionMetrics {
   tool_call_summary: Record<string, number>;
   files_touched: string[];
   recent_errors: string[];
-  recent_actions: ActionEvent[];
-  available_actions: ActionTemplate[];
   memory_facts: MemoryFact[];
   latency_p50_ms: number | null;
   latency_p95_ms: number | null;

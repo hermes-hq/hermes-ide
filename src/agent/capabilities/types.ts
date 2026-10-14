@@ -211,4 +211,6 @@ export interface AgentLaunchOptions {
 	accountId?: string | null;
 	/** "login": run the CLI's sign-in command in the account's profile instead of the agent. */
 	purpose?: "agent" | "login";
+	/** Continue the session's own conversation (the action bar's Resume after the agent exited). */
+	resume?: boolean;
 }

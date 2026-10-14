@@ -89,8 +89,6 @@ function makeSession(mode: SessionMode, workingDir = "/Users/me/projects/h-ide")
       tool_call_summary: {},
       files_touched: [],
       recent_errors: [],
-      recent_actions: [],
-      available_actions: [],
       memory_facts: [],
       latency_p50_ms: null,
       latency_p95_ms: null,

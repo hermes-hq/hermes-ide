@@ -79,7 +79,7 @@ const DirtyWorktreeDialog = lazyView("DirtyWorktreeDialog", () => import("../com
 
 // ─── Re-export shared types for backward compatibility ──────────────
 export type {
-  ActionEvent, ActionTemplate, SessionData, SessionHistoryEntry,
+  SessionData, SessionHistoryEntry,
   CreateSessionOpts, SessionAction, SessionMode,
 } from "../types/session";
 

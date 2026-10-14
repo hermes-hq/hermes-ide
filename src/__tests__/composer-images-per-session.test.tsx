@@ -42,7 +42,7 @@ vi.mock("../state/SessionContext", () => ({
   }),
   useComposer: (sid: string) => fakeState.composers[sid] ?? { draft: "", height: 120, expanded: true },
 }));
-vi.mock("../agent/useAgentInit", () => ({ useAgentInit: () => null }));
+vi.mock("../agent/useAgentInit", () => ({ useAgentInit: () => null, peekAgentInitCache: () => null }));
 vi.mock("../agent/useAgentPrewarm", () => ({ useAgentPrewarm: () => ({ slashCommands: [], catalog: [] }) }));
 vi.mock("@tauri-apps/api/webview", () => ({
   getCurrentWebview: () => ({ onDragDropEvent: async () => () => {} }),

@@ -2215,6 +2215,11 @@ const VALID_SETTING_KEYS: &[&str] = &[
     "ui_language",
     // The status line above terminal agent sessions (F11): "on" | "off"
     "status_strip",
+    // Session action bar: the actions pinned as chips (JSON array of action ids)
+    "session_actions_pinned",
+    // Session action bar: the commands the person sent, per agent (JSON;
+    // excluded from export: personal usage history)
+    "session_commands_recent",
     // Feature flags (per-install debug overrides — see src/featureFlags/)
     "feature_flag_overrides",
     // Away notifications (N16): webhook / ntfy / Telegram address
@@ -3523,6 +3528,8 @@ const EXPORT_EXCLUDED_KEYS: &[&str] = &[
     "ssh_connection_history",
     // Feature flag overrides — per-install debug state, not a real preference
     "feature_flag_overrides",
+    // Commands the person sent per agent — personal usage history
+    "session_commands_recent",
     // Away notification address — a Telegram URL carries the bot's token
     "away_notify_url",
     // Worktree recipes the user allowed to run (project id -> file hash)

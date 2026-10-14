@@ -37,8 +37,14 @@ const TERMINAL_PANE_CSS: string = readFileSync(
   "utf-8",
 );
 
-const PROVIDER_ACTIONS: string = readFileSync(
-  new URL("../components/ProviderActionsBar.tsx", import.meta.url),
+const SESSION_ACTIONS_BAR: string = [
+  readFileSync(new URL("../components/SessionActionsBar.tsx", import.meta.url), "utf-8"),
+  readFileSync(new URL("../components/SessionActionsRow.tsx", import.meta.url), "utf-8"),
+  readFileSync(new URL("../components/SessionCommandsPopover.tsx", import.meta.url), "utf-8"),
+].join("\n");
+
+const SESSION_ACTIONS_RUN: string = readFileSync(
+  new URL("../sessionActions/run.ts", import.meta.url),
   "utf-8",
 );
 
@@ -83,7 +89,6 @@ describe("Invariant 1: ONE authoritative input path, no dual echo", () => {
     //   1. pty-output event handler
     //   2. pty-exit message
     //   3. writeScrollback
-    //   4. sendShortcutCommand backspace clearing
     // NOT in handleTerminalInput or onData
     const handleInputFn = SRC.match(
       /function handleTerminalInput[\s\S]*?^}/m
@@ -166,72 +171,21 @@ describe("Invariant 2: attachCustomKeyEventHandler eliminates duplicate onData",
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// INVARIANT 3: Shortcut uses terminal.paste() — no control codes for text
+// INVARIANT 3: The session action bar never types over the person's line
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-describe("Invariant 3: Shortcut command uses triggerDataEvent with backspace clearing, no breaking codes", () => {
-  // Extract the sendShortcutCommand function body
-  function getShortcutFnBody(): string {
-    const match = SRC.match(
-      /export function sendShortcutCommand\([\s\S]*?\n\}/
-    );
-    expect(match).not.toBeNull();
-    return match![0];
-  }
-
-  it("sendShortcutCommand is exported", () => {
-    expect(SRC).toMatch(/export function sendShortcutCommand\(/);
+describe("Invariant 3: no UI writes Backspaces to erase what the person typed", () => {
+  it("the old shortcut writer (Backspaces, then the command) is gone", () => {
+    expect(SRC).not.toMatch(/export function sendShortcutCommand\(/);
+    expect(SRC).not.toMatch(/export function getInputBufferLength\(/);
   });
 
-  it("uses triggerDataEvent for command injection (with writeToSession fallback)", () => {
-    const body = getShortcutFnBody();
-    expect(body).toContain("triggerDataEvent");
-    // writeToSession is used as a fallback when triggerDataEvent is not available
-    expect(body).toContain("writeToSession");
+  it("the action bar sends through the backend's safe submit, never a raw terminal write", () => {
+    expect(SESSION_ACTIONS_RUN).toContain('invoke<RunOutcome>("run_session_command"');
+    expect(SESSION_ACTIONS_BAR).not.toContain("writeToSession");
+    expect(SESSION_ACTIONS_BAR).not.toContain("triggerDataEvent");
+    expect(SESSION_ACTIONS_BAR).not.toContain("\\x7f");
   });
-
-  it("uses backspaces to clear existing input before sending command", () => {
-    const body = getShortcutFnBody();
-    // Uses \x7f (DEL/backspace) repeated by eraseLen to clear existing text
-    expect(body).toContain("\\x7f");
-    expect(body).toContain("eraseLen");
-  });
-
-  it("does NOT contain \\x0b (Vertical Tab — causes cursor-down in display)", () => {
-    const body = getShortcutFnBody();
-    expect(body).not.toContain("\\x0b");
-  });
-
-  it("validates command has no line breaks (invariant enforcement)", () => {
-    const body = getShortcutFnBody();
-    // Source should check for \n and \r in command
-    expect(body).toContain('command.includes("\\n")');
-    expect(body).toContain('command.includes("\\r")');
-  });
-
-  it("clears inputBuffer and dismisses suggestions", () => {
-    const body = getShortcutFnBody();
-    expect(body).toContain('entry.inputBuffer = ""');
-    expect(body).toContain("dismissSuggestions");
-  });
-
-  it("does NOT append Enter — user reviews and presses Enter manually", () => {
-    const body = getShortcutFnBody();
-    // The command is inserted on the prompt, not executed
-    expect(body).toContain("NO \\r");
-  });
-});
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// INVARIANT 4: All callers use sendShortcutCommand (no raw writeToSession)
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-describe("Invariant 4: All UI shortcut callers use sendShortcutCommand", () => {
-  it("ProviderActionsBar uses sendShortcutCommand, not writeToSession", () => {
-    expect(PROVIDER_ACTIONS).toContain("sendShortcutCommand");
-    expect(PROVIDER_ACTIONS).not.toContain("writeToSession");
-  });
-
 });
 
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
@@ -402,10 +356,9 @@ describe("Invariant 7: Scroll tracking prevents jump during streaming", () => {
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 describe("Invariant 8: No accidental display-breaking codes sent to PTY", () => {
-  it("\\x0b (Vertical Tab) never appears in shortcut/command sending code", () => {
-    const shortcutFn = SRC.match(/export function sendShortcutCommand[\s\S]*?\n\}/);
-    expect(shortcutFn).not.toBeNull();
-    expect(shortcutFn![0]).not.toContain("\\x0b");
+  it("\\x0b (Vertical Tab) never appears in the session command path", () => {
+    expect(SESSION_ACTIONS_RUN).not.toContain("\\x0b");
+    expect(SESSION_ACTIONS_BAR).not.toContain("\\x0b");
   });
 });
 
@@ -458,28 +411,6 @@ describe("Invariant 9: Context injection race prevention", () => {
     expect(refSetIdx).toBeGreaterThan(-1);
     expect(setContextIdx).toBeGreaterThan(-1);
     expect(refSetIdx).toBeLessThan(setContextIdx);
-  });
-});
-
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-// INVARIANT 10: sendShortcutCommand hard-stops on invariant violation
-// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-
-describe("Invariant 10: sendShortcutCommand refuses linebreak commands", () => {
-  it("returns after detecting linebreak (not just logs)", () => {
-    const fnBody = SRC.match(/export function sendShortcutCommand[\s\S]*?\n\}/);
-    expect(fnBody).not.toBeNull();
-    const body = fnBody![0];
-    // After the invariant check, there must be a return statement
-    const checkIdx = body.indexOf('command.includes("\\n")');
-    expect(checkIdx).toBeGreaterThan(-1);
-    // Find the next 'return' after the check
-    const afterCheck = body.slice(checkIdx);
-    const returnIdx = afterCheck.indexOf("return;");
-    expect(returnIdx).toBeGreaterThan(-1);
-    // The return must be before the triggerDataEvent call
-    const triggerIdx = afterCheck.indexOf("triggerDataEvent");
-    expect(returnIdx).toBeLessThan(triggerIdx);
   });
 });
 

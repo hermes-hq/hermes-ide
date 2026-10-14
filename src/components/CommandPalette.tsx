@@ -46,6 +46,8 @@ interface CommandPaletteProps {
   pluginsWithSettings?: { pluginId: string; pluginName: string }[];
   onPluginCommand?: (commandId: string) => void;
   onCheckPluginUpdates?: () => void;
+  /** The focused session's agent commands ("Run in <session>: Compact"), shown when the query matches. */
+  sessionCommands?: { id: string; label: string; category: string; run: () => void }[];
 }
 
 interface Command {
@@ -58,7 +60,7 @@ interface Command {
 }
 
 export function CommandPalette({
-  onClose, sessions, onCloseSession, onCloseSessionRemoveWorktree, activeSessionId, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenLibrary, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates,
+  onClose, sessions, onCloseSession, onCloseSessionRemoveWorktree, activeSessionId, onSelectSession, onNewSession, onToggleContext, onToggleSessions, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenLibrary, onOpenShortcuts, onToggleGit, reviewDesk, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, sessionCommands,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
@@ -109,6 +111,13 @@ export function CommandPalette({
       action: () => { onSelectSession(s.id); onClose(); },
     })),
     ...(onCheckPluginUpdates ? [{ id: "check-plugin-updates", label: t("palette.checkPluginUpdates"), category: t("app.plugins"), action: () => { onCheckPluginUpdates(); onClose(); } }] : []),
+    ...(sessionCommands ?? []).map((sc) => ({
+      id: sc.id,
+      label: sc.label,
+      category: sc.category,
+      hidden: true,
+      action: () => { onClose(); sc.run(); },
+    })),
     ...(pluginCommands ?? []).map(pc => ({
       id: `plugin-${pc.command}`,
       label: pc.title,
@@ -118,7 +127,7 @@ export function CommandPalette({
   // currentLanguage is intentionally in the deps: t() is referentially stable,
   // so without it the memoized labels would never update on a language switch.
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [sessions, onCloseSession, onCloseSessionRemoveWorktree, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenLibrary, onOpenShortcuts, onToggleGit, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, t, currentLanguage]);
+  ], [sessions, onCloseSession, onCloseSessionRemoveWorktree, onNewSession, onClose, onToggleContext, onToggleSessions, onSelectSession, onOpenSettings, onOpenWorkspace, onOpenCostDashboard, onToggleFlowMode, onTileWorkingAgents, onAttachProject, onScanCwd, onOpenComposer, onOpenLibrary, onOpenShortcuts, onToggleGit, onToggleSearch, onToggleTrack, onApproveGate, onMakeFeature, pluginCommands, pluginsWithSettings, onPluginCommand, onCheckPluginUpdates, sessionCommands, t, currentLanguage]);
 
   const filtered = useMemo(() => {
     if (!query) return commands.filter((c) => !c.hidden);

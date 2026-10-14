@@ -231,6 +231,10 @@ pub struct AgentLaunchOptions {
     /// "agent" (default) or "login".
     #[serde(default)]
     pub purpose: Option<String>,
+    /// Continue the session's own conversation (the action bar's Resume
+    /// after the agent exited), whether or not the last launch resumed.
+    #[serde(default)]
+    pub resume: Option<bool>,
 }
 
 /// What a terminal session was launched with, kept on the session and sent
