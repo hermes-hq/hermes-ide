@@ -13,8 +13,9 @@ import { Badge, Button, Chip, Input, Menu, Select, Textarea, type SelectOption }
 import { useI18n } from "../../i18n/I18nProvider";
 import { useLibraryMessages } from "../../library/messages";
 import { useFocusTrap } from "../../hooks/useFocusTrap";
-import { libraryGet, libraryHits, libraryInstalls, libraryItemStates, libraryRecordUse, librarySearch, librarySetItem, libraryStatus } from "../../library/api";
+import { libraryEssentials, libraryGet, libraryHits, libraryInstalls, libraryItemStates, libraryRecordUse, librarySearch, librarySetItem, libraryStatus } from "../../library/api";
 import { argsOf, defaultValues, loadCore, renderWith } from "../../library/render";
+import { fillFromLeftover, taskQuery } from "../../library/everyday";
 import { listParts, type PartItem } from "../../library/parts";
 import { agentName, agentsForTarget, invocation } from "../../library/targets";
 import {
@@ -52,7 +53,7 @@ import {
   type PickerItem,
   type RecentEntry,
 } from "../../library/promptPicker";
-import type { EntryArg, EntryBody, EntryDetail, ItemState, LibraryContext, LibraryHit } from "../../library/types";
+import type { EntryArg, EntryBody, EntryDetail, ItemState, LibraryContext, LibraryHit, RoutePage } from "../../library/types";
 import { KindIcon } from "./PromptPickerParts";
 
 export const PICKER_ROW_HEIGHT = 52;
@@ -95,6 +96,8 @@ export interface PromptPickerProps {
   works?: string[];
   /** Text that goes into the first blank (terminal selection, the launcher's task). */
   prefill?: string;
+  /** What the search starts with: the launcher's task (its first line becomes the query). */
+  initialQuery?: string;
   /** The project, for "Use without Hermes". */
   projectPath?: string | null;
   onClose: () => void;
@@ -152,6 +155,7 @@ function PickerDialog({
   libraryContext,
   works,
   prefill,
+  initialQuery: rawInitialQuery,
   projectPath,
   onClose,
   onOpenLibrary,
@@ -167,7 +171,11 @@ function PickerDialog({
   const listRef = useRef<HTMLDivElement>(null);
   const paneRef = useRef<HTMLDivElement>(null);
 
-  const [query, setQuery] = useState("");
+  const initialQuery = useMemo(() => taskQuery(rawInitialQuery), [rawInitialQuery]);
+  const [query, setQuery] = useState(initialQuery);
+  const [route, setRoute] = useState<RoutePage | null>(null);
+  const [leftover, setLeftover] = useState<string[]>([]);
+  const [essentials, setEssentials] = useState<LibraryHit[]>([]);
   const [filter, setFilter] = useState<PickerFilter>("all");
   const [selKey, setSelKey] = useState<string | null>(null);
   const [mine, setMine] = useState<MyPrompt[]>([]);
@@ -288,12 +296,15 @@ function PickerDialog({
     const timer = setTimeout(() => {
       // With nothing typed, All opens on tasks: personas and answer styles go with a task, under their own chips.
       const kind = !query.trim() && filter === "all" ? kindsFor("task", context) : kindsFor(filter, context);
-      librarySearch({ query, filters: { kind, ...(works && works.length ? { works } : {}) }, limit: PAGE, sort: query.trim() ? "best" : "you", personalise: true }, ctx)
+      // Personal boosts stay on with a query too: "For you" order, not plain relevance.
+      librarySearch({ query, filters: { kind, ...(works && works.length ? { works } : {}) }, limit: PAGE, sort: "you", personalise: true }, ctx)
         .then((page) => {
           if (n !== searchSeq.current) return;
           setHits(page.hits);
           setCursor(page.nextCursor);
           setPersonal(!query.trim());
+          setRoute(page.route ?? null);
+          setLeftover(page.leftover ?? []);
         })
         .catch(() => n === searchSeq.current && setHits([]))
         .finally(() => n === searchSeq.current && setLoading(false));
@@ -305,7 +316,7 @@ function PickerDialog({
     if (!cursor || loading) return;
     const n = searchSeq.current;
     setLoading(true);
-    librarySearch({ query, filters: { kind: !query.trim() && filter === "all" ? kindsFor("task", context) : kindsFor(filter, context), ...(works && works.length ? { works } : {}) }, limit: PAGE, cursor, sort: query.trim() ? "best" : "you", personalise: true }, ctx)
+    librarySearch({ query, filters: { kind: !query.trim() && filter === "all" ? kindsFor("task", context) : kindsFor(filter, context), ...(works && works.length ? { works } : {}) }, limit: PAGE, cursor, sort: "you", personalise: true }, ctx)
       .then((page) => {
         if (n !== searchSeq.current) return;
         setHits((prev) => [...prev, ...page.hits.filter((h) => !prev.some((p) => p.id === h.id))]);
@@ -314,6 +325,18 @@ function PickerDialog({
       .catch(() => {})
       .finally(() => n === searchSeq.current && setLoading(false));
   }, [cursor, loading, query, filter, context, works, ctx]);
+
+  // The Essentials (front doors) for an empty query: never an A–Z first page.
+  useEffect(() => {
+    if (libState !== "ready") return;
+    let live = true;
+    libraryEssentials()
+      .then((list) => live && setEssentials(list.filter((h) => !works?.length || h.works.some((w) => works.includes(w)))))
+      .catch(() => live && setEssentials([]));
+    return () => {
+      live = false;
+    };
+  }, [libState, works]);
 
   useEffect(() => {
     if (!projectPath || libState !== "ready") return;
@@ -335,8 +358,8 @@ function PickerDialog({
     [recentHits, mine, states],
   );
   const items = useMemo(
-    () => buildItems({ query, filter, context, mine, pinnedHits, recent, hits, personal }),
-    [query, filter, context, mine, pinnedHits, recent, hits, personal],
+    () => buildItems({ query, filter, context, mine, pinnedHits, recent, hits, personal, essentials, best: query.trim() ? [route?.exact ?? null, route?.to ?? null].filter((x): x is LibraryHit => !!x) : [], refine: query.trim() ? (route?.refine ?? []) : [] }),
+    [query, filter, context, mine, pinnedHits, recent, hits, personal, essentials, route],
   );
   const rows = useMemo(() => pickables(items), [items]);
   const rowPosition = useMemo(() => new Map(rows.map((r, i) => [r.key, i + 1])), [rows]);
@@ -398,12 +421,18 @@ function PickerDialog({
   const draft = key ? draftOf(key) : null;
   const isTask = kind === "prompt" || kind === "workflow";
 
-  // The first time a prompt is shown, its defaults go in, and the selection or the launcher's text goes into its first blank.
+  // The first time a prompt is shown, its defaults go in, and the selection or the launcher's text goes into its first blank;
+  // the front door a search routed to takes the words the search left over instead ("Lisbon", "5 days").
+  const routedTo = query.trim() && route && selected?.type === "hit" && selected.hit.id === (route.exact ?? route.to).id ? selected.hit.id : null;
   if (draft && key && body && !prefillUsed.current.has(key)) {
     prefillUsed.current.add(key);
     draft.values = { ...defaultValues(body), ...draft.values };
-    const target = prefill?.trim() ? prefillTarget(args, draft.values) : null;
-    if (target) draft.values[target] = prefill!.trim();
+    const answers = routedTo ? fillFromLeftover(args, leftover) : {};
+    if (Object.keys(answers).length > 0) Object.assign(draft.values, answers);
+    else {
+      const target = prefill?.trim() ? prefillTarget(args, draft.values) : null;
+      if (target) draft.values[target] = prefill!.trim();
+    }
   }
 
   useEffect(() => {
@@ -841,6 +870,7 @@ function PickerDialog({
           autoCapitalize="off"
           spellCheck={false}
         />
+        {!!initialQuery && query === initialQuery && <span className="pp-from-task">{t("library.prompts.fromTask")}</span>}
         <kbd className="pp-esc">{t("library.prompts.kbdEsc")}</kbd>
       </div>
       <div className="pp-chips" role="group" aria-label={t("library.prompts.filtersLabel")}>

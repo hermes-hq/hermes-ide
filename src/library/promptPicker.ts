@@ -39,7 +39,7 @@ export function kindGroup(kind: EntryKind | MyPrompt["kind"]): "task" | "persona
   return kind === "persona" ? "persona" : kind === "style" ? "style" : "task";
 }
 
-export type GroupId = "pinned" | "recent" | "forYou" | "mine" | "library" | "task" | "persona" | "style";
+export type GroupId = "pinned" | "recent" | "essentials" | "best" | "refine" | "forYou" | "mine" | "library" | "task" | "persona" | "style";
 
 export type PickerItem =
   | { type: "group"; key: string; group: GroupId; count?: number }
@@ -86,11 +86,18 @@ export interface BuildInput {
   personal: boolean;
   /** How many recent rows to show above the rest. */
   recentLimit?: number;
+  /** The front doors, shown with no query (after Pinned and Recent). */
+  essentials?: readonly LibraryHit[];
+  /** With a query: the entry whose title holds every word (if any), the front door it routes to; then the specialists. */
+  best?: readonly LibraryHit[];
+  refine?: readonly LibraryHit[];
 }
 
 /**
- * The list: with no query, Pinned, Recent, then For you (nothing twice);
- * with a query, Mine's matches, then the Library's. A filter narrows every
+ * The list: with no query, Pinned, Recent, the Essentials, then For you
+ * (nothing twice; never an alphabetical first page); with a query, the
+ * front door it routes to (Best match), the specialists to narrow to (More
+ * specific), Mine's matches, then the Library's. A filter narrows every
  * group; Mine, Pinned and Recent show only themselves.
  */
 export function buildItems(input: BuildInput): PickerItem[] {
@@ -135,8 +142,11 @@ export function buildItems(input: BuildInput): PickerItem[] {
   if (!q) {
     group("pinned", pinned);
     group("recent", recent.slice(0, input.recentLimit ?? 5));
+    if (filter === "all" || filter === "task") group("essentials", (input.essentials ?? []).filter((h) => hitFits(h, filter, context)).map((h) => asHit(h, false)));
     group(filter === "all" ? "forYou" : filter, lib);
   } else {
+    group("best", (input.best ?? []).filter((h) => hitFits(h, filter, context)).map((h) => asHit(h, false)));
+    group("refine", (input.refine ?? []).filter((h) => hitFits(h, filter, context)).map((h) => asHit(h, false)));
     group("mine", mineRows.map(asMine));
     group("library", lib);
   }

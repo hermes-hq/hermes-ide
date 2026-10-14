@@ -741,3 +741,10 @@
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.pp-from-task {
+  flex: none;
+  font-size: var(--text-2xs);
+  color: var(--text-3);
+  white-space: nowrap;
+}

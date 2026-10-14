@@ -104,10 +104,14 @@ function backend(cmd: string, args: Record<string, unknown>) {
       return { ready: true };
     case "library_item_states":
       return [{ itemId: "bugfix-track", pinned: true, favorite: false, hidden: false, useCount: 0, lastUsedAt: null }];
+    case "library_essentials":
+      return [];
     case "library_hits":
       return HITS.filter((x) => (args.ids as string[]).includes(x.id));
     case "library_search": {
-      const req = args.request as { query: string; filters: { kind: string[] } };
+      const req = args.request as { query: string; filters: { kind: string[]; ess?: string[] } };
+      // No front doors in this catalog (the Essentials group stays empty).
+      if (req.filters.ess) return { hits: [], total: 0, totalCapped: false, nextCursor: null, kindCounts: {}, tookMs: 1 };
       const q = req.query.toLowerCase();
       const hits = HITS.filter((x) => req.filters.kind.includes(x.kind) && (!q || x.title.toLowerCase().includes(q)));
       return { hits, total: hits.length, totalCapped: false, nextCursor: null, kindCounts: {}, tookMs: 1 };

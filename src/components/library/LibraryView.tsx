@@ -1,14 +1,19 @@
 // ─── The Library (Hodios inside Hermes) ───────────────────────────────
 //
 // Loaded on demand: nothing of it is startup code. The first open imports
-// the catalog bundled with the app (offline); the first screen shows a few
-// shelves of what fits this person and why, search covers every entry, and
-// an open entry can be used in any session, started as a task with any
+// the catalog bundled with the app (offline). The first screen asks "What
+// do you want to do?" over the Essentials (the front doors), what was used
+// last and a few shelves of what fits this person and why; search covers
+// every entry, a plain need ("trip") leads with its front door and the
+// words it did not use ("Lisbon") become that front door's answers; an
+// open entry can be used in any session, started as a task with any
 // agent, or installed into the project for an agent.
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { Button, Chip, CloseButton, Input, Segmented } from "../ui";
+import { Button, Chip, CloseButton, Segmented } from "../ui";
+import { HEALTH_ADVICE, depthSections, fillFromLeftover, pairsWith, recentIds } from "../../library/everyday";
+import { argsOf } from "../../library/render";
 import { useI18n } from "../../i18n/I18nProvider";
 import { useLibraryMessages } from "../../library/messages";
 import { useSession, useSessionList } from "../../state/SessionContext";
@@ -23,6 +28,7 @@ import {
   libraryHits,
   libraryInstalls,
   libraryItemStates,
+  libraryRecordOpen,
   libraryRecordUse,
   libraryResolve,
   librarySearch,
@@ -36,6 +42,7 @@ import { setLauncherSeed } from "../../library/launcherSeed";
 import { OPEN_LIBRARY_EVENT, takeLibraryFocus } from "../../library/libraryFocus";
 import { agentName, worksTarget } from "../../library/targets";
 import type { EntryDetail, ItemState, LibraryContext, LibraryHit, LibraryStatus, SearchPage, Shelf, Shelves } from "../../library/types";
+import { LibraryAsk } from "./LibraryAsk";
 import { LibraryDetail, type SessionChoice } from "./LibraryDetail";
 import { LibraryHome } from "./LibraryHome";
 import { LibraryInstall } from "./LibraryInstall";
@@ -56,7 +63,7 @@ const PHASE_STAGE: Record<string, string> = {
   implement: "build",
 };
 
-type Nav = "home" | "pinned" | "installed" | "mine" | "classics" | "hidden" | `domain:${string}`;
+type Nav = "home" | "recent" | "pinned" | "installed" | "mine" | "classics" | "hidden" | `domain:${string}`;
 
 type Selection = { type: "hit"; id: string; reasons: LibraryHit["reasons"] } | { type: "legacy"; item: LegacyItem } | null;
 
@@ -75,6 +82,12 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
   const [query, setQuery] = useState("");
   const [kinds, setKinds] = useState<Set<string>>(new Set());
   const [domain, setDomain] = useState<string | null>(null);
+  const [category, setCategory] = useState<string | null>(null);
+  const [intent, setIntent] = useState<string | null>(null);
+  const [topic, setTopic] = useState<string | null>(null);
+  const [depths, setDepths] = useState<Set<string>>(new Set());
+  const [health, setHealth] = useState(false);
+  const [folded, setFolded] = useState<Set<string>>(new Set());
   const [worksAuto, setWorksAuto] = useState(true);
   const [stackAuto, setStackAuto] = useState(false);
   const [sort, setSort] = useState<"you" | "best" | "new">("you");
@@ -97,6 +110,8 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
   const [interestsOffered, setInterestsOffered] = useState(true);
   const searchSeq = useRef(0);
   const inputRef = useRef<HTMLInputElement>(null);
+  // The routed front door was selected for the person (not opened by them).
+  const autoSelected = useRef<string | null>(null);
 
   // ── What this moment is (computed here, never sent) ────────────────
   useEffect(() => ensureDoctor(), []);
@@ -193,18 +208,25 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
   }, [refreshStates]);
 
   const pinned = useMemo(() => new Set(itemStates.filter((s) => s.pinned).map((s) => s.itemId)), [itemStates]);
+  const recent = useMemo(() => recentIds(itemStates), [itemStates]);
   const hidden = useMemo(() => new Set(itemStates.filter((s) => s.hidden).map((s) => s.itemId)), [itemStates]);
 
   // ── Search ──────────────────────────────────────────────────────────
-  const searching_ = nav !== "home" || query.trim() !== "" || kinds.size > 0 || domain !== null || stackAuto;
+  const chosen = kinds.size > 0 || domain !== null || category !== null || intent !== null || topic !== null || depths.size > 0 || health || stackAuto;
+  const searching_ = nav !== "home" || query.trim() !== "" || chosen;
   const filters = useMemo(() => {
     const f: Record<string, string[]> = {};
     if (kinds.size > 0) f.kind = [...kinds];
     if (domain) f.domain = [domain];
+    if (category) f.cat = [category];
+    if (intent) f.intent = [intent];
+    if (topic) f.topic = [topic];
+    if (depths.size > 0) f.depth = [...depths];
+    if (health) f.adv = HEALTH_ADVICE;
     if (worksAuto && activeAgent && query.trim()) f.works = [worksTarget(activeAgent)];
     if (stackAuto && shelves?.stack.length) f.stack = shelves.stack.map((s) => s.value);
     return f;
-  }, [kinds, domain, worksAuto, activeAgent, stackAuto, shelves?.stack, query]);
+  }, [kinds, domain, category, intent, topic, depths, health, worksAuto, activeAgent, stackAuto, shelves?.stack, query]);
 
   const runSearch = useCallback(
     async (cursor: string | null) => {
@@ -229,19 +251,20 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
   );
 
   useEffect(() => {
-    if (!status?.ready || !searching_ || nav === "pinned" || nav === "installed" || nav === "mine" || nav === "classics") return;
+    if (!status?.ready || !searching_ || nav === "recent" || nav === "pinned" || nav === "installed" || nav === "mine" || nav === "classics") return;
     const timer = setTimeout(() => void runSearch(null), SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [status?.ready, searching_, nav, runSearch]);
 
-  // Lists by id: pinned, installed in this project.
+  // Lists by id: recent, pinned, installed in this project.
   useEffect(() => {
-    if (nav !== "pinned" && nav !== "installed") {
+    if (nav !== "recent" && nav !== "pinned" && nav !== "installed") {
       setListHits(null);
       return;
     }
     let live = true;
     const ids = async () => {
+      if (nav === "recent") return recent;
       if (nav === "pinned") return [...pinned];
       const inst = await libraryInstalls(projectPath);
       return [...new Set(inst.lock.entries.map((e) => e.id))];
@@ -253,16 +276,29 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     return () => {
       live = false;
     };
-  }, [nav, pinned, projectPath, context]);
+  }, [nav, pinned, recent, projectPath, context]);
 
+  const levels = useMemo(() => shelves?.depths ?? [], [shelves?.depths]);
+  const route = !listHits && answered === query ? (page?.route ?? null) : null;
+  const leftover = useMemo(() => (answered === query ? (page?.leftover ?? []) : []), [answered, query, page?.leftover]);
   const items: ResultItem[] = useMemo(() => {
     const out: ResultItem[] = [];
     const libHits = listHits ?? (nav === "mine" || nav === "classics" ? [] : hits);
-    if (libHits.length > 0) {
+    if (libHits.length > 0 && !listHits && levels.length > 0) {
+      // Depth sections in the catalog's order, basic ("Start here") first.
+      for (const sec of depthSections(libHits, levels)) {
+        const id = sec.level?.id ?? "";
+        const open = !folded.has(id);
+        const n = page?.depthCounts?.[id];
+        const count = n === undefined ? String(sec.hits.length) : n > 1000 ? "1000+" : String(n);
+        out.push({ type: "header", key: `h:depth:${id}`, label: sec.level?.label ?? id, count, section: id, open });
+        if (open) for (const h of sec.hits) out.push({ type: "hit", key: `hit:${h.id}`, hit: h });
+      }
+    } else if (libHits.length > 0) {
       out.push({ type: "header", key: "h:lib", label: t("library.results.groupLibrary"), count: String(libHits.length) });
       for (const h of libHits) out.push({ type: "hit", key: `hit:${h.id}`, hit: h });
     }
-    const withLegacy = nav === "mine" || nav === "classics" || (nav !== "pinned" && nav !== "installed" && nav !== "hidden" && kinds.size === 0 && !domain);
+    const withLegacy = nav === "mine" || nav === "classics" || (nav !== "recent" && nav !== "pinned" && nav !== "installed" && nav !== "hidden" && !chosen);
     if (withLegacy) {
       const q = query.trim();
       const cls = nav === "mine" ? [] : q || nav === "classics" ? filterLegacy(classics, q) : [];
@@ -277,12 +313,51 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
       }
     }
     return out;
-  }, [hits, listHits, nav, classics, mine, query, kinds.size, domain, t]);
+  }, [hits, listHits, nav, classics, mine, query, chosen, levels, folded, page?.depthCounts, t]);
 
   // ── Selection and detail ────────────────────────────────────────────
-  const openId = useCallback((id: string, reasons: LibraryHit["reasons"] = []) => {
-    setSelection({ type: "hit", id, reasons });
-  }, []);
+  // Opened by the person: it goes to Recent (not a use).
+  const openId = useCallback(
+    (id: string, reasons: LibraryHit["reasons"] = []) => {
+      autoSelected.current = null;
+      setSelection({ type: "hit", id, reasons });
+      void libraryRecordOpen(id)
+        .then(refreshStates)
+        .catch(() => {});
+    },
+    [refreshStates],
+  );
+  // A plain need's front door is shown beside its results, as the mock of
+  // "trip" does; the person's own choice is never replaced.
+  const lead = route ? (route.exact ?? route.to) : null;
+  useEffect(() => {
+    if (!lead) return;
+    const mineSelected = selection && !(selection.type === "hit" && selection.id === autoSelected.current);
+    if (mineSelected || (selection?.type === "hit" && selection.id === lead.id)) return;
+    autoSelected.current = lead.id;
+    setSelection({ type: "hit", id: lead.id, reasons: lead.reasons });
+  }, [lead, selection]);
+  // The best match's questions take the words the search left over.
+  const answers = useMemo(() => {
+    if (!detail || !lead || detail.id !== lead.id || leftover.length === 0) return null;
+    return fillFromLeftover(argsOf(detail.body), leftover);
+  }, [detail, lead, leftover]);
+  // "Leads to": the entry's pairs_with, or the routed need's specialists.
+  const [leads, setLeads] = useState<LibraryHit[]>([]);
+  useEffect(() => {
+    const ids = pairsWith(detail?.body?.fm.pairs_with);
+    if (ids.length === 0) {
+      setLeads(route && detail?.id === route.to.id ? route.refine : []);
+      return;
+    }
+    let live = true;
+    libraryHits(ids.slice(0, 8), context)
+      .then((list) => live && setLeads(list))
+      .catch(() => live && setLeads([]));
+    return () => {
+      live = false;
+    };
+  }, [detail, route, context]);
   // "Open in Library" from Prompts: show that entry (with "Add as a command" open when asked).
   useEffect(() => {
     const apply = () => {
@@ -426,6 +501,11 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     setQuery("");
     setKinds(new Set());
     setDomain(null);
+    setCategory(null);
+    setIntent(null);
+    setTopic(null);
+    setDepths(new Set());
+    setHealth(false);
     setStackAuto(false);
     setNav("home");
   };
@@ -447,8 +527,24 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
   const showSearch = searching_;
   const rows = status?.catalog?.rows ?? 0;
   const domainLabel = domain ? (shelves?.domains.find((d) => d.id === domain)?.label ?? domain) : null;
+  const categoryLabel = category ? (shelves?.domains.flatMap((d) => d.categories ?? []).find((c) => c.id === category)?.label ?? category) : null;
+  const vocabLabel = (list: { id: string; label: string }[] | undefined, id: string | null) => (id ? (list?.find((x) => x.id === id)?.label ?? id) : null);
+  const intentLabel = vocabLabel(shelves?.intents, intent);
+  const topicLabel = vocabLabel(shelves?.topics, topic);
+  const labels = {
+    domain: (id: string) => shelves?.domains.find((d) => d.id === id)?.label ?? id,
+    category: (id: string) => shelves?.domains.flatMap((d) => d.categories ?? []).find((c) => c.id === id)?.label ?? id,
+  };
+  const filledFromSearch =
+    answers && detail && Object.keys(answers).length > 0
+      ? argsOf(detail.body)
+          .map((a) => answers[a.name])
+          .filter(Boolean)
+          .join(" · ")
+      : null;
   const navItems: { id: Nav; label: string; count?: number }[] = [
     { id: "home", label: t("library.nav.forYou") },
+    ...(recent.length > 0 ? [{ id: "recent" as Nav, label: t("library.nav.recent"), count: recent.length }] : []),
     { id: "pinned", label: t("library.nav.pinned"), count: pinned.size },
     ...(projectName ? [{ id: "installed" as Nav, label: t("library.nav.installed", { project: projectName }) }] : []),
     { id: "mine", label: t("library.nav.mine"), count: mine.length },
@@ -461,33 +557,6 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     <div className="library-view" data-testid="library-view" data-ready={status?.ready ? "true" : "false"} data-answered={answered ?? undefined}>
       <div className="lib-head">
         <span className="lib-title">{t("library.title")}</span>
-        <div className="lib-search">
-          <Input
-            ref={inputRef}
-            size="sm"
-            type="search"
-            className="lib-search-input"
-            aria-label={t("library.search.label")}
-            placeholder={t("library.search.placeholder", { count: rows.toLocaleString() })}
-            value={query}
-            onChange={(e) => {
-              setQuery(e.target.value);
-              if (nav !== "home" && !nav.startsWith("domain:")) setNav("home");
-            }}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown") {
-                const first = items.find((i) => i.type !== "header");
-                if (first) {
-                  e.preventDefault();
-                  if (first.type === "hit") openId(first.hit.id, first.hit.reasons);
-                  else if (first.type === "legacy") setSelection({ type: "legacy", item: first.item });
-                }
-              }
-            }}
-            autoFocus
-          />
-          <span className="lib-search-hint">{t("library.search.hint")}</span>
-        </div>
         <LibraryUpdateBadge status={status} fresh={fresh} open={updateOpen} onToggle={() => {
             // The background check may have run since: show its verdict.
             refreshStatus();
@@ -514,6 +583,21 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
               {t("library.facets.domain", { domain: domainLabel })}
             </Chip>
           )}
+          {categoryLabel && (
+            <Chip size="sm" selected onToggle={() => setCategory(null)} onRemove={() => setCategory(null)} removeLabel={t("library.facets.remove")}>
+              {t("library.facets.category", { category: categoryLabel })}
+            </Chip>
+          )}
+          {intentLabel && (
+            <Chip size="sm" selected onToggle={() => setIntent(null)} onRemove={() => setIntent(null)} removeLabel={t("library.facets.remove")}>
+              {intentLabel}
+            </Chip>
+          )}
+          {topicLabel && (
+            <Chip size="sm" selected onToggle={() => setTopic(null)} onRemove={() => setTopic(null)} removeLabel={t("library.facets.remove")}>
+              {topicLabel}
+            </Chip>
+          )}
           {KINDS.map((k) => (
             <Chip
               key={k}
@@ -533,6 +617,27 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
               {page?.kindCounts[k] !== undefined ? ` ${page.kindCounts[k] > 1000 ? "1000+" : page.kindCounts[k]}` : ""}
             </Chip>
           ))}
+          {levels.map((l) => (
+            <Chip
+              key={l.id}
+              size="sm"
+              selected={depths.has(l.id)}
+              onToggle={(on) =>
+                setDepths((cur) => {
+                  const next = new Set(cur);
+                  if (on) next.add(l.id);
+                  else next.delete(l.id);
+                  return next;
+                })
+              }
+              buttonAttrs={{ className: "lib-depth-chip", "data-depth": l.id }}
+            >
+              {l.label}
+            </Chip>
+          ))}
+          <Chip size="sm" selected={health} onToggle={setHealth} buttonAttrs={{ className: "lib-health-chip" }}>
+            {t("library.care.health")}
+          </Chip>
           {activeAgent && (
             <Chip size="sm" selected={worksAuto} onToggle={setWorksAuto} buttonAttrs={{ className: "lib-works-chip", "data-auto": "true" }}>
               {t("library.facets.works", { agent: agentName(activeAgent) })}
@@ -612,56 +717,103 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
           )}
         </nav>
 
-        {interestsOpen ? (
-          <div className="lib-center">
-            <LibraryInterests onSaved={finishInterests} onSkip={() => setInterestsOpen(false)} />
-          </div>
-        ) : showSearch ? (
-          <LibraryResults
-            items={items}
-            total={listHits ? listHits.length : (page?.total ?? 0)}
-            totalCapped={!listHits && !!page?.totalCapped}
+        <div className="lib-main">
+          <LibraryAsk
+            inputRef={inputRef}
             query={query}
-            filtered={Object.keys(filters).length > 0}
-            loading={searching}
-            selectedKey={selectedKey}
-            installedTargets={installedTargets}
-            pinned={pinned}
-            personal={!showEverything && sort === "you"}
-            onOpen={(item) => {
-              if (item.type === "hit") openId(item.hit.id, item.hit.reasons);
-              else if (item.type === "legacy") setSelection({ type: "legacy", item: item.item });
+            rows={rows}
+            essentials={shelves?.essentials ?? []}
+            route={route}
+            onQuery={(q) => {
+              setQuery(q);
+              if (nav !== "home" && !nav.startsWith("domain:")) setNav("home");
             }}
-            onMore={() => {
-              if (page?.nextCursor && !searching && !listHits) void runSearch(page.nextCursor);
+            onOpen={(hit) => openId(hit.id, hit.reasons)}
+            onFirst={() => {
+              const first = items.find((i) => i.type !== "header");
+              if (!first) return false;
+              if (first.type === "hit") openId(first.hit.id, first.hit.reasons);
+              else if (first.type === "legacy") setSelection({ type: "legacy", item: first.item });
+              return true;
             }}
-            onClear={clearSearch}
           />
-        ) : (
-          <LibraryHome
-            shelves={shelves}
-            loading={!status}
-            selectedId={selection?.type === "hit" ? selection.id : null}
-            installedTargets={installedTargets}
-            installedAgentIds={installedAgentIds}
-            pinned={pinned}
-            projectName={projectName}
-            showInterests={!interestsOffered && !!shelves && shelves.profile.roles.length === 0 && shelves.profile.domains.length === 0}
-            onOpen={(id) => {
-              const hit = shelves?.shelves.flatMap((s) => s.hits).find((h) => h.id === id);
-              openId(id, hit?.reasons ?? []);
-            }}
-            onSeeAll={onSeeAll}
-            onBrowseDomain={(d) => setDomain(d)}
-            onShowEverything={toggleShowEverything}
-            onInterestsDone={finishInterests}
-            onEditInterests={() => setInterestsOpen(true)}
-          />
-        )}
+          {interestsOpen ? (
+            <div className="lib-center">
+              <LibraryInterests onSaved={finishInterests} onSkip={() => setInterestsOpen(false)} />
+            </div>
+          ) : showSearch ? (
+            <LibraryResults
+              items={items}
+              total={listHits ? listHits.length : (page?.total ?? 0)}
+              totalCapped={!listHits && !!page?.totalCapped}
+              query={query}
+              filtered={chosen}
+              loading={searching}
+              selectedKey={selectedKey}
+              pinned={pinned}
+              personal={!showEverything && sort === "you"}
+              route={route}
+              filledFromSearch={filledFromSearch}
+              partial={!listHits && answered === query && !!page?.partial}
+              onOpen={(item) => {
+                if (item.type === "hit") openId(item.hit.id, item.hit.reasons);
+                else if (item.type === "legacy") setSelection({ type: "legacy", item: item.item });
+              }}
+              onOpenId={(hit) => openId(hit.id, hit.reasons)}
+              onToggleSection={(id) =>
+                setFolded((cur) => {
+                  const next = new Set(cur);
+                  if (next.has(id)) next.delete(id);
+                  else next.add(id);
+                  return next;
+                })
+              }
+              onMore={() => {
+                if (page?.nextCursor && !searching && !listHits) void runSearch(page.nextCursor);
+              }}
+              onClear={clearSearch}
+            />
+          ) : (
+            <LibraryHome
+              shelves={shelves}
+              loading={!status}
+              selectedId={selection?.type === "hit" ? selection.id : null}
+              installedAgentIds={installedAgentIds}
+              pinned={pinned}
+              itemStates={itemStates}
+              projectName={projectName}
+              showInterests={!interestsOffered && !!shelves && shelves.profile.roles.length === 0 && shelves.profile.domains.length === 0}
+              onOpen={(id) => {
+                const hit = [...(shelves?.essentials ?? []), ...(shelves?.shelves.flatMap((s) => s.hits) ?? [])].find((h) => h.id === id);
+                openId(id, hit?.reasons ?? []);
+              }}
+              onSeeAll={onSeeAll}
+              onBrowseDomain={(d) => {
+                setCategory(null);
+                setDomain(d);
+              }}
+              onBrowseCategory={(d, c) => {
+                setDomain(d);
+                setCategory(c);
+              }}
+              onSearchIntent={(i, tp) => {
+                setIntent(i);
+                setTopic(tp);
+              }}
+              onShowEverything={toggleShowEverything}
+              onInterestsDone={finishInterests}
+              onEditInterests={() => setInterestsOpen(true)}
+            />
+          )}
+        </div>
 
         {selection && (
           <LibraryDetail
             entry={selection.type === "hit" ? detail : null}
+            answers={answers}
+            leads={leads}
+            labels={labels}
+            onOpenLead={(hit) => openId(hit.id, hit.reasons)}
             legacy={selection.type === "legacy" ? selection.item : null}
             reasons={selection.type === "hit" ? selection.reasons : []}
             sessions={sessionChoices}

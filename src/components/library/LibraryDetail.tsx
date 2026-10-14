@@ -1,6 +1,9 @@
 // The open entry: what it is, why it is here, its arguments as a form with
 // a live preview of exactly what the agent receives, and the actions that
-// work for every agent (use in a session, start a task, install).
+// work for every agent (use in a session, start a task, install). A front
+// door shows its questions as optional fields (answered from the search's
+// own words when it can) and the specialists it leads to; an entry with
+// professional-advice risk says so plainly.
 
 import { useEffect, useMemo, useState } from "react";
 import { Badge, Button, Input, NativeSelect, Textarea, Toggle } from "../ui";
@@ -8,9 +11,10 @@ import { useI18n } from "../../i18n/I18nProvider";
 import { listAgents } from "../../catalog/agentCatalog";
 import { personaDelivery, systemPromptFlag } from "../../library/delivery";
 import { argsOf, defaultValues, loadCore, missingRequired, renderWith } from "../../library/render";
+import { careKind } from "../../library/everyday";
 import { agentName, installTarget } from "../../library/targets";
 import type { LegacyItem } from "../../library/legacy";
-import type { EntryArg, EntryDetail, Reason } from "../../library/types";
+import type { EntryArg, EntryDetail, LibraryHit, Reason } from "../../library/types";
 import { KindTag, reasonText } from "./LibraryParts";
 
 type Core = Awaited<ReturnType<typeof loadCore>>;
@@ -32,14 +36,15 @@ export interface DetailActions {
   duplicate(text: string): void;
 }
 
-function ArgField({ arg, value, onChange }: { arg: EntryArg; value: string; onChange: (v: string) => void }) {
+/** One argument; `asQuestion` (a front door's) reads as its question, without the code name. */
+function ArgField({ arg, value, asQuestion, onChange }: { arg: EntryArg; value: string; asQuestion?: boolean; onChange: (v: string) => void }) {
   const { t } = useI18n();
   const id = `lib-arg-${arg.name}`;
   const enumValues = Array.isArray(arg.enum) ? arg.enum : null;
   return (
     <div className="lib-field" data-arg={arg.name}>
       <label htmlFor={id} className="lib-field-label">
-        <span className="lib-field-name">{arg.name}</span>
+        {asQuestion && arg.description ? <span>{arg.description}</span> : <span className="lib-field-name">{arg.name}</span>}
         {arg.required && arg.default === undefined && <span className="lib-field-required">{t("library.detail.required")}</span>}
       </label>
       {enumValues ? (
@@ -58,13 +63,17 @@ function ArgField({ arg, value, onChange }: { arg: EntryArg; value: string; onCh
       ) : (
         <Input id={id} size="sm" value={value} onChange={(e) => onChange(e.target.value)} placeholder={arg.default !== undefined ? String(arg.default) : ""} />
       )}
-      {arg.description && arg.type !== "boolean" && <span className="lib-field-help">{arg.description}</span>}
+      {arg.description && arg.type !== "boolean" && !asQuestion && <span className="lib-field-help">{arg.description}</span>}
     </div>
   );
 }
 
 export function LibraryDetail({
   entry,
+  answers = null,
+  leads = [],
+  labels,
+  onOpenLead,
   legacy,
   reasons,
   sessions,
@@ -75,6 +84,13 @@ export function LibraryDetail({
   actions,
 }: {
   entry: EntryDetail | null;
+  /** Answers to the entry's questions taken from the search ("Lisbon"). */
+  answers?: Record<string, string> | null;
+  /** The specialists this entry leads to. */
+  leads?: LibraryHit[];
+  /** Domain and category names for the crumb. */
+  labels?: { domain: (id: string) => string; category: (id: string) => string };
+  onOpenLead?: (hit: LibraryHit) => void;
   legacy: LegacyItem | null;
   reasons: Reason[];
   sessions: SessionChoice[];
@@ -104,10 +120,10 @@ export function LibraryDetail({
   }, []);
 
   useEffect(() => {
-    setValues(defaultValues(body));
+    setValues({ ...defaultValues(body), ...(answers ?? {}) });
     setLevel(3);
     setTab("about");
-  }, [body, legacy?.key]);
+  }, [body, legacy?.key, answers]);
 
   useEffect(() => {
     if (!sessionId || !sessions.some((s) => s.id === sessionId)) setSessionId(defaultSessionId ?? sessions[0]?.id ?? null);
@@ -135,6 +151,11 @@ export function LibraryDetail({
   const blocked = missing.length > 0 ? t("library.detail.fillFirst", { name: missing.join(", ") }) : null;
   const versionLabel = legacy ? null : entry ? `v${entry.row.v}` : null;
   const changelog = (body?.fm.changelog ?? []) as { version: string; note: string }[];
+  const row = entry?.row as (EntryDetail["row"] & { ess?: number; adv?: string[] }) | undefined;
+  // hodios essentials: 2 marks a front door.
+  const door = row?.ess === 2;
+  const advice = Array.isArray(row?.adv) ? row.adv : Array.isArray(body?.fm.advice_risk) ? (body.fm.advice_risk as string[]) : [];
+  const care = careKind(advice);
 
   if (!entry && !legacy) {
     return (
@@ -151,16 +172,27 @@ export function LibraryDetail({
           <KindTag kind={kind} />
           {entry && (
             <span>
-              {String(entry.row.dom)} › {String(entry.row.cat)}
+              {door ? `${t("library.ess.title")} · ` : ""}
+              {labels ? labels.domain(String(entry.row.dom)) : String(entry.row.dom)} › {labels ? labels.category(String(entry.row.cat)) : String(entry.row.cat)}
             </span>
           )}
           {legacy && <span>{legacy.group === "mine" ? t("library.nav.mine") : t("library.nav.classics")}</span>}
         </div>
         <h2 className="lib-detail-title">{title}</h2>
-        {description && <p className="lib-detail-desc">{description}</p>}
+        {description && (
+          <p className="lib-detail-desc">
+            {description}
+            {door ? ` ${t("library.detail.door")}` : ""}
+          </p>
+        )}
+        {care && (
+          <div className="lib-carebox" role="note" data-care={care}>
+            {t(`library.carebox.${care}`)}
+          </div>
+        )}
         <div className="lib-detail-meta">
           {versionLabel && <Badge>{versionLabel}</Badge>}
-          {entry && <Badge>{t("library.detail.tierStatus", { tier: String(entry.row.tier), status: String(entry.row.status) })}</Badge>}
+          {entry?.row.status === "incubating" && <Badge>{t("library.badge.incubating")}</Badge>}
           {entry?.body && <Badge tone="success">{t("library.badge.offline")}</Badge>}
           {pinned && <Badge tone="warning">{t("library.badge.pinned")}</Badge>}
           {entry?.isNew && <Badge tone="info">{t("library.badge.updated")}</Badge>}
@@ -246,10 +278,23 @@ export function LibraryDetail({
             {args.length > 0 && (
               <section className="lib-detail-section lib-args">
                 <div className="lib-detail-label">
-                  <span>{t("library.detail.arguments")}</span>
+                  <span>{door ? t("library.detail.questions") : t("library.detail.arguments")}</span>
                 </div>
                 {args.map((a) => (
-                  <ArgField key={a.name} arg={a} value={values[a.name] ?? ""} onChange={(v) => setValues((cur) => ({ ...cur, [a.name]: v }))} />
+                  <ArgField key={a.name} arg={a} asQuestion={door} value={values[a.name] ?? ""} onChange={(v) => setValues((cur) => ({ ...cur, [a.name]: v }))} />
+                ))}
+              </section>
+            )}
+
+            {leads.length > 0 && (
+              <section className="lib-detail-section lib-leads" data-testid="library-leads">
+                <div className="lib-detail-label">
+                  <span>{t("library.detail.leadsTo")}</span>
+                </div>
+                {leads.map((h) => (
+                  <Button key={h.id} variant="link" size="sm" className="lib-lead" data-entry={h.id} onClick={() => onOpenLead?.(h)}>
+                    {h.title} →
+                  </Button>
                 ))}
               </section>
             )}

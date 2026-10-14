@@ -2692,6 +2692,7 @@ export function TaskLauncher({
           embedded={!inline}
           works={[...new Set(plannedAgents.map((a) => worksTarget(a.id)))]}
           prefill={task.trim() && !libPrompt ? task : ""}
+          initialQuery={!libPrompt ? task : ""}
           projectPath={repoPath || null}
           libraryContext={{ projectPath: repoPath || null }}
           onClose={() => {

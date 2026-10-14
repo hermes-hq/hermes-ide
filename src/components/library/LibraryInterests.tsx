@@ -8,21 +8,34 @@ import { libraryGetProfile, librarySetProfile, libraryVocab } from "../../librar
 import type { Labeled, LibraryProfile } from "../../library/types";
 
 const EMPTY: LibraryProfile = { roles: [], domains: [], categories: [], subjects: [], stack: [] };
-/** The roles offered first (Hermes is a coding tool); the rest behind "More roles". */
-const FIRST_ROLES = 12;
+/**
+ * The roles offered first: everyday ones (a traveller, a home cook, a
+ * parent, someone looking for a job) side by side with the coding ones;
+ * the rest behind "More roles".
+ */
+const FIRST_ROLES = 14;
 const COMMON_ROLES = [
+  "individual",
   "software-engineer",
+  "traveler",
   "frontend-engineer",
+  "home-cook",
   "backend-engineer",
+  "parent",
+  "job-seeker",
+  "student",
+  "product-manager",
+  "writer",
+  "designer",
+  "language-learner",
+  "founder",
   "fullstack-engineer",
-  "mobile-engineer",
   "devops-engineer",
   "data-engineer",
   "ml-engineer",
   "qa-engineer",
   "security-engineer",
   "tech-lead",
-  "product-manager",
 ];
 
 function commonFirst(list: Labeled[]): Labeled[] {

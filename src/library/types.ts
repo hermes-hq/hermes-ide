@@ -29,6 +29,32 @@ export interface LibraryHit {
   reasons: Reason[];
   isNew: boolean;
   rank: number;
+  /** A front door (Essentials level 1): asks a few questions, then hands off. */
+  door?: boolean;
+  /** An everyday essential (Essentials level 1 or 2). */
+  essential?: boolean;
+  /** Professional-advice risk: medical, mental-health, legal, financial. */
+  adv?: string[];
+  intents?: string[];
+  topic?: string | null;
+  /** Depth level id from the catalog's vocab (null in older catalogs). */
+  depth?: string | null;
+}
+
+/** One value of an ordered vocab list (a depth level, an intent, a topic). */
+export interface VocabLevel {
+  id: string;
+  label: string;
+  hint?: string | null;
+}
+
+/** The front door a plain need routes to, and the specialists to narrow to. */
+export interface RoutePage {
+  /** An entry whose title holds every word when the front door does not ("plan a road trip"): it comes first. */
+  exact?: LibraryHit | null;
+  to: LibraryHit;
+  refine: LibraryHit[];
+  phrase: string;
 }
 
 export interface SearchRequest {
@@ -48,6 +74,14 @@ export interface SearchPage {
   totalCapped: boolean;
   nextCursor: string | null;
   kindCounts: Record<string, number>;
+  /** Matches per depth level (with `counts`). */
+  depthCounts?: Record<string, number>;
+  /** The routed need (first page only). */
+  route?: RoutePage | null;
+  /** Words of the query the best match did not use ("Lisbon", "5-day"). */
+  leftover?: string[];
+  /** No entry matched every word: these match some of them. */
+  partial?: boolean;
   tookMs: number;
 }
 
@@ -69,7 +103,7 @@ export interface Labeled {
 }
 
 export interface Shelf {
-  id: "project" | "role" | "continue" | "now" | "new" | "start";
+  id: "project" | "role" | "continue" | "now" | "new";
   hits: LibraryHit[];
   because: Labeled[];
 }
@@ -94,11 +128,18 @@ export interface CatalogInfo {
   appliedAt: number;
 }
 
+export interface CategoryCount {
+  id: string;
+  label: string;
+  count: number;
+}
+
 export interface DomainCount {
   id: string;
   label: string;
   count: number;
   mine: boolean;
+  categories?: CategoryCount[];
 }
 
 export interface Shelves {
@@ -109,6 +150,12 @@ export interface Shelves {
   profile: LibraryProfile;
   domains: DomainCount[];
   catalog: CatalogInfo | null;
+  /** The front doors (basic entries), shown whatever the profile. */
+  essentials?: LibraryHit[];
+  intents?: VocabLevel[];
+  topics?: VocabLevel[];
+  /** Depth levels in the vocab's order (empty for older catalogs). */
+  depths?: VocabLevel[];
 }
 
 export interface ItemState {
