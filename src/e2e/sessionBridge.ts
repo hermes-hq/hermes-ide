@@ -9,6 +9,8 @@ import type { CreateSessionOpts, SessionData } from "../types/session";
 export interface E2ESessionBridge {
 	createSession(opts: CreateSessionOpts): Promise<SessionData | null>;
 	show(sessionId: string): void;
+	/** Split the focused pane and show `sessionId` in the new one (the action bar's narrow and short pane checks). */
+	split(sessionId: string, direction: "horizontal" | "vertical"): void;
 }
 
 let bridge: E2ESessionBridge | null = null;

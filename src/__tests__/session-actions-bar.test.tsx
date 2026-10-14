@@ -139,7 +139,7 @@ describe("chips", () => {
     renderBar("claude", { compact: true });
     expect(document.querySelectorAll("[data-session-action]")).toHaveLength(0);
     const trigger = document.querySelector("[data-session-commands]")!;
-    expect(trigger.textContent).toMatch(/^\/\d+$/);
+    expect(trigger.textContent).toMatch(/^\/ \d+$/);
     expect(document.querySelector(".session-actions-row")?.getAttribute("data-layout")).toBe("collapsed");
   });
 });

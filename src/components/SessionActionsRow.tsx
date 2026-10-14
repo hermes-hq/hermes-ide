@@ -316,10 +316,11 @@ export function SessionActionsRow({
       aria-expanded={open}
       aria-label={commandsTitle}
       title={commandsTitle}
+      // Not the pane's press-to-focus-the-terminal: the list takes the keyboard.
+      onMouseDown={(e) => e.stopPropagation()}
       onClick={() => (open ? closePopover(false) : setOpen(true))}
     >
-      <span className="sab-slash" aria-hidden="true">/</span>
-      <span>{layout === "collapsed" ? count : commandsLabel}</span>
+      <span className="sab-slash" aria-hidden="true">/</span> <span>{layout === "collapsed" ? count : commandsLabel}</span>
     </Button>
   );
 
@@ -328,7 +329,7 @@ export function SessionActionsRow({
       ref={rowRef}
       className={["session-actions-row", className].filter(Boolean).join(" ")}
       data-layout={layout}
-      data-session-id={sessionId}
+      data-session-actions={sessionId}
       role="toolbar"
       aria-label={t("sessionActions.toolbarLabel", { agent: agentName })}
     >

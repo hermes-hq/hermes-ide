@@ -106,7 +106,7 @@ All components live in `src/components/` as flat files (no nesting). Each compon
 - **Terminal:** `TerminalPane.tsx`, `SplitLayout.tsx`, `SplitPane.tsx`, `SplitDivider.tsx`
 - **Session management:** `SessionList.tsx`, `SessionCreator.tsx`, `SessionPaneTabs.tsx`
 - **Git:** `GitPanel.tsx`, `SessionGitPanel.tsx`, `GitDiffView.tsx`, `GitLogView.tsx`, `GitBranchSelector.tsx`, `GitConflictViewer.tsx`, `GitMergeBanner.tsx`, `GitStashSection.tsx`
-- **AI / Context:** `ContextPanel.tsx`, `ContextPreview.tsx`, `PromptComposer.tsx`, `ProviderActionsBar.tsx`, `RoleSelector.tsx`, `StyleSelector.tsx`
+- **AI / Context:** `ContextPanel.tsx`, `ContextPreview.tsx`, `PromptComposer.tsx`, `SessionActionsBar.tsx`, `RoleSelector.tsx`, `StyleSelector.tsx`
 - **Navigation:** `CommandPalette.tsx`, `ActivityBar.tsx`, `StatusBar.tsx`
 - **Settings & Info:** `Settings.tsx`, `CostDashboard.tsx`, `ShortcutsPanel.tsx`, `OnboardingWizard.tsx`, `WhatsNewDialog.tsx`, `UpdateDialog.tsx`
 - **Workspace:** `WorkspacePanel.tsx`, `ProjectPicker.tsx`, `FileExplorerPanel.tsx`, `SearchPanel.tsx`, `ProcessPanel.tsx`
@@ -270,11 +270,12 @@ trait ProviderAdapter: Send + Sync {
     fn detect_agent(&self, line: &str) -> Option<AgentInfo>;
     fn analyze_line(&self, line: &str) -> LineAnalysis;
     fn is_prompt(&self, line: &str) -> bool;
-    fn known_actions(&self) -> Vec<ActionTemplate>;
 }
 ```
 
-Current adapters: `ClaudeCodeAdapter`, `AiderAdapter`, `GeminiCliAdapter`, `CodexAdapter`. Each adapter uses compiled `Regex` patterns (via `lazy_static!`) to parse token counts, tool calls, cost information, and slash commands from terminal output.
+Current adapters: `ClaudeCodeAdapter`, `AiderAdapter`, `GeminiCliAdapter`, `CodexAdapter`. Each adapter uses compiled `Regex` patterns (via `lazy_static!`) to parse token counts, tool calls and cost information from terminal output.
+
+An agent's commands (the session action bar and its Commands list) are not read from its output: they come from the agent catalog (`src/catalog/agents.json`, `actions` and `agents[].commands`), the person's own command and skill files (`agent_commands.rs`), and what the person sent. A command is typed only through `pty/session_command.rs`, which waits for the agent to wait and never touches a line the person is writing.
 
 The `ProviderRegistry` iterates through adapters on each output line. Once an agent is detected, that adapter becomes the "active" one and gets priority for subsequent line analysis.
 

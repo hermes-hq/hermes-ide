@@ -3119,6 +3119,10 @@ export function SessionProvider({ children }: { children: ReactNode }) {
         if (!layout.root) dispatch({ type: "INIT_PANE", sessionId: id });
         else if (layout.focusedPaneId) dispatch({ type: "SET_PANE_SESSION", paneId: layout.focusedPaneId, sessionId: id });
       },
+      split: (id, direction) => {
+        const paneId = stateRef.current.layout.focusedPaneId;
+        if (paneId) dispatch({ type: "SPLIT_PANE", paneId, direction, newSessionId: id });
+      },
     });
     return () => setE2ESessionBridge(null);
   }, [createSession]);

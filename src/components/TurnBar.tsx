@@ -318,7 +318,7 @@ export function TurnBar({ sessionId, workingDirectory, folders, compact = false 
   return (
     <>
       {compact ? (
-        <span className="turn-bar-compact" data-session-id={sessionId} data-scope={scopeNote ? "main-only" : undefined}>
+        <span className="turn-bar-compact" data-session-turns={sessionId} data-scope={scopeNote ? "main-only" : undefined}>
           {turns.length > 0 && (
             <Chip
               size="sm"

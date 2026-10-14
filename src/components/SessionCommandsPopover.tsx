@@ -42,7 +42,9 @@ const MAX_HEIGHT = 440;
 
 /** Fixed position under (or over) the anchor, inside the window, again on resize. */
 function useAnchoredPosition(anchorRef: RefObject<HTMLElement | null>, popRef: RefObject<HTMLElement | null>): CSSProperties {
-  const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" });
+  // Placed before the first paint (a layout effect); until then invisible
+  // but focusable, so the filter can take the keyboard as the list opens.
+  const [style, setStyle] = useState<CSSProperties>({ position: "fixed", top: 0, left: 0, opacity: 0 });
   const place = useCallback(() => {
     const anchor = anchorRef.current;
     if (!anchor) return;
@@ -260,6 +262,9 @@ export function SessionCommandsPopover({
       data-session-commands-popover={sessionId}
       data-surface={surface}
       onKeyDown={onKeyDown}
+      // The pane puts the keyboard in its terminal on a press anywhere in it;
+      // a press in this list keeps it here.
+      onMouseDown={(e) => e.stopPropagation()}
     >
       {confirm ? (
         (() => {

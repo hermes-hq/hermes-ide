@@ -2006,3 +2006,35 @@ features:
       NOTICES-3:
         text: "Turning off Show notices from the Hermes team in Settings hides every card and stops the fetch"
         scenarios: [QA-notices-card.mjs]
+  ACT:
+    name: "Session action bar: the agent's own commands, run safely, from one catalog"
+    # Fake agents (tools/fake-agents/fake-cli.mjs) record every prompt they
+    # are sent; agy and OpenCode run the same fake under their own names.
+    status: shipped
+    criteria:
+      ACT-1:
+        # Run against the build before this bar, step 1 fails: the old quick
+        # action erased the draft with Backspaces and typed over it.
+        text: "A chip runs its command with Enter only while the agent waits with an empty line; a draft on the line is never touched (Enter then sends exactly the draft) and the bar says Finish or clear your message first; while the agent works the chips are disabled and say when they will work"
+        scenarios: [ACT-draft-safety.mjs]
+      ACT-2:
+        text: "New Chat, Exit and Sign Out are never chips; in the Commands list they sit last under Session and send nothing until the inline confirm"
+        scenarios: [ACT-draft-safety.mjs]
+      ACT-3:
+        text: "The Commands list shows the person's own command files (namespaced, with their frontmatter description) and skills under Your commands, and Recent shows only what the person sent; picking one sends it"
+        scenarios: [ACT-commands-context.mjs]
+      ACT-4:
+        text: "The context chip shows Context N% from the agent's own report and turns amber as Compact · N% at 75%, and a click sends the agent's compact command"
+        scenarios: [ACT-commands-context.mjs]
+      ACT-5:
+        text: "The command palette lists the focused session's commands as Run in <session> and runs one with the bar's rules"
+        scenarios: [ACT-commands-context.mjs]
+      ACT-6:
+        text: "Every agent gets the bar with only the actions it has: Antigravity (Model, Plan) and OpenCode (Model) sessions show Prompts, their chips and Commands"
+        scenarios: [ACT-every-agent-narrow.mjs]
+      ACT-7:
+        text: "Three panes side by side: no bar overflows its pane; a pane narrower than 480 px collapses to Prompts and / N"
+        scenarios: [ACT-every-agent-narrow.mjs]
+      ACT-8:
+        text: "A short pane folds the action bar and the turn bar into its header line and the terminal gets at least 2 more rows, with nothing cut off; a tall pane brings their rows back"
+        scenarios: [ACT-short-pane.mjs]

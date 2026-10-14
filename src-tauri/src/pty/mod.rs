@@ -1021,7 +1021,7 @@ mod tests {
         // A draft on the line: nothing at all is written (no Backspace).
         analyzer.lock().unwrap().typed_line.feed(b"fix the bug");
         assert_eq!(
-            mgr.run_session_command("s1", "/compact"),
+            mgr.run_session_command("s1", "/compact", false),
             Ok(CommandOutcome::Draft)
         );
         assert_eq!(typed.text(), "");
@@ -1030,32 +1030,50 @@ mod tests {
         analyzer.lock().unwrap().typed_line.feed(b"\x15");
         session.lock().unwrap().phase = SessionPhase::Busy;
         assert_eq!(
-            mgr.run_session_command("s1", "/compact"),
+            mgr.run_session_command("s1", "/compact", false),
             Ok(CommandOutcome::Busy)
         );
+        assert_eq!(typed.text(), "");
+        // The agent's own turn-end report outranks the terminal's guess (its
+        // phase changes only after 2 s of quiet), but never a draft.
+        analyzer.lock().unwrap().typed_line.feed(b"x");
+        assert_eq!(
+            mgr.run_session_command("s1", "/compact", true),
+            Ok(CommandOutcome::Draft)
+        );
+        analyzer.lock().unwrap().typed_line.feed(b"\x15");
         assert_eq!(typed.text(), "");
 
         // Waiting with an empty line: the command and Enter, as a paste.
         session.lock().unwrap().phase = SessionPhase::NeedsInput;
         assert_eq!(
-            mgr.run_session_command("s1", "/compact"),
+            mgr.run_session_command("s1", "/compact", false),
             Ok(CommandOutcome::Sent)
         );
         assert_eq!(typed.text(), "\x1b[200~/compact\x1b[201~\r");
 
         // A line with keys in it is refused outright.
-        assert!(mgr.run_session_command("s1", "\x7f\x7f/clear").is_err());
-        assert!(mgr.run_session_command("s1", "/clear\r/exit").is_err());
+        assert!(mgr
+            .run_session_command("s1", "\x7f\x7f/clear", false)
+            .is_err());
+        assert!(mgr
+            .run_session_command("s1", "/clear\r/exit", false)
+            .is_err());
 
         // The agent exited (the shell holds the terminal): nothing is typed.
         mgr.sessions
             .insert("s1".into(), pty(Box::new(ShellAtPrompt)));
         assert_eq!(
-            mgr.run_session_command("s1", "/compact"),
+            mgr.run_session_command("s1", "/compact", false),
+            Ok(CommandOutcome::NoAgent)
+        );
+        // Not even when a stale report says it waits.
+        assert_eq!(
+            mgr.run_session_command("s1", "/compact", true),
             Ok(CommandOutcome::NoAgent)
         );
         assert_eq!(
-            mgr.run_session_command("gone", "/compact"),
+            mgr.run_session_command("gone", "/compact", false),
             Ok(CommandOutcome::NoAgent)
         );
         assert_eq!(typed.text(), "\x1b[200~/compact\x1b[201~\r");

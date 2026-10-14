@@ -26,11 +26,16 @@ export function noteSent(sessionId: string, agentId: string, cmd: SessionCommand
   trackFeatureUsed(analyticsFeature(cmd));
 }
 
-/** Run a command in a terminal session (see the module comment). */
-export async function runInTerminal(sessionId: string, agentId: string, cmd: SessionCommand, via: CommandSend["via"]): Promise<RunOutcome> {
+/**
+ * Run a command in a terminal session (see the module comment).
+ * `reportedWaiting`: the agent itself reported that it waits (its status is
+ * exact or signalled, not guessed); the backend then need not wait for the
+ * terminal's own guess (two seconds of quiet).
+ */
+export async function runInTerminal(sessionId: string, agentId: string, cmd: SessionCommand, via: CommandSend["via"], reportedWaiting = false): Promise<RunOutcome> {
   let outcome: RunOutcome;
   try {
-    outcome = await invoke<RunOutcome>("run_session_command", { sessionId, line: cmd.text });
+    outcome = await invoke<RunOutcome>("run_session_command", { sessionId, line: cmd.text, reportedWaiting });
   } catch (err) {
     console.warn("[session-actions] command not run:", err);
     return "error";

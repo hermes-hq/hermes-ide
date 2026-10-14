@@ -28,6 +28,11 @@ export function isShortPane(paneHeight: number, chromePx: number, cellPx: number
   return wasShort ? rows < SHORT_PANE_ROWS + 1 : rows < SHORT_PANE_ROWS;
 }
 
+/** Test builds only: a scenario turns the folding off to measure the rows it gives back. */
+function foldingOffForTest(): boolean {
+  return import.meta.env.VITE_HERMES_E2E === "1" && (window as { __HERMES_E2E_NO_FOLD__?: boolean }).__HERMES_E2E_NO_FOLD__ === true;
+}
+
 /** The height of one terminal row in this session (px), from the terminal itself when it is drawn. */
 function cellHeight(sessionId: string): number {
   const term = getTerminal(sessionId) as unknown as { _core?: { _renderService?: { dimensions?: { css?: { cell?: { height?: number } } } } } } | null;
@@ -54,7 +59,7 @@ export function useShortPane(paneRef: RefObject<HTMLElement | null>, sessionId: 
         const terminal = pane.querySelector<HTMLElement>(".split-pane-terminal");
         if (terminal && terminal.clientHeight > 0) chrome.current = Math.max(0, height - terminal.clientHeight);
       }
-      setShort(isShortPane(height, chrome.current, cellHeight(sessionId), shortRef.current));
+      setShort(!foldingOffForTest() && isShortPane(height, chrome.current, cellHeight(sessionId), shortRef.current));
     };
     update();
     if (typeof ResizeObserver === "undefined") return;

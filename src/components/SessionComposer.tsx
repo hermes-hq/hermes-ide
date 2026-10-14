@@ -832,6 +832,19 @@ export function SessionComposer() {
   };
 
   return (
+    <>
+    {/* The session's action row sits above the composer, outside its
+        resizable height, so it never takes the textarea's room. */}
+    <AgentActionsRow
+      sessionId={composerSessionId}
+      agentName={getAgent("claude")?.name ?? "Claude"}
+      cwd={init?.cwd ?? session?.working_directory ?? null}
+      liveCommands={slashCommandsFromInit}
+      hasDraft={draft.trim().length > 0 || pendingImages.length > 0}
+      sendCommand={sendCommandText}
+      permissionMode={pendingPerm ?? init?.permissionMode ?? "default"}
+      setPermissionMode={(mode) => void handlePermSelect(mode)}
+    />
     <div
       ref={wrapperRef}
       className={`session-composer session-composer-claude ${isDragOver ? "session-composer-drag-over" : ""}`}
@@ -874,18 +887,6 @@ export function SessionComposer() {
           // not where the user expects claude to run).
           cwd={init?.cwd ?? session?.working_directory ?? null}
           onClose={() => setActiveTerminal(null)}
-        />
-      )}
-      {composerSessionId && (
-        <AgentActionsRow
-          sessionId={composerSessionId}
-          agentName={getAgent("claude")?.name ?? "Claude"}
-          cwd={init?.cwd ?? session?.working_directory ?? null}
-          liveCommands={slashCommandsFromInit}
-          hasDraft={draft.trim().length > 0 || pendingImages.length > 0}
-          sendCommand={sendCommandText}
-          permissionMode={pendingPerm ?? init?.permissionMode ?? "default"}
-          setPermissionMode={(mode) => void handlePermSelect(mode)}
         />
       )}
       <div className="session-composer-card">
@@ -1202,5 +1203,6 @@ export function SessionComposer() {
         </div>
       </div>
     </div>
+    </>
   );
 }

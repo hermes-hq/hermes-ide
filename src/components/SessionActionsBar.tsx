@@ -7,6 +7,8 @@ import { SessionActionsRow } from "./SessionActionsRow";
 import { agentDisplayName, getAgent } from "../catalog/agentCatalog";
 import { agentIdOf, type SessionCommand } from "../sessionActions/catalog";
 import { runInTerminal } from "../sessionActions/run";
+import { takesCommands } from "../sessionActions/state";
+import { getSessionStatus } from "../agent/status/attentionStore";
 import { PromptsGlyph } from "../sessionActions/icons";
 import type { CommandSend } from "../sessionActions/recent";
 import { relaunchAgent } from "../agent/capabilities/api";
@@ -41,7 +43,9 @@ export function SessionActionsBar({ sessionId, paneId, focused, compact = false 
   const run = useCallback(
     async (cmd: SessionCommand, via: CommandSend["via"]) => {
       if (!agentId) return "no_agent" as const;
-      const outcome = await runInTerminal(sessionId, agentId, cmd, via);
+      const status = getSessionStatus(sessionId);
+      const reportedWaiting = status.confidence !== "guessed" && takesCommands(status.kind);
+      const outcome = await runInTerminal(sessionId, agentId, cmd, via, reportedWaiting);
       // The click took the keyboard: give it back to the terminal.
       focusTerminal(sessionId);
       return outcome;

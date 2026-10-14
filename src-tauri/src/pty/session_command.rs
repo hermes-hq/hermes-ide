@@ -8,7 +8,10 @@
 //!
 //! - an agent holds the terminal (not the shell: it would run as a shell
 //!   command once the agent has exited),
-//! - the agent waits (not mid-turn: the line would be queued or lost),
+//! - the agent waits (not mid-turn: the line would be queued or lost):
+//!   the agent itself said so (its turn-end hook, as the frontend's status
+//!   reads it, `reported_waiting`), or its output has been quiet long enough
+//!   for the terminal's own guess to say it waits,
 //! - the person has no text on the line (`typed_line`): the old quick
 //!   actions erased a draft with Backspaces and typed over it; nothing here
 //!   ever sends Backspace, so a draft is never touched.
@@ -46,7 +49,8 @@ pub(crate) struct CommandGate {
     pub agent: bool,
     /// The shell holds the terminal: the agent is not there to read a line.
     pub shell_at_prompt: bool,
-    /// The agent's output is quiet and its phase is waiting or idle.
+    /// The agent reported that it waits (an exact or signalled status), or
+    /// its output is quiet and its phase is waiting or idle.
     pub waiting: bool,
     /// The person has typed text on the line and not entered it.
     pub line_pending: bool,
@@ -90,6 +94,7 @@ impl PtyManager {
         &self,
         session_id: &str,
         line: &str,
+        reported_waiting: bool,
     ) -> Result<CommandOutcome, String> {
         if !is_command_line(line) {
             return Err("Not a command line".to_string());
@@ -115,7 +120,7 @@ impl PtyManager {
             agent,
             // Asked only for an agent session (it reads the process table).
             shell_at_prompt: agent && Self::shell_has_terminal(pty),
-            waiting: quiet && waiting_phase,
+            waiting: reported_waiting || (quiet && waiting_phase),
             line_pending,
         };
         if let Some(refusal) = gate.refusal() {
@@ -127,15 +132,17 @@ impl PtyManager {
 }
 
 /// Run one of the agent's commands in a terminal session (the session
-/// action bar, the Commands list, the command palette).
+/// action bar, the Commands list, the command palette). `reported_waiting`:
+/// the agent's own report (not a guess) says it waits at its prompt.
 #[tauri::command]
 pub fn run_session_command(
     state: State<'_, AppState>,
     session_id: String,
     line: String,
+    reported_waiting: Option<bool>,
 ) -> Result<CommandOutcome, String> {
     let mgr = state.pty_manager.lock().unwrap_or_else(|e| e.into_inner());
-    mgr.run_session_command(&session_id, &line)
+    mgr.run_session_command(&session_id, &line, reported_waiting.unwrap_or(false))
 }
 
 #[cfg(test)]
