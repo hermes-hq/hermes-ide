@@ -73,6 +73,9 @@ pub struct Manifest {
     /// `id@version` (or a bare id) of entries taken down; hidden on apply.
     #[serde(default)]
     pub revoked: Vec<String>,
+    /// The compiled everyday-word routing (`queries.json`), by hash.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub queries: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -148,6 +151,43 @@ pub struct Row {
     pub bytes: Option<i64>,
     #[serde(default)]
     pub updated: Option<String>,
+    /// Essentials (hodios `essentials.yml`): 2 = a front door (level1),
+    /// 1 = another everyday essential (level2), 0 = neither; higher first.
+    #[serde(default)]
+    pub ess: i64,
+    /// Intent ids (Write, Plan, ...); from the vocab's category map when absent.
+    #[serde(default, rename = "int", deserialize_with = "one_or_many")]
+    pub intents: Vec<String>,
+    /// Topic id (travel, food, ...); from the vocab's category map when absent.
+    #[serde(default)]
+    pub top: Option<String>,
+    /// Extra search words: the category label and synonyms, the everyday
+    /// phrases routed here, aliases.
+    #[serde(default, deserialize_with = "one_or_many")]
+    pub syn: Vec<String>,
+    /// Professional-advice risk (medical, mental-health, legal, financial).
+    #[serde(default, alias = "advice_risk", deserialize_with = "one_or_many")]
+    pub adv: Vec<String>,
+    /// Depth level id (vocab `depth` order); the middle level when absent.
+    #[serde(default)]
+    pub dep: Option<String>,
+}
+
+/// A list field that a catalog may also write as one string (or null).
+fn one_or_many<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+        Nothing(()),
+    }
+    Ok(match OneOrMany::deserialize(d)? {
+        OneOrMany::One(s) if s.is_empty() => Vec::new(),
+        OneOrMany::One(s) => vec![s],
+        OneOrMany::Many(v) => v,
+        OneOrMany::Nothing(()) => Vec::new(),
+    })
 }
 
 /// Tier order of the static rank (lower first).
@@ -160,12 +200,29 @@ pub fn tier_order(tier: &str) -> i64 {
     }
 }
 
-/// hodios-core `compareStatic`: tier, deprecated last, quality, usage, id.
-pub fn compare_static(a: &Row, b: &Row) -> std::cmp::Ordering {
-    tier_order(&a.tier)
-        .cmp(&tier_order(&b.tier))
-        .then((a.status == "deprecated").cmp(&(b.status == "deprecated")))
+/// Front doors first, then the other essentials, then everything else.
+pub fn ess_order(ess: i64) -> i64 {
+    match ess {
+        2 => 0,
+        1 => 1,
+        _ => 2,
+    }
+}
+
+/// The static rank (hodios-core `compareStatic`): deprecated last, then
+/// essentials, depth (the vocab's order, basic first), commonness, tier,
+/// usage, and the id only as the final tiebreak.
+pub fn compare_static(a: &Row, b: &Row, vocab: &Vocab) -> std::cmp::Ordering {
+    (a.status == "deprecated")
+        .cmp(&(b.status == "deprecated"))
+        .then(ess_order(a.ess).cmp(&ess_order(b.ess)))
+        .then(
+            vocab
+                .depth_rank(a.dep.as_deref())
+                .cmp(&vocab.depth_rank(b.dep.as_deref())),
+        )
         .then(b.q.cmp(&a.q))
+        .then(tier_order(&a.tier).cmp(&tier_order(&b.tier)))
         .then(b.u.cmp(&a.u))
         .then(a.id.cmp(&b.id))
 }
@@ -190,6 +247,52 @@ pub struct DetectRule {
     pub deps: Vec<String>,
 }
 
+/// One value of an ordered list in the vocab (a depth level, an intent, a topic).
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct Level {
+    #[serde(alias = "value")]
+    pub id: String,
+    #[serde(default)]
+    pub label: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+/// The depth levels, in order: a list, or `{ values: [...], default }`
+/// (hodios `vocab/depth.yml`; `levels` is read too). `default` is the
+/// level of an entry that has none (else the middle one).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum DepthVocab {
+    List(Vec<Level>),
+    Wrapped {
+        #[serde(alias = "levels")]
+        values: Vec<Level>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        default: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct CategoryIntent {
+    #[serde(default, deserialize_with = "one_or_many")]
+    pub intents: Vec<String>,
+    #[serde(default)]
+    pub topic: Option<String>,
+}
+
+/// `vocab/intent.yml`: intents (verbs) and topics (nouns) in display
+/// order, and each category's intents and topic.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct IntentVocab {
+    #[serde(default)]
+    pub intents: Vec<Level>,
+    #[serde(default)]
+    pub topics: Vec<Level>,
+    #[serde(default)]
+    pub categories: HashMap<String, CategoryIntent>,
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Vocab {
     #[serde(default)]
@@ -199,9 +302,98 @@ pub struct Vocab {
     pub domains: HashMap<String, String>,
     #[serde(default)]
     pub detect: BTreeMap<String, DetectRule>,
+    /// Depth levels in order (`vocab/depth.yml`). Absent in older catalogs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub depth: Option<DepthVocab>,
+    /// `vocab/intent.yml`. Absent in older catalogs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub intent: Option<IntentVocab>,
+    /// The same lists at the top level (another way a catalog may carry them).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub intents: Vec<Level>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub topics: Vec<Level>,
 }
 
 impl Vocab {
+    /// The depth levels in the vocab's order (none in older catalogs).
+    pub fn depth_levels(&self) -> &[Level] {
+        match &self.depth {
+            Some(DepthVocab::List(l)) | Some(DepthVocab::Wrapped { values: l, .. }) => l,
+            None => &[],
+        }
+    }
+
+    /// Position of the level an entry without one gets: the vocab's
+    /// `default` when it names a level, else the middle one.
+    fn default_depth(&self) -> usize {
+        let levels = self.depth_levels();
+        let named = match &self.depth {
+            Some(DepthVocab::Wrapped {
+                default: Some(d), ..
+            }) => levels.iter().position(|l| &l.id == d),
+            _ => None,
+        };
+        named.unwrap_or(levels.len() / 2)
+    }
+
+    /// A row's depth level id: its own when the vocab knows it, else the
+    /// default level; None when the vocab has no levels.
+    pub fn depth_of(&self, dep: Option<&str>) -> Option<String> {
+        let levels = self.depth_levels();
+        if levels.is_empty() {
+            return None;
+        }
+        Some(
+            dep.filter(|d| levels.iter().any(|l| l.id == *d))
+                .map(str::to_string)
+                .unwrap_or_else(|| levels[self.default_depth()].id.clone()),
+        )
+    }
+
+    /// Position of a depth level in the vocab's order (0 without levels).
+    pub fn depth_rank(&self, dep: Option<&str>) -> i64 {
+        let levels = self.depth_levels();
+        if levels.is_empty() {
+            return 0;
+        }
+        dep.and_then(|d| levels.iter().position(|l| l.id == d))
+            .unwrap_or_else(|| self.default_depth()) as i64
+    }
+
+    /// The first depth level ("Start here"), when there are levels.
+    pub fn first_depth(&self) -> Option<&str> {
+        self.depth_levels().first().map(|l| l.id.as_str())
+    }
+
+    pub fn intent_list(&self) -> &[Level] {
+        match &self.intent {
+            Some(i) if !i.intents.is_empty() => &i.intents,
+            _ => &self.intents,
+        }
+    }
+
+    pub fn topic_list(&self) -> &[Level] {
+        match &self.intent {
+            Some(i) if !i.topics.is_empty() => &i.topics,
+            _ => &self.topics,
+        }
+    }
+
+    /// A category's intents and topic from `vocab/intent.yml`.
+    pub fn category_intent(&self, category: &str) -> Option<&CategoryIntent> {
+        self.intent.as_ref()?.categories.get(category)
+    }
+
+    pub fn topic_label<'a>(&'a self, topic: &'a str) -> &'a str {
+        self.topic_list()
+            .iter()
+            .find(|t| t.id == topic)
+            .map(|t| t.label.as_str())
+            .filter(|l| !l.is_empty())
+            .unwrap_or(topic)
+    }
+
     pub fn label<'a>(&'a self, facet: &str, value: &'a str) -> &'a str {
         self.facets
             .get(facet)
@@ -283,6 +475,8 @@ pub struct VerifiedCatalog {
     /// Every row with its raw JSON line.
     pub rows: Vec<(Row, String)>,
     pub vocab: Option<Vocab>,
+    /// Everyday-word routes (`queries.json`); empty in older catalogs.
+    pub routes: Vec<super::everyday::Route>,
     /// Body objects: (hex, bytes).
     pub bodies: Vec<(String, Vec<u8>)>,
 }
@@ -360,9 +554,24 @@ pub fn collect(
     check_manifest(&manifest)?;
     let mut objects = Vec::new();
     let mut vocab = None;
+    let mut routes = Vec::new();
     if let Some(reference) = &manifest.vocab {
         let (hex, bytes) = fetch_verified(source, reference, "vocab")?;
         vocab = Some(serde_json::from_slice::<Vocab>(&bytes).map_err(|e| format!("vocab: {e}"))?);
+        // The routes may also travel inside the vocab object.
+        if let Some(q) = serde_json::from_slice::<Value>(&bytes)
+            .ok()
+            .and_then(|v| v.get("queries").cloned())
+        {
+            routes = super::everyday::parse_routes(&q);
+        }
+        objects.push((hex, bytes));
+    }
+    // The manifest's own queries object wins over a copy in the vocab.
+    if let Some(reference) = &manifest.queries {
+        let (hex, bytes) = fetch_verified(source, reference, "queries")?;
+        let value: Value = serde_json::from_slice(&bytes).map_err(|e| format!("queries: {e}"))?;
+        routes = super::everyday::parse_routes(&value);
         objects.push((hex, bytes));
     }
     for (name, pack) in &manifest.packs {
@@ -454,6 +663,7 @@ pub fn collect(
         objects,
         rows,
         vocab,
+        routes,
         bodies,
     })
 }
@@ -526,17 +736,40 @@ pub mod tests {
         seq: i64,
         entries: &[(&str, serde_json::Value, &str)],
     ) -> Fixture {
+        fixture_with(catalog, seq, entries, serde_json::json!({}), None)
+    }
+
+    /// `fixture` with more vocab (merged at the top level) and a
+    /// `queries.json` object. An entry's `fm` extra goes into its body's
+    /// front matter (not its row).
+    pub fn fixture_with(
+        catalog: &str,
+        seq: i64,
+        entries: &[(&str, serde_json::Value, &str)],
+        vocab_extra: serde_json::Value,
+        queries: Option<serde_json::Value>,
+    ) -> Fixture {
         let mut objects = HashMap::new();
         // One shard list per tier, like hodios-dist (a row's tier comes
         // from its `tier` field, curated when the entry does not say).
         let mut lines: BTreeMap<String, Vec<String>> = BTreeMap::new();
         for (id, extra, body) in entries {
-            let body_obj = serde_json::json!({
+            let mut body_obj = serde_json::json!({
                 "schema": 1,
                 "fm": { "id": id, "kind": extra.get("kind").cloned().unwrap_or("prompt".into()), "title": id, "version": "1.0.0",
                         "args": extra.get("args").cloned().unwrap_or(serde_json::json!([])) },
                 "body": body, "steps": [],
             });
+            if let Some(fm) = extra.get("fm").and_then(|f| f.as_object()) {
+                for (k, v) in fm {
+                    body_obj["fm"][k] = v.clone();
+                }
+            }
+            let mut extra = extra.clone();
+            if let Some(o) = extra.as_object_mut() {
+                o.remove("fm");
+                o.remove("args");
+            }
             let body_ref = put(&mut objects, serde_json::to_vec(&body_obj).unwrap());
             let tier = extra
                 .get("tier")
@@ -545,7 +778,7 @@ pub mod tests {
             lines
                 .entry(tier.to_string())
                 .or_default()
-                .push(row_json(id, extra.clone(), &body_ref).to_string());
+                .push(row_json(id, extra, &body_ref).to_string());
         }
         let mut tiers = serde_json::Map::new();
         for (tier, tier_lines) in &lines {
@@ -566,35 +799,40 @@ pub mod tests {
                 serde_json::json!({ "list": list, "rows": tier_lines.len() }),
             );
         }
-        let vocab = put(
-            &mut objects,
-            serde_json::to_vec(&serde_json::json!({
-                "schema": 1,
-                "facets": {
-                    "stack": { "labels": { "react": "React", "typescript": "TypeScript", "nextjs": "Next.js", "python": "Python" },
-                               "synonyms": { "reactjs": "react", "ts": "typescript" },
-                               "implies": { "nextjs": ["react"] } },
-                    "category": { "labels": { "testing": "Testing", "debugging": "Debugging", "code-review": "Code review" }, "synonyms": {}, "implies": {} },
-                    "domain": { "labels": { "software-engineering": "Software engineering", "writing": "Writing" }, "synonyms": {}, "implies": {} },
-                    "role": { "labels": { "frontend-engineer": "Frontend engineer" }, "synonyms": {}, "implies": {} }
-                },
-                "domains": { "testing": "software-engineering", "debugging": "software-engineering" },
-                "detect": {
-                    "typescript": { "files": ["tsconfig.json", "*.ts", "*.tsx"], "deps": ["npm:typescript"] },
-                    "react": { "deps": ["npm:react"] },
-                    "python": { "files": ["pyproject.toml", "*.py"] },
-                    "rust": { "files": ["Cargo.toml"] }
-                }
-            }))
-            .unwrap(),
-        );
-        let manifest = serde_json::to_vec(&serde_json::json!({
+        let mut vocab_json = serde_json::json!({
+            "schema": 1,
+            "facets": {
+                "stack": { "labels": { "react": "React", "typescript": "TypeScript", "nextjs": "Next.js", "python": "Python" },
+                           "synonyms": { "reactjs": "react", "ts": "typescript" },
+                           "implies": { "nextjs": ["react"] } },
+                "category": { "labels": { "testing": "Testing", "debugging": "Debugging", "code-review": "Code review" }, "synonyms": {}, "implies": {} },
+                "domain": { "labels": { "software-engineering": "Software engineering", "writing": "Writing" }, "synonyms": {}, "implies": {} },
+                "role": { "labels": { "frontend-engineer": "Frontend engineer" }, "synonyms": {}, "implies": {} }
+            },
+            "domains": { "testing": "software-engineering", "debugging": "software-engineering" },
+            "detect": {
+                "typescript": { "files": ["tsconfig.json", "*.ts", "*.tsx"], "deps": ["npm:typescript"] },
+                "react": { "deps": ["npm:react"] },
+                "python": { "files": ["pyproject.toml", "*.py"] },
+                "rust": { "files": ["Cargo.toml"] }
+            }
+        });
+        if let (Some(v), Some(extra)) = (vocab_json.as_object_mut(), vocab_extra.as_object()) {
+            for (k, x) in extra {
+                v.insert(k.clone(), x.clone());
+            }
+        }
+        let vocab = put(&mut objects, serde_json::to_vec(&vocab_json).unwrap());
+        let mut manifest = serde_json::json!({
             "schema": 1, "catalog": catalog, "seq": seq, "minClientVersion": "0.1.0",
             "objects": "o/{aa}/{sha256}",
             "tiers": tiers,
             "deltas": [], "packs": {}, "vocab": vocab
-        }))
-        .unwrap();
+        });
+        if let Some(q) = queries {
+            manifest["queries"] = put(&mut objects, serde_json::to_vec(&q).unwrap()).into();
+        }
+        let manifest = serde_json::to_vec(&manifest).unwrap();
         Fixture { objects, manifest }
     }
 
@@ -778,9 +1016,11 @@ pub mod tests {
 
     #[test]
     fn static_order_follows_hodios_core() {
+        let v = Vocab::default();
         let mut a = Row {
             id: "b".into(),
             tier: "curated".into(),
+            q: 9,
             ..Default::default()
         };
         let b = Row {
@@ -789,13 +1029,154 @@ pub mod tests {
             q: 9,
             ..Default::default()
         };
-        assert_eq!(compare_static(&a, &b), std::cmp::Ordering::Less);
+        assert_eq!(compare_static(&a, &b, &v), std::cmp::Ordering::Less);
         a.status = "deprecated".into();
         let c = Row {
             id: "z".into(),
             tier: "curated".into(),
+            q: 9,
             ..Default::default()
         };
-        assert_eq!(compare_static(&a, &c), std::cmp::Ordering::Greater);
+        assert_eq!(compare_static(&a, &c, &v), std::cmp::Ordering::Greater);
+        // Commonness beats the tier, and the id is only the last tiebreak.
+        let common = Row {
+            id: "zz".into(),
+            tier: "community".into(),
+            q: 80,
+            ..Default::default()
+        };
+        assert_eq!(compare_static(&common, &c, &v), std::cmp::Ordering::Less);
+        // A front door leads, then the other essentials.
+        let door = Row {
+            id: "zzz".into(),
+            ess: 2,
+            ..Default::default()
+        };
+        let shelf = Row {
+            id: "y".into(),
+            ess: 1,
+            q: 100,
+            ..Default::default()
+        };
+        assert_eq!(compare_static(&door, &shelf, &v), std::cmp::Ordering::Less);
+        assert_eq!(
+            compare_static(&shelf, &common, &v),
+            std::cmp::Ordering::Less
+        );
+    }
+
+    fn depth_vocab(levels: &[&str]) -> Vocab {
+        serde_json::from_value(serde_json::json!({
+            "depth": levels.iter().map(|l| serde_json::json!({"id": l, "label": l.to_uppercase()})).collect::<Vec<_>>()
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn depth_order_comes_from_the_vocab_only() {
+        let row = |id: &str, dep: Option<&str>, q: i64| Row {
+            id: id.into(),
+            dep: dep.map(str::to_string),
+            q,
+            ..Default::default()
+        };
+        let mut rows = vec![
+            row("adv", Some("advanced"), 100),
+            row("none", None, 90),
+            row("spec", Some("specific"), 100),
+            row("basic", Some("basic"), 10),
+        ];
+        let v = depth_vocab(&["basic", "specific", "advanced"]);
+        rows.sort_by(|a, b| compare_static(a, b, &v));
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        // A row without a level counts as the middle one.
+        assert_eq!(ids, vec!["basic", "spec", "none", "adv"]);
+        assert_eq!(v.depth_of(None).as_deref(), Some("specific"));
+        assert_eq!(v.first_depth(), Some("basic"));
+
+        // A fourth level added to the vocab takes its place, no code change.
+        let v4 = depth_vocab(&["basic", "specific", "expert", "advanced"]);
+        rows.push(row("exp", Some("expert"), 100));
+        rows.sort_by(|a, b| compare_static(a, b, &v4));
+        let ids: Vec<&str> = rows.iter().map(|r| r.id.as_str()).collect();
+        assert_eq!(ids, vec!["basic", "spec", "exp", "none", "adv"]);
+        // ...and the middle moves with it.
+        assert_eq!(v4.depth_of(Some("unknown")).as_deref(), Some("expert"));
+
+        // No levels at all (an older catalog): depth plays no part.
+        let plain = Vocab::default();
+        assert_eq!(plain.depth_rank(Some("advanced")), 0);
+        assert!(plain.depth_of(Some("basic")).is_none());
+        // The wrapped form reads the same.
+        let wrapped: Vocab = serde_json::from_value(serde_json::json!({
+            "depth": { "levels": [{"id": "basic", "label": "Start here"}, {"value": "advanced", "label": "Advanced"}] }
+        }))
+        .unwrap();
+        assert_eq!(wrapped.depth_levels()[1].id, "advanced");
+        // hodios vocab/depth.yml: `values` and a `default` for entries without one.
+        let hodios: Vocab = serde_json::from_value(serde_json::json!({
+            "depth": { "values": [
+                {"id": "basic", "label": "Start here", "description": "x"},
+                {"id": "specific", "label": "Specific"},
+                {"id": "advanced", "label": "Advanced"},
+                {"id": "expert", "label": "Expert"}
+            ], "default": "specific" }
+        }))
+        .unwrap();
+        assert_eq!(hodios.depth_levels().len(), 4);
+        assert_eq!(hodios.depth_of(None).as_deref(), Some("specific"));
+        assert_eq!(hodios.depth_rank(None), 1);
+        let back: Vocab = serde_json::from_str(&serde_json::to_string(&hodios).unwrap()).unwrap();
+        assert_eq!(back.depth_of(Some("nope")).as_deref(), Some("specific"));
+    }
+
+    #[test]
+    fn new_row_fields_are_optional_and_lenient() {
+        let old: Row = serde_json::from_str(r#"{"id":"x","q":0}"#).unwrap();
+        assert!(old.syn.is_empty() && old.adv.is_empty() && old.dep.is_none() && old.ess == 0);
+        let new: Row = serde_json::from_str(
+            r#"{"id":"x","q":80,"ess":2,"int":"plan","top":"travel","syn":["trip","vacation"],"advice_risk":["medical"],"dep":"basic"}"#,
+        )
+        .unwrap();
+        assert_eq!(new.intents, vec!["plan"]);
+        assert_eq!(new.adv, vec!["medical"]);
+        assert_eq!(new.syn.len(), 2);
+        let nulls: Row = serde_json::from_str(r#"{"id":"x","adv":null,"syn":"one"}"#).unwrap();
+        assert!(nulls.adv.is_empty());
+        assert_eq!(nulls.syn, vec!["one"]);
+    }
+
+    #[test]
+    fn intent_vocab_reads_nested_or_top_level() {
+        let nested: Vocab = serde_json::from_value(serde_json::json!({
+            "intent": {
+                "intents": [{"id": "plan", "label": "Plan", "hint": "trips, meals, money"}],
+                "topics": [{"id": "travel", "label": "Travel"}],
+                "categories": {"trip-planning": {"intents": ["plan"], "topic": "travel"}}
+            }
+        }))
+        .unwrap();
+        assert_eq!(
+            nested.intent_list()[0].hint.as_deref(),
+            Some("trips, meals, money")
+        );
+        assert_eq!(nested.topic_label("travel"), "Travel");
+        assert_eq!(
+            nested
+                .category_intent("trip-planning")
+                .unwrap()
+                .topic
+                .as_deref(),
+            Some("travel")
+        );
+        let flat: Vocab = serde_json::from_value(serde_json::json!({
+            "intents": [{"id": "write", "label": "Write"}], "topics": [{"id": "food", "label": "Food"}]
+        }))
+        .unwrap();
+        assert_eq!(flat.intent_list()[0].id, "write");
+        assert_eq!(flat.topic_list()[0].id, "food");
+        // It survives the round trip through library.db's meta.
+        let back: Vocab = serde_json::from_str(&serde_json::to_string(&nested).unwrap()).unwrap();
+        assert_eq!(back.intent_list().len(), 1);
     }
 }

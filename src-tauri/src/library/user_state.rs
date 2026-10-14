@@ -170,6 +170,18 @@ pub fn record_use(conn: &Connection, row: &Row, learn: bool, now: i64) -> Result
     Ok(())
 }
 
+/// Records that an entry was opened: it goes to the top of Recent and
+/// Continue, without counting as a use (nothing was sent anywhere).
+pub fn record_open(conn: &Connection, id: &str, now: i64) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO library_item_state (item_id, last_used_at) VALUES (?1, ?2)
+         ON CONFLICT(item_id) DO UPDATE SET last_used_at = ?2",
+        params![id, now],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
 pub fn decayed(score: f64, at: i64, now: i64) -> f64 {
     let age = (now - at).max(0) as f64;
     score * 0.5f64.powf(age / HALF_LIFE_SECS)
@@ -215,7 +227,7 @@ pub struct UseSignals {
     pub pinned: HashSet<String>,
     pub hidden: HashSet<String>,
     pub used: HashMap<String, i64>,
-    /// Pinned first, then most recently used.
+    /// Pinned first, then most recently used or opened.
     pub continue_ids: Vec<String>,
 }
 
@@ -245,7 +257,7 @@ pub fn use_signals(conn: &Connection) -> UseSignals {
     });
     let continue_ids = states
         .into_iter()
-        .filter(|s| !s.hidden && (s.pinned || s.use_count > 0))
+        .filter(|s| !s.hidden && (s.pinned || s.use_count > 0 || s.last_used_at.is_some()))
         .map(|s| s.item_id)
         .collect();
     UseSignals {
@@ -336,6 +348,27 @@ mod tests {
             stack: vec!["react".into()],
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn an_opened_entry_continues_first_without_counting_as_a_use() {
+        let c = conn();
+        record_use(&c, &row("used"), true, 100).unwrap();
+        record_open(&c, "opened", 200).unwrap();
+        let u = use_signals(&c);
+        assert_eq!(
+            u.continue_ids,
+            vec!["opened".to_string(), "used".to_string()]
+        );
+        assert!(!u.used.contains_key("opened"));
+        let s = item_states(&c)
+            .into_iter()
+            .find(|s| s.item_id == "opened")
+            .unwrap();
+        assert_eq!((s.use_count, s.last_used_at), (0, Some(200)));
+        // Opening a used entry again keeps its count.
+        record_open(&c, "used", 300).unwrap();
+        assert_eq!(use_signals(&c).used["used"], 1);
     }
 
     #[test]

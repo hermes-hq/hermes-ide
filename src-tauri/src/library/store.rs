@@ -5,19 +5,26 @@
 //! when it is unreadable or has a schema this build does not know. User
 //! state (pins, use counts, the profile) lives in `hermes.db`.
 //!
-//! Rows are stored in static-rank order (`rowid` = position by tier,
-//! deprecation, quality, usage, id), so the first N FTS matches in rowid
-//! order are the N best by static rank: search takes 300 such candidates
-//! and reranks only those, whatever the catalog size (design §12.5).
+//! Rows are stored in static-rank order (`rowid` = position by essentials,
+//! depth, commonness, tier, deprecation, usage, id: `compare_static`), so
+//! the first N FTS matches in rowid order are the N best by static rank:
+//! search takes 300 such candidates and reranks only those, whatever the
+//! catalog size (design §12.5).
+//!
+//! Each stored row is the catalog's row with what the catalog may leave out
+//! filled in (fields older catalogs do not have degrade to these): its
+//! effective depth level, intents and topic from the vocab's category map,
+//! the advice risk from its body, and the essentials level normalised.
 
 use super::catalog::{compare_static, parse_ref, Manifest, Row, ShardList, VerifiedCatalog, Vocab};
+use super::everyday::Route;
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 /// Bumped when the schema below changes; an older file is rebuilt.
-pub const STORE_VERSION: i64 = 1;
+pub const STORE_VERSION: i64 = 2;
 
 /// Manifests kept in the history, the current one included: the earlier
 /// ones are what a rollback can go back to.
@@ -42,7 +49,10 @@ CREATE TABLE IF NOT EXISTS entry (
   row TEXT NOT NULL,
   body TEXT NOT NULL,
   updated TEXT,
-  revoked INTEGER NOT NULL DEFAULT 0
+  revoked INTEGER NOT NULL DEFAULT 0,
+  ess INTEGER NOT NULL DEFAULT 0,
+  depth INTEGER NOT NULL DEFAULT 0,
+  syn TEXT NOT NULL DEFAULT ''
 );
 CREATE TABLE IF NOT EXISTS alias (alias TEXT PRIMARY KEY, id TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS sync (tier TEXT PRIMARY KEY, list TEXT NOT NULL, rows INTEGER NOT NULL, catalog TEXT NOT NULL, seq INTEGER NOT NULL);
@@ -64,7 +74,7 @@ CREATE TABLE IF NOT EXISTS manifest_history (
   PRIMARY KEY (catalog, seq)
 );
 CREATE VIRTUAL TABLE IF NOT EXISTS entry_fts USING fts5(
-  id, title, tags, description, f,
+  id, title, tags, description, f, syn,
   content='entry', content_rowid='rowid',
   tokenize='unicode61 remove_diacritics 2', prefix='2 3', detail=column
 );
@@ -166,6 +176,11 @@ pub fn facet_prefix(key: &str) -> Option<char> {
         "status" => 'x',
         "level" => 'l',
         "lang" => 'n',
+        "depth" => 'p',
+        "intent" => 'v',
+        "topic" => 'u',
+        "ess" => 'e',
+        "adv" => 'm',
         _ => return None,
     })
 }
@@ -178,7 +193,9 @@ fn facets_of(row: &Row) -> String {
         facet_token('t', &row.tier),
         facet_token('x', &row.status),
     ];
-    let lists: [(char, &Vec<String>); 9] = [
+    let lists: [(char, &Vec<String>); 11] = [
+        ('v', &row.intents),
+        ('m', &row.adv),
         ('g', &row.stage),
         ('r', &row.role),
         ('s', &row.stack),
@@ -192,11 +209,18 @@ fn facets_of(row: &Row) -> String {
     for (p, values) in lists {
         tokens.extend(values.iter().map(|v| facet_token(p, v)));
     }
+    match row.ess {
+        2 => tokens.extend([facet_token('e', "door"), facet_token('e', "essential")]),
+        1 => tokens.push(facet_token('e', "essential")),
+        _ => {}
+    }
     for (p, value) in [
         ('b', &row.sub),
         ('a', &row.risk),
         ('l', &row.level),
         ('n', &row.lang),
+        ('p', &row.dep),
+        ('u', &row.top),
     ] {
         if let Some(v) = value {
             tokens.push(facet_token(p, v));
@@ -253,8 +277,10 @@ pub fn apply(
             || revoked.contains(format!("{}@{}", row.id, row.v).as_str())
     };
 
-    let mut ordered: Vec<&(Row, String)> = cat.rows.iter().collect();
-    ordered.sort_by(|a, b| compare_static(&a.0, &b.0));
+    let vocab = cat.vocab.clone().unwrap_or_default();
+    let normalised = normalise(&tx, cat, &vocab);
+    let mut ordered: Vec<&(Row, String)> = normalised.iter().collect();
+    ordered.sort_by(|a, b| compare_static(&a.0, &b.0, &vocab));
 
     tx.execute_batch("DELETE FROM entry; DELETE FROM alias;")
         .map_err(|e| e.to_string())?;
@@ -268,8 +294,8 @@ pub fn apply(
         let mut insert = tx
             .prepare(
                 "INSERT INTO entry (rowid, id, version, kind, domain, category, tier, status, quality, usage,
-                                    title, description, tags, f, row, body, updated, revoked)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+                                    title, description, tags, f, row, body, updated, revoked, ess, depth, syn)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             )
             .map_err(|e| e.to_string())?;
         let mut alias = tx
@@ -309,6 +335,13 @@ pub fn apply(
                     row.body,
                     row.updated,
                     gone as i64,
+                    row.ess,
+                    vocab.depth_rank(row.dep.as_deref()),
+                    if gone {
+                        String::new()
+                    } else {
+                        search_words(row, &vocab)
+                    },
                 ])
                 .map_err(|e| e.to_string())?;
             for a in &row.aliases {
@@ -343,8 +376,8 @@ pub fn apply(
     // A revoked entry's id is still a column of its row: take it out of the
     // index too (an external-content delete names the indexed values).
     tx.execute(
-        "INSERT INTO entry_fts(entry_fts, rowid, id, title, tags, description, f)
-         SELECT 'delete', rowid, id, title, tags, description, f FROM entry WHERE revoked = 1",
+        "INSERT INTO entry_fts(entry_fts, rowid, id, title, tags, description, f, syn)
+         SELECT 'delete', rowid, id, title, tags, description, f, syn FROM entry WHERE revoked = 1",
         [],
     )
     .map_err(|e| e.to_string())?;
@@ -392,7 +425,11 @@ pub fn apply(
         .unwrap_or_default();
     let mut new_ids = summary.added.clone();
     new_ids.extend(summary.changed.iter().map(|(id, _, _)| id.clone()));
-    let metas: [(&str, String); 8] = [
+    let metas: [(&str, String); 9] = [
+        (
+            "routes",
+            serde_json::to_string(&cat.routes).unwrap_or_default(),
+        ),
         ("catalog", cat.manifest.catalog.clone()),
         ("seq", cat.manifest.seq.to_string()),
         ("manifest_sha256", cat.manifest_sha.clone()),
@@ -433,6 +470,111 @@ pub fn apply(
     Ok(summary)
 }
 
+/// The words a row is also found by: its `syn` list, its category's label
+/// and its topic's label (indexed in the `syn` column, weight 4).
+fn search_words(row: &Row, vocab: &Vocab) -> String {
+    let mut out: Vec<String> = row.syn.iter().map(|s| s.replace('-', " ")).collect();
+    let cat = vocab.label("category", &row.cat);
+    if cat != row.cat {
+        out.push(cat.to_string());
+    }
+    if let Some(top) = &row.top {
+        out.push(vocab.topic_label(top).to_string());
+    }
+    out.join(" ")
+}
+
+#[derive(serde::Deserialize, Default)]
+struct BodyRisk {
+    #[serde(default)]
+    fm: FmRisk,
+}
+
+#[derive(serde::Deserialize, Default)]
+struct FmRisk {
+    #[serde(default)]
+    advice_risk: Vec<String>,
+}
+
+/// The catalog's rows with what older catalogs leave out filled in, the
+/// stored JSON carrying the same values (so an entry's detail has them).
+fn normalise(conn: &Connection, cat: &VerifiedCatalog, vocab: &Vocab) -> Vec<(Row, String)> {
+    // The essentials level: 2 marks the front doors (at most 24), 1 the
+    // rest of the everyday shelf (up to 200). A catalog that clearly numbers
+    // them the other way round is read the same.
+    let ones = cat.rows.iter().filter(|(r, _)| r.ess == 1).count();
+    let twos = cat.rows.iter().filter(|(r, _)| r.ess == 2).count();
+    let swap = ones > 0 && ones * 2 < twos;
+    let bodies: HashMap<&str, &[u8]> = cat
+        .bodies
+        .iter()
+        .map(|(h, b)| (h.as_str(), b.as_slice()))
+        .collect();
+    let advice_of = |row: &Row| -> Vec<String> {
+        let Ok(hex) = parse_ref(&row.body) else {
+            return Vec::new();
+        };
+        let parsed = match bodies.get(hex.as_str()) {
+            Some(b) => serde_json::from_slice::<BodyRisk>(b).ok(),
+            None => conn
+                .query_row("SELECT text FROM body_cache WHERE hash = ?1", [&hex], |r| {
+                    r.get::<_, Vec<u8>>(0)
+                })
+                .ok()
+                .and_then(|b| serde_json::from_slice::<BodyRisk>(&b).ok()),
+        };
+        parsed.map(|b| b.fm.advice_risk).unwrap_or_default()
+    };
+    cat.rows
+        .iter()
+        .map(|(row, raw)| {
+            let mut row = row.clone();
+            if swap {
+                row.ess = match row.ess {
+                    1 => 2,
+                    2 => 1,
+                    other => other,
+                };
+            }
+            if let Some(d) = vocab.depth_of(row.dep.as_deref()) {
+                row.dep = Some(d);
+            }
+            if let Some(ci) = vocab.category_intent(&row.cat) {
+                if row.intents.is_empty() {
+                    row.intents = ci.intents.clone();
+                }
+                if row.top.is_none() {
+                    row.top = ci.topic.clone();
+                }
+            }
+            if row.adv.is_empty() {
+                row.adv = advice_of(&row);
+            }
+            let raw = match serde_json::from_str::<serde_json::Value>(raw) {
+                Ok(serde_json::Value::Object(mut obj)) => {
+                    obj.insert("ess".into(), row.ess.into());
+                    if let Some(d) = &row.dep {
+                        obj.insert("dep".into(), d.clone().into());
+                    }
+                    if !row.intents.is_empty() {
+                        obj.insert("int".into(), row.intents.clone().into());
+                    }
+                    if let Some(t) = &row.top {
+                        obj.insert("top".into(), t.clone().into());
+                    }
+                    if !row.adv.is_empty() {
+                        obj.remove("advice_risk");
+                        obj.insert("adv".into(), row.adv.clone().into());
+                    }
+                    serde_json::Value::Object(obj).to_string()
+                }
+                _ => raw.clone(),
+            };
+            (row, raw)
+        })
+        .collect()
+}
+
 /// Drops the oldest manifests from the history, then every object and body
 /// no kept manifest references. Each update stores the shards and bodies it
 /// changed, so without this the file grows with every catalog release.
@@ -466,7 +608,12 @@ fn prune_unreferenced(conn: &Connection, cat: &VerifiedCatalog) -> Result<(), St
         let Ok(m) = serde_json::from_slice::<Manifest>(&bytes) else {
             continue;
         };
-        let mut refs: Vec<&str> = m.vocab.iter().map(String::as_str).collect();
+        let mut refs: Vec<&str> = m
+            .vocab
+            .iter()
+            .chain(m.queries.iter())
+            .map(String::as_str)
+            .collect();
         refs.extend(m.packs.values().filter_map(|p| {
             p.as_str()
                 .or_else(|| p.get("object").and_then(|o| o.as_str()))
@@ -700,6 +847,56 @@ pub fn domain_counts(conn: &Connection) -> Vec<(String, i64)> {
         .unwrap_or_default()
 }
 
+/// Entry counts per (domain, category) (category browsing).
+pub fn category_counts(conn: &Connection) -> Vec<(String, String, i64)> {
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT domain, category, count(*) FROM entry WHERE revoked = 0 GROUP BY domain, category ORDER BY count(*) DESC, category",
+    ) else {
+        return Vec::new();
+    };
+    stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+}
+
+/// The everyday-word routes of the current catalog (none in older ones).
+pub fn routes(conn: &Connection) -> Vec<Route> {
+    meta(conn, "routes")
+        .and_then(|v| serde_json::from_str(&v).ok())
+        .unwrap_or_default()
+}
+
+/// Ids of the front doors (Essentials level 1), in static order.
+pub fn door_ids(conn: &Connection) -> Vec<String> {
+    let Ok(mut stmt) =
+        conn.prepare("SELECT id FROM entry WHERE ess = 2 AND revoked = 0 ORDER BY rowid")
+    else {
+        return Vec::new();
+    };
+    stmt.query_map([], |r| r.get(0))
+        .map(|rows| rows.filter_map(Result::ok).collect())
+        .unwrap_or_default()
+}
+
+/// The ids of a pack the manifest names (e.g. `hermes-default`), read from
+/// the stored pack object.
+pub fn pack_ids(conn: &Connection, name: &str) -> Option<Vec<String>> {
+    let m = manifest(conn)?;
+    let pack = m.packs.get(name)?;
+    let reference = pack
+        .as_str()
+        .or_else(|| pack.get("object").and_then(|o| o.as_str()))?;
+    let bytes = stored_object(conn, &parse_ref(reference).ok()?)?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes).ok()?;
+    let ids: Vec<String> = v
+        .get("ids")?
+        .as_array()?
+        .iter()
+        .filter_map(|x| x.as_str().map(str::to_string))
+        .collect();
+    (!ids.is_empty()).then_some(ids)
+}
+
 /// Ids added or changed by the last update.
 pub fn new_ids(conn: &Connection) -> Vec<String> {
     meta(conn, "new_ids")
@@ -832,6 +1029,44 @@ mod tests {
             )
             .unwrap();
         assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn stored_rows_carry_what_older_catalogs_leave_out() {
+        let conn = crate::library::search::tests::everyday();
+        // Front doors first in the static order, by essentials then depth.
+        let first: String = conn
+            .query_row("SELECT id FROM entry WHERE rowid = 1", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(first, "eat-healthier");
+        // The advice risk read from the body, intents and topic from the
+        // vocab's category map, the default depth level: in the stored JSON.
+        let row: serde_json::Value = serde_json::from_str(
+            &conn
+                .query_row(
+                    "SELECT row FROM entry WHERE id = 'plan-sustainable-weight-loss'",
+                    [],
+                    |r| r.get::<_, String>(0),
+                )
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(row["adv"], serde_json::json!(["medical"]));
+        assert_eq!(row["int"], serde_json::json!(["plan"]));
+        assert_eq!(row["top"], "health");
+        let old = row_by_id(&conn, "accept-a-job-offer").unwrap();
+        assert_eq!(old.row.dep.as_deref(), Some("specific"));
+        assert_eq!(routes(&conn).len(), 3);
+        assert_eq!(door_ids(&conn).len(), 3);
+        // The category label is searchable (the syn column).
+        let n: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM entry_fts WHERE entry_fts MATCH 'syn : nutrition'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 2);
     }
 
     #[test]

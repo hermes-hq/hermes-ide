@@ -9,7 +9,7 @@
 //   1. downloads the manifest at the locked tag (jsDelivr first, then raw
 //      GitHub) and refuses it unless its sha256 is the lock's;
 //   2. walks the hash chain (tier lists -> shards -> every row's body, the
-//      vocab, the packs) and refuses any object whose sha256 is not its name;
+//      vocab, the queries, the packs) and refuses any object whose sha256 is not its name;
 //   3. writes src-tauri/library/catalog-v1.tar.zst (the manifest and every
 //      object, deterministic: sorted, fixed timestamps) and
 //      src-tauri/library/catalog-v1.json (what the app and the tests check).
@@ -96,6 +96,7 @@ export async function collectCatalog({ manifestBytes, lock, getObject, concurren
 	};
 
 	if (manifest.vocab) await fetchVerified(manifest.vocab, "vocab");
+	if (manifest.queries) await fetchVerified(manifest.queries, "queries");
 	for (const [name, ref] of Object.entries(manifest.packs ?? {})) {
 		await fetchVerified(typeof ref === "string" ? ref : ref?.object, `pack ${name}`);
 	}
