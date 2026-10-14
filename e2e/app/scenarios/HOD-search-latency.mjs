@@ -111,6 +111,51 @@ await runLauncherQa(
       "no answer is larger than one page of 50",
     );
 
+    // Diagnostics (logged only): which part of a front-door answer is slow on this machine.
+    // The first front door of a session costs about 1 s on the Windows runner, later ones about
+    // 115 ms: the first is shown with everything new hidden, then one part comes back per query.
+    for (const [q, hide] of [
+      ["plan a trip", ".lib-detail, .lib-suggest, .lib-front, .lib-refine"],
+      ["find a gift", ".lib-suggest, .lib-front, .lib-refine"],
+      ["get fit", ".lib-front, .lib-refine"],
+      ["make a budget", ".lib-front"],
+      ["plan my week", ".lib-front > *"],
+      ["find a job", ".lib-door, .lib-front-desc, .lib-care, .lib-front-open"],
+      ["eat healthier", ".lib-front-desc, .lib-care, .lib-front-open"],
+      ["fix a bug", ".lib-care, .lib-front-open"],
+      ["learn something new", ".lib-front-open"],
+      ["plan an event", ""],
+    ]) {
+      await typeValue(bridge, ".lib-search-input", "");
+      await sleep(400);
+      const r = await bridge.eval(`
+        const q = ${JSON.stringify(q)}, hide = ${JSON.stringify(hide)};
+        let st = document.getElementById("e2e-diag-hide");
+        if (!st) { st = document.createElement("style"); st.id = "e2e-diag-hide"; document.head.appendChild(st); }
+        st.textContent = hide && hide !== "ARIA" ? hide + " { display: none !important; }" : "";
+        const el = e2e.first(".lib-search-input");
+        const realSet = el.setAttribute.bind(el);
+        el.setAttribute = hide === "ARIA" ? (n, v) => (n.startsWith("aria-") ? undefined : realSet(n, v)) : realSet;
+        el.focus();
+        const gaps = []; let last = performance.now();
+        const iv = setInterval(() => { const n = performance.now(); if (n - last > 40) gaps.push([Math.round(last - t0), Math.round(n - last)]); last = n; }, 4);
+        const t0 = performance.now();
+        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, q);
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+        let ms = 0;
+        while (performance.now() - t0 < 5000) {
+          if (e2e.first('[data-testid="library-view"]')?.getAttribute("data-answered") === q && document.querySelectorAll(".lib-row").length > 0) { ms = Math.round(performance.now() - t0); break; }
+          await new Promise((r) => setTimeout(r, 2));
+        }
+        await new Promise((r) => setTimeout(r, 1200));
+        clearInterval(iv);
+        el.setAttribute = realSet;
+        st.textContent = "";
+        return { q, hide, ms, gaps, route: !!e2e.first('[data-testid="library-front"]') || !!e2e.first('[data-testid="library-exact"]') };
+      `);
+      log(`  diag: ${JSON.stringify(r)}`);
+    }
+
     // Typing: the results of what was typed, quickly.
     const typed = [];
     for (const q of ["flaky tests", "write a cover letter", "sql query", "persona kind:persona", "commit message"]) {
@@ -157,45 +202,6 @@ await runLauncherQa(
     }
     log(`  typing to results (in the page): ${typed.join(", ")} ms`);
     check(Math.max(...typed) <= 500, `results show within 500 ms of typing (worst ${Math.max(...typed)} ms)`);
-    // Diagnostics (logged only): which part of a front-door answer is slow on this machine.
-    for (const [q, hide] of [
-      ["write a cover letter", ""],
-      ["plan a trip", ""],
-      ["find a gift", ".lib-suggest"],
-      ["get fit", ".lib-front, .lib-refine"],
-      ["make a budget", ".lib-suggest, .lib-front, .lib-refine"],
-      ["plan my week", "ARIA"],
-    ]) {
-      await typeValue(bridge, ".lib-search-input", "");
-      await sleep(400);
-      const r = await bridge.eval(`
-        const q = ${JSON.stringify(q)}, hide = ${JSON.stringify(hide)};
-        let st = document.getElementById("e2e-diag-hide");
-        if (!st) { st = document.createElement("style"); st.id = "e2e-diag-hide"; document.head.appendChild(st); }
-        st.textContent = hide && hide !== "ARIA" ? hide + " { display: none !important; }" : "";
-        const el = e2e.first(".lib-search-input");
-        const realSet = el.setAttribute.bind(el);
-        el.setAttribute = hide === "ARIA" ? (n, v) => (n.startsWith("aria-") ? undefined : realSet(n, v)) : realSet;
-        el.focus();
-        const gaps = []; let last = performance.now();
-        const iv = setInterval(() => { const n = performance.now(); if (n - last > 40) gaps.push([Math.round(last - t0), Math.round(n - last)]); last = n; }, 4);
-        const t0 = performance.now();
-        Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(el, q);
-        el.dispatchEvent(new Event("input", { bubbles: true }));
-        let ms = 0;
-        while (performance.now() - t0 < 5000) {
-          if (e2e.first('[data-testid="library-view"]')?.getAttribute("data-answered") === q && document.querySelectorAll(".lib-row").length > 0) { ms = Math.round(performance.now() - t0); break; }
-          await new Promise((r) => setTimeout(r, 2));
-        }
-        await new Promise((r) => setTimeout(r, 1200));
-        clearInterval(iv);
-        el.setAttribute = realSet;
-        st.textContent = "";
-        return { q, hide, ms, gaps, route: !!e2e.first('[data-testid="library-front"]') || !!e2e.first('[data-testid="library-exact"]') };
-      `);
-      log(`  diag: ${JSON.stringify(r)}`);
-    }
-
 
     // Late answers are dropped.
     const expected = await invoke(bridge, "library_search", {
