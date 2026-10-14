@@ -96,10 +96,12 @@ export function LibraryResults({
                 <span className="lib-front-title">
                   {front.door && <DoorTag />} <b>{front.title}</b>
                 </span>
-                <span className="lib-front-desc">
-                  {front.description}
-                  {filledFromSearch && front.id === (route?.exact ?? door)?.id ? ` ${t("library.results.filled", { words: filledFromSearch })}` : ""}
-                </span>
+                <span className="lib-front-desc">{front.description}</span>
+                {filledFromSearch && front.id === (route?.exact ?? door)?.id && (
+                  <span className="lib-front-filled" data-testid="library-filled">
+                    {t("library.results.filled", { words: filledFromSearch })}
+                  </span>
+                )}
                 <CareTag adv={front.adv} />
               </div>
               <Button variant={front === door && !route?.exact ? "primary" : "secondary"} size="sm" className="lib-front-open" onClick={() => onOpenId(front)}>

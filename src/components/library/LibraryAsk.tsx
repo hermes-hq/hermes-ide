@@ -30,6 +30,7 @@ export function suggestDoors(essentials: readonly LibraryHit[], route: RoutePage
 }
 
 export function LibraryAsk({
+  compact = false,
   inputRef,
   query,
   rows,
@@ -39,6 +40,8 @@ export function LibraryAsk({
   onOpen,
   onFirst,
 }: {
+  /** Over results: the question is not repeated, the list gets the room. */
+  compact?: boolean;
   inputRef: RefObject<HTMLInputElement | null>;
   query: string;
   rows: number;
@@ -62,7 +65,7 @@ export function LibraryAsk({
 
   return (
     <div className="lib-ask">
-      <h2 className="lib-ask-title">{t("library.ask.title")}</h2>
+      {!compact && <h2 className="lib-ask-title">{t("library.ask.title")}</h2>}
       <div className="lib-ask-box">
         <Input
           ref={inputRef}

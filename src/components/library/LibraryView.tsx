@@ -719,6 +719,7 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
 
         <div className="lib-main">
           <LibraryAsk
+            compact={showSearch && !interestsOpen}
             inputRef={inputRef}
             query={query}
             rows={rows}

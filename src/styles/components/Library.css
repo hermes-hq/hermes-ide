@@ -576,7 +576,16 @@
 .lib-front--selected { border-color: var(--focus-ring); }
 .lib-front-text { flex: 1; min-width: 0; display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-1); }
 .lib-front-title { display: flex; align-items: center; gap: var(--space-1-5); font-size: var(--text-md); color: var(--text-0); }
-.lib-front-desc { font-size: var(--text-xs); color: var(--text-2); }
+.lib-front-desc {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+  font-size: var(--text-xs);
+  color: var(--text-2);
+}
+
+.lib-front-filled { font-size: var(--text-xs); color: var(--text-1); }
 
 .lib-refine { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1); }
 
