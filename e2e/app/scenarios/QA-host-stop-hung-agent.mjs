@@ -53,6 +53,7 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps }) => {
   log(`  after Force stop: ${JSON.stringify(after)}`);
   await bridge.screenshot(join(evidenceDir, "02-force-stopped.png"));
   assert(stopped, "Force stop ended the turn");
-  const kept = await bridge.eval(`return /hello there/.test(document.querySelector('.agent-session-view[data-session-id="' + CSS.escape(${JSON.stringify(sid)}) + '"]')?.innerText || "");`);
+  // textContent: a turn scrolled out of view skips rendering, and WebKit leaves it out of innerText.
+  const kept = await bridge.eval(`return /hello there/.test(document.querySelector('.agent-session-view[data-session-id="' + CSS.escape(${JSON.stringify(sid)}) + '"]')?.textContent || "");`);
   assert(kept, "the conversation is still there");
 });

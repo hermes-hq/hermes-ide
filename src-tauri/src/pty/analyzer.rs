@@ -735,7 +735,9 @@ impl OutputAnalyzer {
             // (e.g. Claude Code shows model on a separate line from the version)
             // Also detect model changes (e.g. "/model" command output)
             if let Some(ref mut agent) = self.detected_agent {
-                if let Some(model) = extract_model_name(trimmed) {
+                if let Some(model) =
+                    extract_model_name(trimmed).filter(|m| model_fits_provider(&agent.provider, m))
+                {
                     let lower = trimmed.to_lowercase();
                     let is_model_change = lower.contains("set model to")
                         || lower.contains("model:")
@@ -1218,6 +1220,22 @@ mod tests {
         save(&mut restored);
         save(&mut restored);
         assert_eq!(saved_usage(&db), (1, 220, 29, 1.5));
+    }
+
+    #[test]
+    fn a_claude_session_keeps_its_model_when_the_agent_talks_about_gemini() {
+        let mut a = OutputAnalyzer::new();
+        a.process(b"Claude Code v2.1.287\r\nOpus 4.7 with high effort\r\n");
+        let model = |a: &OutputAnalyzer| a.detected_agent.as_ref().and_then(|d| d.model.clone());
+        assert_eq!(model(&a).as_deref(), Some("opus"));
+        // The agent's own answer names other vendors' models.
+        a.process(b"Model: Gemini 4 Argon is out; the prompt library needs a price for it\r\n");
+        a.process(b"Claude Code can't run gemini-3-pro, switching to the docs\r\n");
+        a.process(b"Set model to gpt-5\r\n");
+        assert_eq!(model(&a).as_deref(), Some("opus"));
+        // Its own /model switch still counts.
+        a.process(b"Set model to Sonnet 4.5\r\n");
+        assert_eq!(model(&a).as_deref(), Some("sonnet"));
     }
 
     #[test]

@@ -145,6 +145,33 @@ pub(crate) fn extract_model_name(line: &str) -> Option<String> {
     None
 }
 
+/// The vendor of a model as `extract_model_name` names it.
+fn model_vendor(model: &str) -> Option<&'static str> {
+    if ["opus", "sonnet", "haiku"]
+        .iter()
+        .any(|m| model.starts_with(m))
+    {
+        Some("anthropic")
+    } else if model.starts_with("gpt-") || ["o1", "o3", "o4"].contains(&model) {
+        Some("openai")
+    } else if model.starts_with("gemini") {
+        Some("google")
+    } else {
+        None
+    }
+}
+
+/// Whether an agent of `provider` can be running `model`. Claude Code,
+/// Codex and Gemini CLI run their own vendor's models only, so another
+/// vendor's model named in their output (an answer about Gemini) is never
+/// theirs; multi-vendor agents take any.
+pub(crate) fn model_fits_provider(provider: &str, model: &str) -> bool {
+    match provider {
+        "anthropic" | "openai" | "google" => model_vendor(model).is_none_or(|v| v == provider),
+        _ => true,
+    }
+}
+
 pub(crate) fn estimate_cost(provider: &str, model: &str, input: u64, output: u64) -> f64 {
     let (in_price, out_price) = match (provider, model) {
         ("anthropic", m) if m.contains("opus") => (15.0, 75.0),

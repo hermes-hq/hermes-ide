@@ -23,3 +23,6 @@ Everyday prompts come first in the Library, and the commands above each session 
 - In short panes, the bars above and below a session fold into its header, so the agent has more room.
 - Scrolling back through a terminal is no longer interrupted when the window resizes.
 - Search no longer comes up empty when not every word matches.
+- A Claude Code, Codex or Gemini CLI session keeps showing its own model (and its cost) when the conversation mentions another company's model.
+- A session pane no longer stops working at some window widths.
+- Library search answers faster.

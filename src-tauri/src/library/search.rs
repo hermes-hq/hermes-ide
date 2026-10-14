@@ -146,14 +146,20 @@ pub fn text_match(row: &Row, terms: &[String], extra: &[String]) -> TextMatch {
     if terms.is_empty() {
         return out;
     }
-    let mut id_title = words(&row.id);
-    id_title.extend(words(&row.title));
-    let mut syn: Vec<String> = row.syn.iter().flat_map(|a| words(a)).collect();
-    syn.extend(extra.iter().flat_map(|a| words(a)));
-    let mut tags: Vec<String> = row.aliases.iter().flat_map(|a| words(a)).collect();
-    tags.extend(row.tags.iter().flat_map(|t| words(t)));
-    let desc = words(&row.desc);
-    let fields: [&Vec<String>; 4] = [&id_title, &syn, &tags, &desc];
+    // Each field lowercased once and read as words in place (no word allocations).
+    let join = |parts: &mut dyn Iterator<Item = &String>| {
+        let mut out = String::new();
+        for p in parts {
+            out.push_str(&p.to_lowercase());
+            out.push(' ');
+        }
+        out
+    };
+    let id_title = format!("{} {}", row.id, row.title).to_lowercase();
+    let syn = join(&mut row.syn.iter().chain(extra.iter()));
+    let tags = join(&mut row.aliases.iter().chain(row.tags.iter()));
+    let desc = row.desc.to_lowercase();
+    let fields: [&str; 4] = [&id_title, &syn, &tags, &desc];
     for term in terms {
         // A word matches a word it starts, or one its stem starts ("trips" -> "trip").
         let parts: Vec<(String, String)> = words(term)
@@ -173,9 +179,13 @@ pub fn text_match(row: &Row, terms: &[String], extra: &[String]) -> TextMatch {
         out.asked += 1;
         let mut best = 0.0f64;
         for (list, weight) in fields.iter().zip(TEXT_WEIGHTS) {
+            if best >= weight {
+                continue;
+            }
             if parts.iter().all(|(p, stem)| {
-                list.iter()
-                    .any(|w| w.starts_with(p.as_str()) || w.starts_with(stem.as_str()))
+                list.split(|c: char| !c.is_alphanumeric()).any(|w| {
+                    !w.is_empty() && (w.starts_with(p.as_str()) || w.starts_with(stem.as_str()))
+                })
             }) {
                 best = best.max(weight);
             }

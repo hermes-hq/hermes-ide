@@ -130,13 +130,25 @@ await runLauncherQa(
           const t0 = performance.now();
           Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value").set.call(el, q);
           el.dispatchEvent(new Event("input", { bubbles: true }));
+          // What the page shows on the way (logged when it is slow).
+          const steps = []; let last = "";
+          const note = () => {
+            const res = e2e.first('[data-testid="library-results"]');
+            const s = [e2e.first('[data-testid="library-view"]')?.getAttribute("data-answered") === q ? "answered" : "-", res ? res.querySelectorAll(".lib-row").length + " rows" : "no list", res?.querySelector(".lib-results-head .lib-muted")?.innerText ?? "", document.querySelector('.lib-detail[data-entry]') ? "entry open" : "-", document.visibilityState].join(" | ");
+            if (s !== last) { steps.push(Math.round(performance.now() - t0) + " ms: " + s); last = s; }
+          };
           while (!answered()) {
-            if (performance.now() - t0 > 10000) return 10000;
+            note();
+            if (performance.now() - t0 > 10000) return { ms: 10000, steps };
             await new Promise((r) => setTimeout(r, 2));
           }
-          return Math.round(performance.now() - t0);
+          note();
+          return { ms: Math.round(performance.now() - t0), steps };
         `),
       );
+      const done = typed[typed.length - 1];
+      if (done.ms > 300) log(`  "${q}" took ${done.ms} ms: ${done.steps.join("; ")}`);
+      typed[typed.length - 1] = done.ms;
       await search(bridge, q);
     }
     log(`  typing to results (in the page): ${typed.join(", ")} ms`);

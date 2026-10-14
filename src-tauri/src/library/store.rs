@@ -22,6 +22,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 /// Bumped when the schema below changes; an older file is rebuilt.
 pub const STORE_VERSION: i64 = 2;
@@ -719,10 +720,21 @@ pub fn manifest(conn: &Connection) -> Option<Manifest> {
     serde_json::from_str(&meta(conn, "manifest")?).ok()
 }
 
-pub fn vocab(conn: &Connection) -> Vocab {
-    meta(conn, "vocab")
-        .and_then(|v| serde_json::from_str(&v).ok())
-        .unwrap_or_default()
+/// The catalog's vocab, parsed once per stored version (every search reads it).
+pub fn vocab(conn: &Connection) -> Arc<Vocab> {
+    static PARSED: Mutex<Option<(String, Arc<Vocab>)>> = Mutex::new(None);
+    let Some(raw) = meta(conn, "vocab") else {
+        return Arc::default();
+    };
+    let mut parsed = PARSED.lock().unwrap_or_else(|e| e.into_inner());
+    if let Some((key, v)) = parsed.as_ref() {
+        if *key == raw {
+            return v.clone();
+        }
+    }
+    let v: Arc<Vocab> = Arc::new(serde_json::from_str(&raw).unwrap_or_default());
+    *parsed = Some((raw, v.clone()));
+    v
 }
 
 /// The previous manifest in the history (for rollback), newest first after the current.
