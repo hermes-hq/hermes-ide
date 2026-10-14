@@ -1981,6 +1981,10 @@ features:
       README-6:
         text: "The terminal on screen draws with WebGL where the webview has it (and falls back where it has not), shows the link pointer over a printed web address, and refits its columns and rows when the window is resized"
         scenarios: [webgl-rendering.mjs]
+      README-6b:
+        # Windows not yet covered: both scripts drive a POSIX shell.
+        text: "A terminal's last row stays on screen above the reply strip and the status bar in a small window, the program is told exactly the rows shown, and a resize while reading scrollback keeps the view where it was"
+        scenarios: ["FIX-terminal-bottom-row.mjs@darwin,linux", "FIX-terminal-scroll-hold.mjs@darwin,linux"]
       README-7:
         # Not on Windows: PowerShell predicts from its own history there
         # (PSReadLine), and Hermes leaves the prompt to it, as it does for
