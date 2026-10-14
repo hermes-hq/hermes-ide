@@ -612,13 +612,31 @@
 .lib-detail--empty { padding: var(--space-4); }
 
 /* An entry open beside the results: the results keep a readable column
-   (about 340 px) and the detail gives up width first; a narrow Library
-   also hides its left list until the entry closes. */
+   (about 340 px) and the detail gives up width first. In a narrow Library
+   the left list becomes one wrapping row over the results, so every place
+   in it stays one click away. */
 .lib-body--open .lib-main { min-width: calc(var(--space-1) * 85); }
 .lib-body--open .lib-detail { flex: 0 1 auto; min-width: calc(var(--space-1) * 80); }
 
 @container library (max-width: 976px) {
-  .lib-body--open .lib-nav { display: none; }
+  .lib-body--open {
+    display: grid;
+    grid-template-columns: minmax(calc(var(--space-1) * 85), 1fr) minmax(calc(var(--space-1) * 80), min(44vw, calc(var(--space-1) * 110)));
+    grid-template-rows: auto minmax(0, 1fr);
+  }
+  .lib-body--open .lib-nav {
+    grid-area: 1 / 1;
+    width: auto;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-4) 0;
+    border-right: none;
+    overflow: visible;
+  }
+  .lib-body--open .lib-nav-label { display: none; }
+  .lib-body--open .lib-main { grid-area: 2 / 1; }
+  .lib-body--open .lib-detail { grid-area: 1 / 2 / 3 / 3; width: auto; }
 }
 
 .lib-detail-scroll {
