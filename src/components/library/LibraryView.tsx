@@ -9,7 +9,7 @@
 // open entry can be used in any session, started as a task with any
 // agent, or installed into the project for an agent.
 
-import { startTransition, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Chip, CloseButton, Segmented } from "../ui";
 import { HEALTH_ADVICE, depthSections, fillFromLeftover, isDeveloperRole, pairsWith, recentIds, usesFacets } from "../../library/everyday";
@@ -52,6 +52,8 @@ import { LibraryUpdateBadge, LibraryUpdatePanel } from "./LibraryUpdate";
 
 const KINDS = ["prompt", "persona", "workflow", "rule", "style"] as const;
 const SEARCH_DEBOUNCE_MS = 80;
+/** How long a cleared search field stays empty before the home view comes back. */
+const HOME_AFTER_CLEAR_MS = 300;
 
 /** Feature Track phase -> hodios stage. */
 const PHASE_STAGE: Record<string, string> = {
@@ -224,9 +226,19 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
   // ── Search ──────────────────────────────────────────────────────────
   const chosen = kinds.size > 0 || domain !== null || category !== null || intent !== null || topic !== null || depths.size > 0 || health || stackAuto;
   const searching_ = nav !== "home" || query.trim() !== "" || chosen;
-  // Clearing the search brings the home view back; it is heavy, so it renders in the background
-  // and a new search interrupts it (on a slow machine the next results waited a second behind it).
-  const showSearchLagging = useDeferredValue(searching_);
+  // Clearing the search brings the home view back once the field has stayed empty a moment, and
+  // in the background: it is heavy, and on a slow machine a search typed right after a clear
+  // waited a second behind it.
+  const [homeDue, setHomeDue] = useState(!searching_);
+  useEffect(() => {
+    if (searching_) {
+      setHomeDue(false);
+      return;
+    }
+    const timer = setTimeout(() => setHomeDue(true), HOME_AFTER_CLEAR_MS);
+    return () => clearTimeout(timer);
+  }, [searching_]);
+  const showSearchLagging = useDeferredValue(searching_ || !homeDue);
   const filters = useMemo(() => {
     const f: Record<string, string[]> = {};
     if (kinds.size > 0) f.kind = [...kinds];
@@ -268,40 +280,6 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
     },
     [query, filters, sort, showEverything, nav, context],
   );
-
-  // Test builds only: when an answer reaches the screen, and every frame over 50 ms (where its time went).
-  useLayoutEffect(() => {
-    if (import.meta.env.VITE_HERMES_E2E !== "1" || answered === null) return;
-    const log = ((window as unknown as { __libSearchLog?: unknown[] }).__libSearchLog ??= []) as unknown[];
-    log.push({ committed: answered, t: Math.round(performance.now()), rows: hits.length, route: Boolean(page?.route) });
-  }, [answered, hits, page]);
-  useLayoutEffect(() => {
-    if (import.meta.env.VITE_HERMES_E2E !== "1" || selection?.type !== "hit") return;
-    const log = ((window as unknown as { __libSearchLog?: unknown[] }).__libSearchLog ??= []) as unknown[];
-    log.push({ selected: selection.id, detail: detail?.id ?? null, t: Math.round(performance.now()) });
-  }, [selection, detail]);
-  useEffect(() => {
-    if (import.meta.env.VITE_HERMES_E2E !== "1" || typeof PerformanceObserver === "undefined") return;
-    const log = ((window as unknown as { __libSearchLog?: unknown[] }).__libSearchLog ??= []) as unknown[];
-    try {
-      const po = new PerformanceObserver((list) => {
-        for (const e of list.getEntries()) {
-          const f = e as PerformanceEntry & { renderStart?: number; styleAndLayoutStart?: number; scripts?: { invoker: string; sourceFunctionName: string; sourceURL: string; duration: number; forcedStyleAndLayoutDuration: number }[] };
-          log.push({
-            frame: Math.round(e.duration),
-            t: Math.round(e.startTime),
-            render: f.renderStart ? Math.round(f.renderStart - e.startTime) : null,
-            layout: f.styleAndLayoutStart ? Math.round(e.startTime + e.duration - f.styleAndLayoutStart) : null,
-            scripts: (f.scripts ?? []).filter((x) => x.duration > 20).map((x) => `${x.invoker} ${x.sourceFunctionName} ${Math.round(x.duration)}ms forced-layout ${Math.round(x.forcedStyleAndLayoutDuration)}ms`),
-          });
-        }
-      });
-      po.observe({ type: "long-animation-frame", buffered: false });
-      return () => po.disconnect();
-    } catch {
-      return;
-    }
-  }, []);
 
   useEffect(() => {
     if (!status?.ready || !searching_ || nav === "recent" || nav === "pinned" || nav === "installed" || nav === "mine" || nav === "classics") return;
