@@ -52,8 +52,6 @@ import { LibraryUpdateBadge, LibraryUpdatePanel } from "./LibraryUpdate";
 
 const KINDS = ["prompt", "persona", "workflow", "rule", "style"] as const;
 const SEARCH_DEBOUNCE_MS = 80;
-/** How long a cleared search field stays empty before the home view comes back. */
-const HOME_AFTER_CLEAR_MS = 300;
 
 /** Feature Track phase -> hodios stage. */
 const PHASE_STAGE: Record<string, string> = {
@@ -226,19 +224,9 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
   // ── Search ──────────────────────────────────────────────────────────
   const chosen = kinds.size > 0 || domain !== null || category !== null || intent !== null || topic !== null || depths.size > 0 || health || stackAuto;
   const searching_ = nav !== "home" || query.trim() !== "" || chosen;
-  // Clearing the search brings the home view back once the field has stayed empty a moment, and
-  // in the background: it is heavy, and on a slow machine a search typed right after a clear
-  // waited a second behind it.
-  const [homeDue, setHomeDue] = useState(!searching_);
-  useEffect(() => {
-    if (searching_) {
-      setHomeDue(false);
-      return;
-    }
-    const timer = setTimeout(() => setHomeDue(true), HOME_AFTER_CLEAR_MS);
-    return () => clearTimeout(timer);
-  }, [searching_]);
-  const showSearchLagging = useDeferredValue(searching_ || !homeDue);
+  // Clearing the search brings the home view back; it is heavy, so it renders in the background
+  // and a new search interrupts it (on a slow machine the next results waited a second behind it).
+  const showSearchLagging = useDeferredValue(searching_);
   const filters = useMemo(() => {
     const f: Record<string, string[]> = {};
     if (kinds.size > 0) f.kind = [...kinds];

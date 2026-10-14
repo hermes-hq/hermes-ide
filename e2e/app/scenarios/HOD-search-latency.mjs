@@ -111,6 +111,21 @@ await runLauncherQa(
       "no answer is larger than one page of 50",
     );
 
+    // The first Korean, Japanese or Chinese text a Windows session draws loads those system
+    // fonts, about 1 s on the CI runner, once ("write a cover letter" lists Korean and Japanese
+    // entries; the same query was 116 ms the second time). That is the OS, not the search: draw
+    // that text once before timing.
+    await bridge.eval(`
+      const el = document.createElement("div");
+      el.setAttribute("aria-hidden", "true");
+      el.style.cssText = "position:fixed;left:0;top:0;opacity:0;pointer-events:none";
+      el.innerHTML = '<span>자기소개서 エントリーシート 自己介绍</span><b>자기소개서 エントリーシート 自己介绍</b>';
+      document.body.appendChild(el);
+      await new Promise((r) => requestAnimationFrame(() => setTimeout(r, 1500)));
+      el.remove();
+      return true;
+    `);
+
     // Typing: the results of what was typed, quickly.
     const typed = [];
     for (const q of ["flaky tests", "write a cover letter", "sql query", "persona kind:persona", "commit message"]) {
