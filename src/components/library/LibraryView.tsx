@@ -9,7 +9,7 @@
 // open entry can be used in any session, started as a task with any
 // agent, or installed into the project for an agent.
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { Button, Chip, CloseButton, Segmented } from "../ui";
 import { HEALTH_ADVICE, depthSections, fillFromLeftover, isDeveloperRole, pairsWith, recentIds, usesFacets } from "../../library/everyday";
@@ -224,6 +224,9 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
   // ── Search ──────────────────────────────────────────────────────────
   const chosen = kinds.size > 0 || domain !== null || category !== null || intent !== null || topic !== null || depths.size > 0 || health || stackAuto;
   const searching_ = nav !== "home" || query.trim() !== "" || chosen;
+  // Clearing the search brings the home view back; it is heavy, so it renders in the background
+  // and a new search interrupts it (on a slow machine the next results waited a second behind it).
+  const showSearchLagging = useDeferredValue(searching_);
   const filters = useMemo(() => {
     const f: Record<string, string[]> = {};
     if (kinds.size > 0) f.kind = [...kinds];
@@ -753,7 +756,7 @@ export function LibraryView({ onClose, onStartTask }: { onClose: () => void; onS
             <div className="lib-center">
               <LibraryInterests onSaved={finishInterests} onSkip={() => setInterestsOpen(false)} />
             </div>
-          ) : showSearch ? (
+          ) : showSearch || showSearchLagging ? (
             <LibraryResults
               items={items}
               total={listHits ? listHits.length : (page?.total ?? 0)}
