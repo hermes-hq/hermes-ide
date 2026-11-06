@@ -313,12 +313,20 @@ pub fn resolve_program(
         Vec::new()
     };
     let has_ext = direct.extension().is_some();
+    // On Windows a name runs as given only when it already ends in a PATHEXT
+    // extension: npm puts an extensionless shell script (`codex`) next to
+    // `codex.cmd`, and Windows refuses to start the script (os error 193).
+    let plain_runs = !cfg!(windows)
+        || direct.extension().is_some_and(|e| {
+            let e = format!(".{}", e.to_string_lossy());
+            exts.iter().any(|x| x.eq_ignore_ascii_case(&e))
+        });
     for dir in std::env::split_paths(path.unwrap_or_default()) {
         if dir.as_os_str().is_empty() {
             continue;
         }
         let plain = dir.join(program);
-        if is_executable(&plain) {
+        if plain_runs && is_executable(&plain) {
             return Some(plain);
         }
         if !has_ext || cfg!(windows) {
@@ -1867,6 +1875,31 @@ mod tests {
             resolve_program(dir.path().join("nope").to_str().unwrap(), None, None),
             None
         );
+    }
+
+    /// npm installs `codex` (a shell script) and `codex.cmd` side by side;
+    /// Windows can only start the `.cmd` (issue #532).
+    #[cfg(windows)]
+    #[test]
+    fn windows_skips_the_extensionless_npm_shim() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("codex"), "#!/bin/sh\n").unwrap();
+        let cmd = write_exe(dir.path(), "codex.cmd");
+        let path = std::env::join_paths([dir.path()]).unwrap();
+        let pathext = Some(OsStr::new(".COM;.EXE;.BAT;.CMD"));
+        let found = resolve_program("codex", Some(&path), pathext).unwrap();
+        assert_eq!(
+            found.to_string_lossy().to_lowercase(),
+            cmd.to_string_lossy().to_lowercase()
+        );
+        // A name that already carries a PATHEXT extension is used as given.
+        assert_eq!(
+            resolve_program("codex.cmd", Some(&path), pathext),
+            Some(cmd)
+        );
+        // The shim alone is not a program Windows can start.
+        std::fs::remove_file(dir.path().join("codex.cmd")).unwrap();
+        assert_eq!(resolve_program("codex", Some(&path), pathext), None);
     }
 
     #[cfg(unix)]
