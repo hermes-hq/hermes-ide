@@ -41,6 +41,9 @@ export interface PoolEntry {
   userScrolledUp: boolean;
   // Intelligence state
   inputBuffer: string;
+  /** ↑/↓ went to the shell: the prompt line now holds a history entry that
+   *  inputBuffer cannot see. No suggestions until Enter, Ctrl-C or Ctrl-U. */
+  lineFromShell: boolean;
   suggestionState: SuggestionState | null;
   suggestionTimer: ReturnType<typeof setTimeout> | null;
   historyProvider: HistoryProvider;
@@ -443,6 +446,7 @@ export async function createTerminal(
     userScrolledUp: false,
     // Intelligence
     inputBuffer: "",
+    lineFromShell: false,
     suggestionState: null,
     suggestionTimer: null,
     historyProvider: createHistoryProvider(),

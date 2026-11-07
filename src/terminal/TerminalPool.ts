@@ -163,11 +163,17 @@ function handleTerminalInput(sessionId: string, data: string): void {
   // Intelligence gating controls *showing* the overlay; once visible, we
   // must always intercept navigation keys to prevent them reaching the PTY.
   if (overlayVisible && entry.suggestionState) {
-    // Up arrow — move selection up (wrapping)
+    // Up arrow — move selection up (wrapping) once ↓ has moved into the list.
+    // With nothing highlighted, ↑ is the shell's history, as in any terminal:
+    // close the list and let it through.
     // Handles both normal mode (\x1b[A) and application cursor mode (\x1bOA)
     if (data === "\x1b[A" || data === "\x1bOA") {
-      moveSuggestionSelection(sessionId, -1);
-      return; // CONSUME
+      if (entry.suggestionState.selectedIndex !== null) {
+        moveSuggestionSelection(sessionId, -1);
+        return; // CONSUME
+      }
+      dismissSuggestions(sessionId);
+      clearGhostText(sessionId);
     }
     // Down arrow — move selection down (wrapping)
     if (data === "\x1b[B" || data === "\x1bOB") {
@@ -234,6 +240,22 @@ function handleTerminalInput(sessionId: string, data: string): void {
   // the typed ':' command is needed to resolve the intent.
   if (data === "\r" && runIntentCommand(sessionId, entry, entry.inputBuffer)) {
     return;
+  }
+
+  // ── History keys that reach the shell ──
+  // ↑/↓ at the shell's prompt replace the line with a history entry Hermes
+  // cannot see. Forget the typed text so no stale suggestion list opens.
+  // (A program the shell started reads ↑/↓ its own way: left alone.)
+  if (
+    (data === "\x1b[A" || data === "\x1bOA" || data === "\x1b[B" || data === "\x1bOB") &&
+    entry.shellIsForeground &&
+    entry.terminal.buffer.active.type !== "alternate"
+  ) {
+    entry.inputBuffer = "";
+    entry.lineFromShell = true;
+    if (entry.suggestionTimer) clearTimeout(entry.suggestionTimer);
+    dismissSuggestions(sessionId);
+    if (entry.ghostText) clearGhostText(sessionId);
   }
 
   // ── Update input buffer ──
@@ -324,7 +346,7 @@ function sliceLastCodePoint(buf: string): string {
  */
 function recordInputInHistory(entry: PoolEntry): void {
   const command = entry.inputBuffer.trim();
-  if (!command) return;
+  if (!command || entry.lineFromShell) return;
   if (!entry.shellIsForeground) return;
   if (entry.terminal.buffer.active.type === "alternate") return;
   // Mark the line now and read it back once the echo has caught up: an Enter
@@ -386,12 +408,14 @@ function updateInputBuffer(entry: PoolEntry, data: string, sessionId: string): v
     } else if (code === 0x03 || code === 0x15) {
       // Ctrl-C or Ctrl-U — clear
       entry.inputBuffer = "";
+      entry.lineFromShell = false;
       dismissSuggestionsForEntry(entry);
     } else if (code === 0x0d) {
       // Enter — log to history and clear
       recordInputInHistory(entry);
       reportSubmittedCommand(sessionId, entry);
       entry.inputBuffer = "";
+      entry.lineFromShell = false;
       dismissSuggestionsForEntry(entry);
     } else if (code === 0x1b) {
       // Bare Escape — dismiss suggestions
@@ -418,12 +442,14 @@ function updateInputBuffer(entry: PoolEntry, data: string, sessionId: string): v
     } else if (code === 0x03 || code === 0x15) {
       // Ctrl-C or Ctrl-U within paste — clear buffer
       entry.inputBuffer = "";
+      entry.lineFromShell = false;
       dismissSuggestionsForEntry(entry);
     } else if (code === 0x0d) {
       // Enter within paste — log to history and clear
       recordInputInHistory(entry);
       reportSubmittedCommand(sessionId, entry);
       entry.inputBuffer = "";
+      entry.lineFromShell = false;
       dismissSuggestionsForEntry(entry);
     } else if (code === 0x1b) {
       // Escape sequence embedded in paste — skip the sequence, keep processing
@@ -454,7 +480,7 @@ function updateInputBuffer(entry: PoolEntry, data: string, sessionId: string): v
  * CLI, an editor, a pager) is reading the keys.
  */
 function maySuggest(entry: PoolEntry): boolean {
-  if (!entry.inputBuffer.trim()) return false;
+  if (!entry.inputBuffer.trim() || entry.lineFromShell) return false;
   if (isIntelligenceDisabled()) return false;
 
   // Only show suggestions when the shell is at an interactive prompt.

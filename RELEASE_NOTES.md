@@ -1,8 +1,9 @@
-# Hermes IDE 2.3.6
+# Hermes IDE 2.3.7
 
-Security and maintenance updates.
+↑ in a terminal works the way it does in any other terminal again.
 
 ## Fixed
 
-- Updated the secure connection, update download and compression components to versions that fix recently reported security issues.
-- Brought the app's built-in components up to their latest versions, with their bug fixes.
+- ↑ in a terminal brings back your earlier commands: with the suggestion list open it goes to your history, and the list no longer reopens after you press it. Press ↓ to move into the list.
+- On macOS, a new terminal now has your shell history from earlier terminals, and what you run is saved to it, as in any other terminal.
+- The command Hermes types to start an agent is no longer saved in your shell history.
