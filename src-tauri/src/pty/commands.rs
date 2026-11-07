@@ -836,7 +836,11 @@ fn type_agent_launch(
         let _ = app.emit("session-updated", &update);
     }
     if let Ok(mut w) = writer.lock() {
-        let _ = w.write_all(format!("{}\r", launch.cmd).as_bytes());
+        // The leading space keeps the line out of the user's saved shell
+        // history (HIST_IGNORE_SPACE, set by the zsh integration): it is
+        // Hermes's line, and a typed vendor command can carry the user's
+        // custom prefix (an inline key, say).
+        let _ = w.write_all(format!(" {}\r", launch.cmd).as_bytes());
         let _ = w.flush();
     }
     if let Some(watch) = launch.watch {

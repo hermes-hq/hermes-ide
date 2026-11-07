@@ -65,6 +65,9 @@ ZDOTDIR="$_HERMES_ZDOTDIR"
 /// ZDOTDIR is swapped to temp dir between user files so zsh finds .zlogin.
 const ZSH_ZSHRC: &str = r#"# Hermes IDE shell integration — do not edit
 _hermes_user="${HERMES_ORIGINAL_ZDOTDIR:-$HOME}"
+# /etc/zshrc (macOS) set HISTFILE from ZDOTDIR while it pointed at this
+# temporary folder: keep the user's real history file instead.
+[[ "$HISTFILE" == "$_HERMES_ZDOTDIR/.zsh_history" ]] && HISTFILE="$_hermes_user/.zsh_history"
 ZDOTDIR="$_hermes_user"
 [[ -f "$_hermes_user/.zshrc" ]] && source "$_hermes_user/.zshrc"
 # Re-point so zsh finds our .zlogin next
@@ -966,6 +969,54 @@ mod tests {
         }
         assert!(
             stdout.contains(&format!("ZDOTDIR={}", xdg.display())),
+            "{stdout}"
+        );
+    }
+
+    #[test]
+    fn zsh_keeps_the_users_history_file() {
+        // macOS /etc/zshrc runs just before $ZDOTDIR/.zshrc, while ZDOTDIR
+        // is Hermes's temp folder: `HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history`
+        // would put every terminal's history in a throwaway file.
+        let run = |user_zshrc: &str| {
+            let home = tempfile::tempdir().unwrap();
+            let home = home.path().canonicalize().unwrap();
+            std::fs::write(home.join(".zshrc"), user_zshrc).unwrap();
+            let tmp = home.join("hermes-zdotdir");
+            std::fs::create_dir_all(&tmp).unwrap();
+            let system_zshrc = "HISTFILE=${ZDOTDIR:-$HOME}/.zsh_history\n";
+            for (name, body) in [
+                (".zshenv", ZSH_ZSHENV.to_string()),
+                (".zprofile", ZSH_ZPROFILE.to_string()),
+                (".zshrc", format!("{system_zshrc}{}", zsh_zshrc(false))),
+                (".zlogin", ZSH_ZLOGIN.to_string()),
+            ] {
+                std::fs::write(tmp.join(name), body).unwrap();
+            }
+            // -d skips the real system-wide rc files.
+            let out = std::process::Command::new("zsh")
+                .args(["-d", "-l", "-i", "-c", "echo HISTFILE=$HISTFILE"])
+                .env_clear()
+                .env("HOME", &home)
+                .env("PATH", "/usr/bin:/bin")
+                .env("ZDOTDIR", &tmp)
+                .env("_HERMES_ZDOTDIR", &tmp)
+                .env("HERMES_ORIGINAL_ZDOTDIR", &home)
+                .output()
+                .ok()?;
+            Some((home, String::from_utf8_lossy(&out.stdout).to_string()))
+        };
+        let Some((home, stdout)) = run("") else {
+            return; // no zsh on this machine
+        };
+        assert!(
+            stdout.contains(&format!("HISTFILE={}/.zsh_history", home.display())),
+            "{stdout}"
+        );
+        // A HISTFILE the user's own .zshrc sets still wins.
+        let (home, stdout) = run("HISTFILE=$HOME/custom_history\n").unwrap();
+        assert!(
+            stdout.contains(&format!("HISTFILE={}/custom_history", home.display())),
             "{stdout}"
         );
     }

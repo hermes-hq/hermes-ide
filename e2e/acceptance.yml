@@ -1995,6 +1995,14 @@ features:
         # Same platforms as README-7.
         text: "Suggestions and ghost text never offer back a secret: a line holding a key, token or password is never suggested, and what is typed at a hidden password prompt is never remembered"
         scenarios: ["QA-no-secret-suggestions.mjs@darwin,linux"]
+      README-7c:
+        # Same platforms as README-7.
+        text: "↑ in a plain terminal recalls earlier commands as in any terminal: a new terminal has the shell's saved history, an open suggestion list gives ↑ to the shell until ↓ moves into it, and a closed list does not reopen after ↑"
+        scenarios: ["FIX-terminal-up-history.mjs@darwin,linux"]
+      README-7d:
+        # macOS only: it reads zsh's saved history, and zsh is the default shell there.
+        text: "The line Hermes types to start an agent is never saved in the user's shell history, while the commands the person types are"
+        scenarios: ["FIX-launch-line-not-in-history.mjs@darwin"]
       README-9:
         text: "Scanning two projects finds each one's languages, frameworks, architecture and conventions; both attach to one session, and the agent is pointed at a context file holding both, kept within the project's token budget"
         scenarios: [project-scanning.mjs]
