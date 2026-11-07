@@ -1,7 +1,8 @@
-# Hermes IDE 2.3.5
+# Hermes IDE 2.3.6
 
-Codex and other npm-installed agents start again on Windows.
+Security and maintenance updates.
 
 ## Fixed
 
-- On Windows, starting a Codex task (or any agent installed with npm) no longer fails with "%1 is not a valid Win32 application".
+- Updated the secure connection, update download and compression components to versions that fix recently reported security issues.
+- Brought the app's built-in components up to their latest versions, with their bug fixes.

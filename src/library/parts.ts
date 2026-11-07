@@ -18,9 +18,6 @@ const OLD_ROLES = new Map(BUILT_IN_ROLES.map((r) => [r.id, r]));
 const OLD_STYLES = new Map(BUILT_IN_STYLES.map((s) => [s.id, s]));
 const OLD_TEMPLATE_IDS = new Set(BUILT_IN_TEMPLATES.map((t) => t.id));
 
-export const oldRole = (id: string): RoleDefinition | undefined => OLD_ROLES.get(id);
-export const oldStyle = (id: string): StyleDefinition | undefined => OLD_STYLES.get(id);
-
 export interface PartItem {
   id: string;
   title: string;

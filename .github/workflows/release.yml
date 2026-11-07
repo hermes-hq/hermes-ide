@@ -266,7 +266,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
         if: matrix.enabled == 'true'
 
-      - uses: swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         if: matrix.enabled == 'true'
         with:
           workspaces: src-tauri
@@ -393,7 +393,7 @@ jobs:
         if: steps.check.outputs.enabled == 'true'
         run: rustup target add ${{ matrix.target }}
 
-      - uses: swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+      - uses: swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
         if: steps.check.outputs.enabled == 'true'
         with:
           workspaces: src-tauri
