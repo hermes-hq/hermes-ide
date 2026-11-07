@@ -27,7 +27,8 @@ await runScenario(SCENARIO, async ({ evidenceDir, log, assert, apps, onCleanup }
   if (platform() !== "darwin") {
     skipScenario({ scenario: SCENARIO, evidenceDir, reason: "checks zsh's saved history; zsh is the default shell only on macOS", log });
   }
-  const { fx, bridge } = await startApp("launch-hist", evidenceDir, log, onCleanup, apps);
+  // zsh, macOS's default shell (a CI runner's account may use another).
+  const { fx, bridge } = await startApp("launch-hist", evidenceDir, log, onCleanup, apps, { env: { SHELL: "/bin/zsh" } });
 
   log("step 1: a Claude Code session; Hermes types its launch line");
   const id = await claude(bridge, fx, fx.repo, "launch-hist", 1);

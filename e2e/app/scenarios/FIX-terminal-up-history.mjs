@@ -56,7 +56,9 @@ await runScenario(SCENARIO, async ({ log, assert, apps, evidenceDir }) => {
   if (platform() === "win32") {
     skipScenario({ scenario: SCENARIO, evidenceDir, reason: "PowerShell keeps its own history and predictions (PSReadLine); Hermes draws no suggestion list there", log });
   }
-  const app = await launchApp({ runDir: join(evidenceDir, "run"), log });
+  // On macOS, zsh (its default shell; a CI runner's account may use another).
+  const env = platform() === "darwin" ? { SHELL: "/bin/zsh" } : {};
+  const app = await launchApp({ runDir: join(evidenceDir, "run"), log, env });
   apps.push(app);
   const { bridge } = app;
   await completeOnboarding(bridge, log);
